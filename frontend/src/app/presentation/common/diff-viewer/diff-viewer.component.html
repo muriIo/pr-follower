@@ -1,0 +1,38 @@
+@if (showHeader()) {
+  <section class="pf-diff">
+    <header class="pf-diff-head">
+      <span>{{ file() }}</span>
+      @if (deltaAdd() || deltaDel()) {
+        <span>
+          @if (deltaAdd()) {
+            <span class="pf-delta-add">{{ deltaAdd() }}</span>
+          }
+          @if (deltaDel()) {
+            <span class="pf-delta-del">{{ deltaDel() }}</span>
+          }
+        </span>
+      }
+    </header>
+    <div class="pf-hunk">
+      @for (l of lines(); track $index) {
+        <span [class]="'pf-line ' + l.cls">
+          <span class="pf-gut">{{ l.n }}</span>
+          @for (t of l.tokens; track $index) {
+            <span [class]="t.cls">{{ t.s }}</span>
+          }
+        </span>
+      }
+    </div>
+  </section>
+} @else {
+  <div class="pf-hunk">
+    @for (l of lines(); track $index) {
+      <span [class]="'pf-line ' + l.cls">
+        <span class="pf-gut">{{ l.n }}</span>
+        @for (t of l.tokens; track $index) {
+          <span [class]="t.cls">{{ t.s }}</span>
+        }
+      </span>
+    }
+  </div>
+}

@@ -1,0 +1,11 @@
+<button type="button" [class]="'pf-card ' + card().sel" (click)="selected.emit(card().id)">
+  <span class="pf-mono" style="color: #A3ACBD">{{ card().repo }} #{{ card().id }}</span>
+  <span class="pf-card-title">{{ card().radarTitle }}</span>
+  <span class="pf-meta">
+    <span [attr.data-tip]="card().metaTip || null">{{ card().radarMeta }}</span>
+    <span [class]="card().ciTextCls">{{ card().ciShort }}</span>
+    @if (card().approvedMine) {
+      <app-risk-badge badgeClass="pf-badge-baixo" [label]="'drawer.approvedByYou' | t" />
+    }
+  </span>
+</button>

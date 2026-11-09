@@ -1,0 +1,99 @@
+<section [class]="'pf-rv pf-rv-' + drawer().verdict">
+  <div class="pf-rv-head">{{ drawer().rvHead }}</div>
+  <p>{{ drawer().rvDetail }}</p>
+</section>
+
+<section class="pf-drawer-sec">
+  <h3 class="pf-section">{{ 'drawer.depTree' | t }}</h3>
+  <div class="pf-tree">
+    @for (n of drawer().tree; track n.index) {
+      @if (n.hasLink) {
+        <span class="pf-tree-link" aria-hidden="true"></span>
+      }
+      <button
+        type="button"
+        [class]="'pf-tree-node ' + n.cls"
+        [attr.aria-pressed]="n.pressed"
+        (click)="selectTreeNode.emit(n.index)"
+      >
+        {{ n.label }}
+      </button>
+    }
+  </div>
+  <p class="pf-tree-info">{{ drawer().treeInfo }}</p>
+</section>
+
+<section class="pf-drawer-sec">
+  <h3 class="pf-section">{{ drawer().blastTitle }}</h3>
+  @if (drawer().hasSummary) {
+    <p class="pf-blast-summary">{{ drawer().blastSummary }}</p>
+  }
+  @if (drawer().hasBlast) {
+    <div class="pf-blasts">
+      @for (b of drawer().blasts; track b.index) {
+        <div [class]="'pf-diff ' + b.cls">
+          <button
+            type="button"
+            class="pf-diff-head pf-blast-head"
+            [attr.aria-expanded]="b.expanded"
+            (click)="toggleBlastFile.emit(b.index)"
+          >
+            <span class="pf-blast-file">
+              <svg
+                [class]="'pf-chev pf-chev-r ' + b.chevCls"
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4.5 3l3 3-3 3"></path>
+              </svg>
+              <span>{{ b.file }}</span>
+            </span>
+            <span class="pf-blast-tags">
+              @if (b.hasUses) {
+                <app-risk-badge badgeClass="pf-tag" [label]="b.usesLabel" />
+              }
+              @if (b.breaks) {
+                <app-risk-badge badgeClass="pf-badge-alto" label="Usa API que quebra" />
+              }
+            </span>
+          </button>
+          @if (b.isOpen) {
+            <app-diff-viewer [showHeader]="false" [lines]="b.lines" />
+          }
+        </div>
+      }
+    </div>
+    @if (drawer().hasBlastFoot) {
+      <div class="pf-blast-foot">
+        @if (drawer().hasMore) {
+          <button type="button" class="pf-link" (click)="showAllBlastFiles.emit()">
+            {{ drawer().moreLabel }}
+          </button>
+        }
+        <button
+          type="button"
+          class="pf-link"
+          style="margin-left: auto"
+          (click)="toggleAllBlastFiles.emit()"
+        >
+          {{ drawer().allLabel }}
+        </button>
+      </div>
+    }
+  }
+  @if (drawer().noBlast) {
+    <p class="pf-empty-note">{{ 'drawer.noBlast' | t }}</p>
+  }
+</section>
+
+<section class="pf-drawer-sec">
+  <h3 class="pf-section">{{ 'drawer.breakingNotes' | t }}</h3>
+  <p [class]="'pf-alert ' + drawer().noteCls">{{ drawer().note }}</p>
+</section>

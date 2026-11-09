@@ -1,0 +1,28 @@
+<app-page-header [title]="'timeline.title' | t" [subtitle]="'timeline.subtitle' | t">
+  <div class="pf-actions">
+    <button type="button" class="pf-btn" (click)="store.togglePauseTimeline()">
+      {{ (store.pausedTimeline() ? 'timeline.resume' : 'timeline.pause') | t }}
+    </button>
+  </div>
+</app-page-header>
+
+@for (g of store.timelineGroups(); track g.label) {
+  <section class="pf-group">
+    <h2 class="pf-section">{{ g.label }}</h2>
+    <div class="pf-list">
+      @for (e of g.items; track e.key) {
+        <button
+          type="button"
+          [class]="'pf-event ' + e.cls"
+          [attr.aria-disabled]="e.noPr ? 'true' : 'false'"
+          (click)="!e.noPr && e.pr && store.openPr(e.pr)"
+        >
+          <span class="pf-mono" style="color: #8791A5">{{ e.time }}</span>
+          <app-status-dot [dotClass]="e.dot" />
+          <span class="pf-event-text">{{ e.text }}</span>
+          <span class="pf-mono" style="color: #8791A5">{{ e.repo }}</span>
+        </button>
+      }
+    </div>
+  </section>
+}

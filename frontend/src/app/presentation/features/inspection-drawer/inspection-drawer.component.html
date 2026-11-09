@@ -1,0 +1,173 @@
+<aside class="pf-drawer" aria-label="Inspeção do PR">
+  <div class="pf-resize" role="separator" aria-orientation="vertical">
+    <span class="pf-grip" aria-hidden="true">
+      <svg width="6" height="14" viewBox="0 0 6 14" fill="currentColor">
+        <circle cx="1.25" cy="2" r="1"></circle>
+        <circle cx="4.75" cy="2" r="1"></circle>
+        <circle cx="1.25" cy="7" r="1"></circle>
+        <circle cx="4.75" cy="7" r="1"></circle>
+        <circle cx="1.25" cy="12" r="1"></circle>
+        <circle cx="4.75" cy="12" r="1"></circle>
+      </svg>
+    </span>
+  </div>
+
+  <header class="pf-drawer-head">
+    <div class="pf-drawer-top">
+      <span class="pf-mono">{{ drawer().repo }} #{{ drawer().id }}</span>
+      <span class="pf-actions">
+        <a class="pf-btn pf-btn-sm" [href]="drawer().ghUrl" target="_blank" rel="noopener">
+          {{ 'drawer.openGithub' | t }}
+        </a>
+        <button
+          type="button"
+          id="pf-drawer-close"
+          class="pf-close"
+          [attr.aria-label]="'drawer.close' | t"
+          (click)="store.closeDrawer()"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+            <path d="M2.5 2.5l9 9M11.5 2.5l-9 9"></path>
+          </svg>
+        </button>
+      </span>
+    </div>
+    <h2 class="pf-drawer-title">{{ drawer().title }}</h2>
+  </header>
+
+  <div class="pf-drawer-body">
+    @if (drawer().focused) {
+      <p class="pf-banner">{{ drawer().banner }}</p>
+    }
+
+    @if (drawer().general) {
+      <section class="pf-verdict">
+        <app-risk-badge [badgeClass]="drawer().vCls" [label]="drawer().vLabel" />
+        <p>{{ drawer().why }}</p>
+      </section>
+
+      <section class="pf-drawer-sec">
+        <h3 class="pf-section">{{ 'drawer.signals' | t }}</h3>
+        <div class="pf-signals">
+          @for (sig of drawer().signals; track sig.k) {
+            <div class="pf-signal">
+              <span class="pf-signal-key">{{ sig.k }}</span>
+              <app-status-dot [dotClass]="sig.dot" />
+              <span class="pf-signal-val">{{ sig.v }}</span>
+            </div>
+          }
+        </div>
+      </section>
+    }
+
+    @if (drawer().isDep) {
+      <app-dependabot-impact
+        [drawer]="drawer()"
+        (selectTreeNode)="store.selectTreeNode($event)"
+        (toggleBlastFile)="store.toggleBlastFile($event)"
+        (showAllBlastFiles)="store.showAllBlastFiles()"
+        (toggleAllBlastFiles)="store.toggleAllBlastFiles()"
+      />
+    }
+
+    @if (drawer().showDiff) {
+      <app-diff-viewer
+        [file]="drawer().diffFile"
+        [deltaAdd]="drawer().deltaAdd"
+        [deltaDel]="drawer().deltaDel"
+        [lines]="drawer().lines"
+      />
+    }
+  </div>
+
+  <footer class="pf-drawer-foot" aria-live="polite">
+    @if (drawer().showIdle) {
+      @if (drawer().blocked) {
+        <p [class]="drawer().blockedCls">{{ drawer().blockedText }}</p>
+      }
+      <div class="pf-actions">
+        @if (drawer().showApprove) {
+          <button type="button" class="pf-btn pf-btn-primary" (click)="store.approvePr(drawer().id)">
+            {{ 'drawer.approve' | t }}
+          </button>
+        }
+        @if (drawer().approvedMine) {
+          <app-risk-badge badgeClass="pf-badge-baixo" [label]="'drawer.approvedByYou' | t" />
+        }
+        <button
+          type="button"
+          [class]="'pf-btn ' + drawer().mergeCls"
+          [attr.aria-disabled]="drawer().mergeDis"
+          (click)="drawer().mergeDis !== 'true' && store.mergePr(drawer().id)"
+        >
+          {{ 'drawer.mergeSquash' | t }}
+        </button>
+      </div>
+    }
+
+    <app-cancellable-action
+      [action]="drawer().act"
+      mode="drawer"
+      cancelButtonId="pf-drawer-cancel"
+      [cancelLabel]="'drawer.cancelEsc' | t"
+    />
+
+    @if (drawer().showMerged) {
+      <p class="pf-note pf-note-ok">Este PR já foi mesclado.</p>
+    }
+
+    @if (drawer().showSecondary) {
+      @if (drawer().isDep) {
+        <div class="pf-actions">
+          <button
+            type="button"
+            class="pf-btn pf-mono"
+            [attr.aria-disabled]="drawer().busyDis"
+            (click)="store.commentOnPr(drawer().id, '@dependabot rebase')"
+          >
+            {{ 'drawer.rebase' | t }}
+          </button>
+          <button
+            type="button"
+            class="pf-btn pf-mono"
+            [attr.aria-disabled]="drawer().busyDis"
+            (click)="store.commentOnPr(drawer().id, '@dependabot recreate')"
+          >
+            {{ 'drawer.recreate' | t }}
+          </button>
+          <button
+            type="button"
+            class="pf-btn"
+            [attr.aria-disabled]="drawer().busyDis"
+            (click)="store.silencePr(drawer().id, '🔕 Silenciado no Radar')"
+          >
+            {{ 'drawer.silence' | t }}
+          </button>
+        </div>
+      }
+      @if (drawer().notDep) {
+        <div class="pf-actions">
+          <button
+            type="button"
+            class="pf-btn"
+            [attr.aria-disabled]="drawer().busyDis"
+            (click)="store.silencePr(drawer().id, '🔕 Silenciado até o próximo commit')"
+          >
+            {{ 'drawer.silenceCommit' | t }}
+          </button>
+          <button
+            type="button"
+            class="pf-btn"
+            [attr.aria-disabled]="drawer().busyDis"
+            (click)="store.silencePr(drawer().id, '🔕 Silenciado até o CI passar')"
+          >
+            {{ 'drawer.silenceCi' | t }}
+          </button>
+          <button type="button" class="pf-btn" aria-disabled="true">
+            {{ 'drawer.passToTeammate' | t }}
+          </button>
+        </div>
+      }
+    }
+  </footer>
+</aside>

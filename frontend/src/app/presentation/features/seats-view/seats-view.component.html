@@ -1,0 +1,36 @@
+<app-page-header [title]="'seats.title' | t" [subtitle]="'seats.subtitle' | t">
+  <div class="pf-actions" aria-live="polite">
+    <app-cancellable-action
+      [action]="store.syncAction()"
+      mode="header"
+      [cancelLabel]="'drawer.cancel' | t"
+    >
+      <button type="button" class="pf-btn" (click)="store.runSync()">
+        {{ 'seats.sync' | t }}
+      </button>
+    </app-cancellable-action>
+    <button type="button" class="pf-btn pf-btn-primary" (click)="store.followRepo()">
+      {{ 'seats.followRepo' | t }}
+    </button>
+  </div>
+</app-page-header>
+
+<div class="pf-filters" role="group">
+  @for (f of store.seatFilterOptions(); track f.id) {
+    <button
+      type="button"
+      class="pf-filter"
+      [class.is-active]="f.active"
+      [attr.aria-pressed]="f.active"
+      (click)="store.setSeatFilter(f.id)"
+    >
+      {{ f.label }}
+    </button>
+  }
+</div>
+
+<div class="pf-seats">
+  @for (s of store.seats(); track s.name) {
+    <app-seat-card [seat]="s" (openRadar)="store.setPerspective('radar')" />
+  }
+</div>

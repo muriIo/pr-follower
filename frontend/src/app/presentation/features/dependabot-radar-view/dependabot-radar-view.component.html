@@ -1,0 +1,23 @@
+<app-page-header [title]="'radar.title' | t" [subtitle]="subtitle()" />
+
+<app-batch-merge-bar
+  [summary]="store.safeBatchSummary()"
+  [batchAction]="store.batchAction()"
+  (batchApprove)="store.runBatchApprove()"
+  (batchMerge)="store.runBatchMerge()"
+/>
+
+@if (store.radarGroups().length === 0) {
+  <p class="pf-empty">{{ 'radar.empty' | t }}</p>
+}
+
+@for (g of store.radarGroups(); track g.label) {
+  <section class="pf-group">
+    <h2 class="pf-section">{{ g.label }}</h2>
+    <div class="pf-cards">
+      @for (p of g.items; track p.id) {
+        <app-radar-pr-card [card]="p" (selected)="store.openPr($event)" />
+      }
+    </div>
+  </section>
+}

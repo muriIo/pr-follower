@@ -1,0 +1,30 @@
+<button
+  type="button"
+  [class]="'pf-card ' + (muted() ? 'is-muted ' : '') + card().sel"
+  (click)="selected.emit(card().id)"
+>
+  <span class="pf-mono" style="color: #A3ACBD">{{ card().repo }} #{{ card().id }}</span>
+  <span class="pf-card-title">{{ card().title }}</span>
+
+  @if (!muted()) {
+    <span class="pf-meta">
+      <span>{{ card().authorLabel }}</span>
+      <span aria-hidden="true">•</span>
+      <span [class]="card().ciTextCls">{{ card().ciLabel }}</span>
+      <span aria-hidden="true">•</span>
+      <span>{{ 'inbox.noConflicts' | t }}</span>
+    </span>
+    <span class="pf-tags">
+      @if (card().hasPill && card().ownPill) {
+        <app-risk-badge badgeClass="pf-turn" [label]="card().ownPill!" />
+      }
+      @if (card().hasClaim && card().claim) {
+        <app-risk-badge badgeClass="pf-tag" [label]="card().claim!" />
+      }
+    </span>
+  } @else {
+    <span class="pf-tags">
+      <app-risk-badge badgeClass="pf-tag" [label]="card().badge" [tooltip]="card().badgeTip" />
+    </span>
+  }
+</button>

@@ -1,0 +1,41 @@
+@if (summary().has) {
+  <section class="pf-batch" aria-live="polite">
+    <div class="pf-batch-text">
+      <h2 class="pf-batch-title">{{ summary().title }}</h2>
+    </div>
+    @if (batchAction().idle) {
+      <div class="pf-actions">
+        @if (summary().canApprove) {
+          <button type="button" class="pf-btn pf-btn-primary" (click)="batchApprove.emit()">
+            {{ summary().approveLabel }}
+          </button>
+        }
+        <button
+          type="button"
+          [class]="'pf-btn ' + summary().mergeCls"
+          [attr.aria-disabled]="summary().mergeDis"
+          (click)="summary().mergeDis !== 'true' && batchMerge.emit()"
+        >
+          {{ summary().mergeLabel }}
+        </button>
+      </div>
+    }
+    @if (batchAction().running) {
+      <div class="pf-batch-run">
+        <div class="pf-progress">
+          <span [style.width.%]="batchAction().pct"></span>
+        </div>
+        <span class="pf-running">
+          <span class="pf-spin"></span>{{ batchAction().label }}
+        </span>
+        <button type="button" class="pf-btn" (click)="batchAction().cancel()">
+          {{ 'radar.batch.cancel' | t }}
+        </button>
+      </div>
+    }
+  </section>
+}
+
+@if (batchAction().hasNote) {
+  <p [class]="batchAction().noteCls" role="status">{{ batchAction().note }}</p>
+}

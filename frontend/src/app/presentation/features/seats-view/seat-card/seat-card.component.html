@@ -1,0 +1,60 @@
+<article [class]="seat().cls ? 'pf-seat ' + seat().cls : 'pf-seat'">
+  <header class="pf-seat-head">
+    <h2 class="pf-seat-name">{{ seat().name }}</h2>
+    <span class="pf-badge pf-tag pf-mono">{{ seat().branch }}</span>
+    <span [class]="'pf-seat-ci ' + seat().ciCls">
+      <app-status-dot [dotClass]="seat().ciDot" />{{ seat().ciLabel }}
+    </span>
+  </header>
+
+  <div class="pf-kpis">
+    <app-risk-badge [badgeClass]="seat().turnCls" [label]="seat().turn + ' ' + ('seats.kpi.yourTurn' | t)" />
+    <button type="button" [class]="'pf-badge ' + seat().depCls" (click)="openRadar.emit()">
+      {{ seat().deps }} {{ 'seats.kpi.dependabot' | t }}
+    </button>
+    <app-risk-badge badgeClass="pf-tag" [label]="seat().openLabel" />
+  </div>
+
+  <div class="pf-seat-body">
+    @if (seat().isEmpty) {
+      <p class="pf-seat-empty">{{ 'seats.empty' | t }}</p>
+    }
+    @for (p of seat().stream; track p.id) {
+      <div [class]="'pf-srow ' + p.sel + ' ' + p.dim">
+        <button type="button" class="pf-srow-open" (click)="p.open()">
+          <span class="pf-pr-title">
+            <span class="pf-mono" style="color: #A3ACBD">#{{ p.id }}</span> {{ p.title }}
+          </span>
+          <span class="pf-meta">
+            @if (p.showTurn) {
+              <app-risk-badge badgeClass="pf-turn" [label]="'seats.kpi.yourTurn' | t" />
+            }
+            @if (p.hasOwn) {
+              <app-risk-badge badgeClass="pf-tag" [label]="p.ownLabel" />
+            }
+            @if (p.showRisk) {
+              <app-risk-badge [badgeClass]="p.vCls" [label]="p.riskLabel" [tooltip]="p.riskTip" />
+            }
+            @if (p.isApproved) {
+              <app-risk-badge badgeClass="pf-tag" [label]="p.approvedLabel" [tooltip]="p.approvedTip" />
+            }
+          </span>
+        </button>
+
+        @if (p.hasQuick) {
+          <div class="pf-srow-act" aria-live="polite">
+            <app-cancellable-action
+              [action]="p.act"
+              mode="inline-sm"
+              [cancelLabel]="'drawer.cancel' | t"
+            >
+              <button type="button" class="pf-btn pf-btn-sm" (click)="p.quick()">
+                {{ p.quickLabel }}
+              </button>
+            </app-cancellable-action>
+          </div>
+        }
+      </div>
+    }
+  </div>
+</article>

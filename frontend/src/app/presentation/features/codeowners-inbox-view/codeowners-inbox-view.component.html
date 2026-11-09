@@ -1,0 +1,40 @@
+<app-page-header [title]="'inbox.title' | t">
+  <button
+    type="button"
+    class="pf-toggle"
+    role="switch"
+    [attr.aria-checked]="store.showMuted()"
+    (click)="store.toggleShowMuted()"
+  >
+    <span class="pf-switch"></span>
+    <span>{{ 'inbox.toggleMuted' | t }} ({{ store.mutedInboxCards().length }})</span>
+  </button>
+</app-page-header>
+
+@if (store.activeInboxCards().length === 0) {
+  <p class="pf-empty">{{ 'inbox.empty' | t }}</p>
+} @else {
+  <section class="pf-group">
+    <h2 class="pf-section">
+      {{ 'inbox.waitingSection' | t }} — {{ store.activeInboxCards().length }}
+    </h2>
+    <div class="pf-cards">
+      @for (p of store.activeInboxCards(); track p.id) {
+        <app-inbox-pr-card [card]="p" (selected)="store.openPr($event)" />
+      }
+    </div>
+  </section>
+}
+
+@if (store.showMuted() && store.mutedInboxCards().length > 0) {
+  <section class="pf-group">
+    <h2 class="pf-section">
+      {{ 'inbox.mutedSection' | t }} — {{ store.mutedInboxCards().length }}
+    </h2>
+    <div class="pf-cards">
+      @for (p of store.mutedInboxCards(); track p.id) {
+        <app-inbox-pr-card [card]="p" [muted]="true" (selected)="store.openPr($event)" />
+      }
+    </div>
+  </section>
+}

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component } from '@angular/core';
-import { WorkspaceShellComponent } from './presentation/workspace-shell/workspace-shell.component';
+import { WorkspaceShellComponent } from './presentation/layout/workspace-shell/workspace-shell.component';
 
 @Component({
   selector: 'app-root',

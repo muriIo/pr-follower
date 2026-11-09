@@ -1,0 +1,42 @@
+@if (action().idle) {
+  <ng-content />
+}
+
+@if (action().running) {
+  @if (mode() === 'drawer') {
+    <div class="pf-actions">
+      <button type="button" class="pf-btn pf-btn-primary pf-btn-busy" aria-disabled="true" aria-busy="true">
+        <span class="pf-spin"></span>{{ action().label }}
+      </button>
+      <button
+        type="button"
+        [attr.id]="cancelButtonId() || null"
+        class="pf-btn pf-btn-danger"
+        (click)="action().cancel()"
+      >
+        {{ cancelLabel() }}
+      </button>
+    </div>
+  } @else if (mode() === 'inline-sm') {
+    <span class="pf-spin" role="status"></span>
+    <button type="button" class="pf-btn pf-btn-sm" (click)="action().cancel()">
+      {{ cancelLabel() }}
+    </button>
+  } @else {
+    <span class="pf-running">
+      <span class="pf-spin"></span>
+      {{ action().label }}
+    </span>
+    <button type="button" class="pf-btn" (click)="action().cancel()">
+      {{ cancelLabel() }}
+    </button>
+  }
+}
+
+@if (action().hasNote && showNote()) {
+  @if (mode() === 'inline-sm') {
+    <span class="pf-srow-note">{{ action().note }}</span>
+  } @else {
+    <span [class]="action().noteCls">{{ action().note }}</span>
+  }
+}
