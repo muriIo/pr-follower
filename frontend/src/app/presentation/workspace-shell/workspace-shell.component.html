@@ -1,0 +1,711 @@
+<div
+  class="pf-app"
+  [class.has-drawer]="store.selectedPrId() !== null"
+  (keydown.escape)="store.handleEscapeKey()"
+>
+  <nav class="pf-side" aria-label="Perspectivas">
+    <div class="pf-brand-block">
+      <div class="pf-brand">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="4" cy="3.5" r="1.75"></circle>
+          <circle cx="4" cy="12.5" r="1.75"></circle>
+          <circle cx="12" cy="12.5" r="1.75"></circle>
+          <path d="M4 5.25v5.5M12 10.75V7a2.5 2.5 0 0 0-2.5-2.5H8"></path>
+        </svg>
+        <span>{{ 'app.brand' | t }}</span>
+      </div>
+      <div class="pf-live" role="status">
+        <span [class]="connectionDotClass()"></span>
+        <span>{{ connectionLabelKey() | t }}</span>
+      </div>
+    </div>
+
+    <div class="pf-nav-group">
+      <div class="pf-section">{{ 'app.perspectives' | t }}</div>
+
+      <button
+        type="button"
+        class="pf-nav"
+        [class.is-active]="store.view() === 'inbox'"
+        [attr.aria-current]="store.view() === 'inbox' ? 'page' : 'false'"
+        (click)="store.setPerspective('inbox')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2 9.5 4 3h8l2 6.5V13H2V9.5Z"></path>
+          <path d="M2 9.5h3.5l1 1.5h3l1-1.5H14"></path>
+        </svg>
+        <span class="pf-nav-label">{{ 'nav.inbox' | t }}</span>
+        @if (store.navCounts().inbox > 0) {
+          <span class="pf-count pf-count-turn">{{ store.navCounts().inbox }}</span>
+        }
+      </button>
+
+      <button
+        type="button"
+        class="pf-nav"
+        [class.is-active]="store.view() === 'radar'"
+        [attr.aria-current]="store.view() === 'radar' ? 'page' : 'false'"
+        (click)="store.setPerspective('radar')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+          <circle cx="8" cy="8" r="6"></circle>
+          <circle cx="8" cy="8" r="2.5"></circle>
+          <path d="M8 8l4-4"></path>
+        </svg>
+        <span class="pf-nav-label">{{ 'nav.radar' | t }}</span>
+        @if (store.navCounts().radar > 0) {
+          <span class="pf-count">{{ store.navCounts().radar }}</span>
+        }
+      </button>
+
+      <button
+        type="button"
+        class="pf-nav"
+        [class.is-active]="store.view() === 'seats'"
+        [attr.aria-current]="store.view() === 'seats' ? 'page' : 'false'"
+        (click)="store.setPerspective('seats')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2" y="2" width="5" height="5" rx="1"></rect>
+          <rect x="9" y="2" width="5" height="5" rx="1"></rect>
+          <rect x="2" y="9" width="5" height="5" rx="1"></rect>
+          <rect x="9" y="9" width="5" height="5" rx="1"></rect>
+        </svg>
+        <span class="pf-nav-label">{{ 'nav.seats' | t }}</span>
+        @if (store.navCounts().seats > 0) {
+          <span class="pf-count">{{ store.navCounts().seats }}</span>
+        }
+      </button>
+
+      <button
+        type="button"
+        class="pf-nav"
+        [class.is-active]="store.view() === 'timeline'"
+        [attr.aria-current]="store.view() === 'timeline' ? 'page' : 'false'"
+        (click)="store.setPerspective('timeline')"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1.5 8h3l2-5 3 10 2-5h3"></path>
+        </svg>
+        <span class="pf-nav-label">{{ 'nav.timeline' | t }}</span>
+        @if (store.navCounts().timeline > 0) {
+          <span class="pf-count">{{ store.navCounts().timeline }}</span>
+        }
+      </button>
+    </div>
+
+    <div class="pf-side-foot">
+      <div class="pf-user">
+        <span class="pf-avatar" aria-hidden="true">M</span>
+        <span>@murilo</span>
+      </div>
+      <div class="pf-user-tags">
+        <span class="pf-badge pf-tag">@arvore/frontend</span>
+        <button type="button" class="pf-badge pf-tag" (click)="toggleLocale()">
+          {{ localeStore.locale() }}
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pf-main">
+    <div class="pf-canvas" [class.pf-canvas-narrow]="store.view() !== 'seats'">
+      <header class="pf-head">
+        <div>
+          <h1 class="pf-title">{{ currentTitle() }}</h1>
+          @if (currentSubtitle()) {
+            <p class="pf-sub">{{ currentSubtitle() }}</p>
+          }
+        </div>
+
+        @if (store.view() === 'inbox') {
+          <button
+            type="button"
+            class="pf-toggle"
+            role="switch"
+            [attr.aria-checked]="store.showMuted()"
+            (click)="store.toggleShowMuted()"
+          >
+            <span class="pf-switch"></span>
+            <span>{{ 'inbox.toggleMuted' | t }} ({{ store.mutedInboxCards().length }})</span>
+          </button>
+        }
+
+        @if (store.view() === 'seats') {
+          <div class="pf-actions" aria-live="polite">
+            @if (store.syncAction().idle) {
+              <button type="button" class="pf-btn" (click)="store.runSync()">
+                {{ 'seats.sync' | t }}
+              </button>
+            }
+            @if (store.syncAction().running) {
+              <span class="pf-running">
+                <span class="pf-spin"></span>
+                {{ store.syncAction().label }}
+              </span>
+              <button type="button" class="pf-btn" (click)="store.syncAction().cancel()">
+                {{ 'drawer.cancel' | t }}
+              </button>
+            }
+            @if (store.syncAction().hasNote) {
+              <span [class]="store.syncAction().noteCls">{{ store.syncAction().note }}</span>
+            }
+            <button type="button" class="pf-btn pf-btn-primary">
+              {{ 'seats.followRepo' | t }}
+            </button>
+          </div>
+        }
+
+        @if (store.view() === 'timeline') {
+          <div class="pf-actions">
+            <button type="button" class="pf-btn" (click)="store.togglePauseTimeline()">
+              {{ (store.pausedTimeline() ? 'timeline.resume' : 'timeline.pause') | t }}
+            </button>
+          </div>
+        }
+      </header>
+
+      <!-- SEATS DE REPOSITÓRIOS -->
+      @if (store.view() === 'seats') {
+        <div class="pf-filters" role="group">
+          @for (f of store.seatFilterOptions(); track f.id) {
+            <button
+              type="button"
+              class="pf-filter"
+              [class.is-active]="f.active"
+              [attr.aria-pressed]="f.active"
+              (click)="store.setSeatFilter(f.id)"
+            >
+              {{ f.label }}
+            </button>
+          }
+        </div>
+
+        <div class="pf-seats">
+          @for (s of store.seats(); track s.name) {
+            <article class="pf-seat" [class]="s.cls ? 'pf-seat ' + s.cls : 'pf-seat'">
+              <header class="pf-seat-head">
+                <h2 class="pf-seat-name">{{ s.name }}</h2>
+                <span class="pf-badge pf-tag pf-mono">{{ s.branch }}</span>
+                <span class="pf-seat-ci" [class]="'pf-seat-ci ' + s.ciCls">
+                  <span [class]="s.ciDot"></span>{{ s.ciLabel }}
+                </span>
+              </header>
+
+              <div class="pf-kpis">
+                <span [class]="'pf-badge ' + s.turnCls">{{ s.turn }} {{ 'seats.kpi.yourTurn' | t }}</span>
+                <button type="button" [class]="'pf-badge ' + s.depCls" (click)="store.setPerspective('radar')">
+                  {{ s.deps }} {{ 'seats.kpi.dependabot' | t }}
+                </button>
+                <span class="pf-badge pf-tag">{{ s.openLabel }}</span>
+              </div>
+
+              <div class="pf-seat-body">
+                @if (s.isEmpty) {
+                  <p class="pf-seat-empty">{{ 'seats.empty' | t }}</p>
+                }
+                @for (p of s.stream; track p.id) {
+                  <div [class]="'pf-srow ' + p.sel + ' ' + p.dim">
+                    <button type="button" class="pf-srow-open" (click)="p.open()">
+                      <span class="pf-pr-title">
+                        <span class="pf-mono" style="color: #A3ACBD">#{{ p.id }}</span> {{ p.title }}
+                      </span>
+                      <span class="pf-meta">
+                        @if (p.showTurn) {
+                          <span class="pf-badge pf-turn">{{ 'seats.kpi.yourTurn' | t }}</span>
+                        }
+                        @if (p.hasOwn) {
+                          <span class="pf-badge pf-tag">{{ p.ownLabel }}</span>
+                        }
+                        @if (p.showRisk) {
+                          <span [class]="'pf-badge ' + p.vCls">{{ p.riskLabel }}</span>
+                        }
+                        @if (p.isApproved) {
+                          <span class="pf-badge pf-tag">{{ p.approvedLabel }}</span>
+                        }
+                      </span>
+                    </button>
+
+                    @if (p.hasQuick) {
+                      <div class="pf-srow-act" aria-live="polite">
+                        @if (p.act.idle) {
+                          <button type="button" class="pf-btn pf-btn-sm" (click)="p.quick()">
+                            {{ p.quickLabel }}
+                          </button>
+                        }
+                        @if (p.act.running) {
+                          <span class="pf-spin" role="status"></span>
+                          <button type="button" class="pf-btn pf-btn-sm" (click)="p.act.cancel()">
+                            {{ 'drawer.cancel' | t }}
+                          </button>
+                        }
+                        @if (p.act.hasNote) {
+                          <span class="pf-srow-note">{{ p.act.note }}</span>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            </article>
+          }
+        </div>
+      }
+
+      <!-- MINHA VEZ (CODEOWNERS) -->
+      @if (store.view() === 'inbox') {
+        @if (store.activeInboxCards().length === 0) {
+          <p class="pf-empty">{{ 'inbox.empty' | t }}</p>
+        } @else {
+          <section class="pf-group">
+            <h2 class="pf-section">
+              {{ 'inbox.waitingSection' | t }} — {{ store.activeInboxCards().length }}
+            </h2>
+            <div class="pf-cards">
+              @for (p of store.activeInboxCards(); track p.id) {
+                <button type="button" [class]="'pf-card ' + p.sel" (click)="store.openPr(p.id)">
+                  <span class="pf-mono" style="color: #A3ACBD">{{ p.repo }} #{{ p.id }}</span>
+                  <span class="pf-card-title">{{ p.title }}</span>
+                  <span class="pf-meta">
+                    <span>{{ p.authorLabel }}</span>
+                    <span aria-hidden="true">•</span>
+                    <span [class]="p.ciTextCls">{{ p.ciLabel }}</span>
+                    <span aria-hidden="true">•</span>
+                    <span>{{ 'inbox.noConflicts' | t }}</span>
+                  </span>
+                  <span class="pf-tags">
+                    @if (p.hasPill) {
+                      <span class="pf-badge pf-turn">{{ p.ownPill }}</span>
+                    }
+                    @if (p.hasClaim) {
+                      <span class="pf-badge pf-tag">{{ p.claim }}</span>
+                    }
+                  </span>
+                </button>
+              }
+            </div>
+          </section>
+        }
+
+        @if (store.showMuted() && store.mutedInboxCards().length > 0) {
+          <section class="pf-group">
+            <h2 class="pf-section">
+              {{ 'inbox.mutedSection' | t }} — {{ store.mutedInboxCards().length }}
+            </h2>
+            <div class="pf-cards">
+              @for (p of store.mutedInboxCards(); track p.id) {
+                <button type="button" [class]="'pf-card is-muted ' + p.sel" (click)="store.openPr(p.id)">
+                  <span class="pf-mono" style="color: #A3ACBD">{{ p.repo }} #{{ p.id }}</span>
+                  <span class="pf-card-title">{{ p.title }}</span>
+                  <span class="pf-tags">
+                    <span class="pf-badge pf-tag">{{ p.badge }}</span>
+                  </span>
+                </button>
+              }
+            </div>
+          </section>
+        }
+      }
+
+      <!-- RADAR DEPENDABOT -->
+      @if (store.view() === 'radar') {
+        @if (store.safeBatchSummary().has) {
+          <section class="pf-batch" aria-live="polite">
+            <div class="pf-batch-text">
+              <h2 class="pf-batch-title">{{ store.safeBatchSummary().title }}</h2>
+            </div>
+            @if (store.batchAction().idle) {
+              <div class="pf-actions">
+                @if (store.safeBatchSummary().canApprove) {
+                  <button type="button" class="pf-btn pf-btn-primary" (click)="store.runBatchApprove()">
+                    {{ store.safeBatchSummary().approveLabel }}
+                  </button>
+                }
+                <button
+                  type="button"
+                  [class]="'pf-btn ' + store.safeBatchSummary().mergeCls"
+                  [attr.aria-disabled]="store.safeBatchSummary().mergeDis"
+                  (click)="store.runBatchMerge()"
+                >
+                  {{ store.safeBatchSummary().mergeLabel }}
+                </button>
+              </div>
+            }
+            @if (store.batchAction().running) {
+              <div class="pf-batch-run">
+                <div class="pf-progress">
+                  <span [style.width.%]="store.batchAction().pct"></span>
+                </div>
+                <span class="pf-running">
+                  <span class="pf-spin"></span>{{ store.batchAction().label }}
+                </span>
+                <button type="button" class="pf-btn" (click)="store.batchAction().cancel()">
+                  {{ 'radar.batch.cancel' | t }}
+                </button>
+              </div>
+            }
+          </section>
+        }
+
+        @if (store.batchAction().hasNote) {
+          <p [class]="store.batchAction().noteCls" role="status">{{ store.batchAction().note }}</p>
+        }
+
+        @if (store.radarGroups().length === 0) {
+          <p class="pf-empty">{{ 'radar.empty' | t }}</p>
+        }
+
+        @for (g of store.radarGroups(); track g.label) {
+          <section class="pf-group">
+            <h2 class="pf-section">{{ g.label }}</h2>
+            <div class="pf-cards">
+              @for (p of g.items; track p.id) {
+                <button type="button" [class]="'pf-card ' + p.sel" (click)="store.openPr(p.id)">
+                  <span class="pf-mono" style="color: #A3ACBD">{{ p.repo }} #{{ p.id }}</span>
+                  <span class="pf-card-title">{{ p.radarTitle }}</span>
+                  <span class="pf-meta">
+                    <span>{{ p.radarMeta }}</span>
+                    <span [class]="p.ciTextCls">{{ p.ciShort }}</span>
+                    @if (p.approvedMine) {
+                      <span class="pf-badge pf-badge-baixo">{{ 'drawer.approvedByYou' | t }}</span>
+                    }
+                  </span>
+                </button>
+              }
+            </div>
+          </section>
+        }
+      }
+
+      <!-- LINHA DO TEMPO -->
+      @if (store.view() === 'timeline') {
+        @for (g of store.timelineGroups(); track g.label) {
+          <section class="pf-group">
+            <h2 class="pf-section">{{ g.label }}</h2>
+            <div class="pf-list">
+              @for (e of g.items; track e.key) {
+                <button
+                  type="button"
+                  [class]="'pf-event ' + e.cls"
+                  [attr.aria-disabled]="e.noPr ? 'true' : 'false'"
+                  (click)="!e.noPr && e.pr && store.openPr(e.pr)"
+                >
+                  <span class="pf-mono" style="color: #8791A5">{{ e.time }}</span>
+                  <span [class]="e.dot"></span>
+                  <span class="pf-event-text">{{ e.text }}</span>
+                  <span class="pf-mono" style="color: #8791A5">{{ e.repo }}</span>
+                </button>
+              }
+            </div>
+          </section>
+        }
+      }
+    </div>
+  </main>
+
+  <!-- INSPECTION DRAWER -->
+  @if (store.drawer(); as d) {
+    <aside class="pf-drawer" aria-label="Inspeção do PR">
+      <div class="pf-resize" role="separator" aria-orientation="vertical">
+        <span class="pf-grip" aria-hidden="true">
+          <svg width="6" height="14" viewBox="0 0 6 14" fill="currentColor">
+            <circle cx="1.25" cy="2" r="1"></circle>
+            <circle cx="4.75" cy="2" r="1"></circle>
+            <circle cx="1.25" cy="7" r="1"></circle>
+            <circle cx="4.75" cy="7" r="1"></circle>
+            <circle cx="1.25" cy="12" r="1"></circle>
+            <circle cx="4.75" cy="12" r="1"></circle>
+          </svg>
+        </span>
+      </div>
+
+      <header class="pf-drawer-head">
+        <div class="pf-drawer-top">
+          <span class="pf-mono">{{ d.repo }} #{{ d.id }}</span>
+          <span class="pf-actions">
+            <a class="pf-btn pf-btn-sm" [href]="d.ghUrl" target="_blank" rel="noopener">
+              {{ 'drawer.openGithub' | t }}
+            </a>
+            <button
+              type="button"
+              id="pf-drawer-close"
+              class="pf-close"
+              [attr.aria-label]="'drawer.close' | t"
+              (click)="store.closeDrawer()"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+                <path d="M2.5 2.5l9 9M11.5 2.5l-9 9"></path>
+              </svg>
+            </button>
+          </span>
+        </div>
+        <h2 class="pf-drawer-title">{{ d.title }}</h2>
+      </header>
+
+      <div class="pf-drawer-body">
+        @if (d.focused) {
+          <p class="pf-banner">{{ d.banner }}</p>
+        }
+
+        @if (d.general) {
+          <section class="pf-verdict">
+            <span [class]="'pf-badge ' + d.vCls">{{ d.vLabel }}</span>
+            <p>{{ d.why }}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">{{ 'drawer.signals' | t }}</h3>
+            <div class="pf-signals">
+              @for (sig of d.signals; track sig.k) {
+                <div class="pf-signal">
+                  <span class="pf-signal-key">{{ sig.k }}</span>
+                  <span [class]="sig.dot"></span>
+                  <span class="pf-signal-val">{{ sig.v }}</span>
+                </div>
+              }
+            </div>
+          </section>
+        }
+
+        @if (d.isDep) {
+          <section [class]="'pf-rv pf-rv-' + d.verdict">
+            <div class="pf-rv-head">{{ d.rvHead }}</div>
+            <p>{{ d.rvDetail }}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">{{ 'drawer.depTree' | t }}</h3>
+            <div class="pf-tree">
+              @for (n of d.tree; track n.index) {
+                @if (n.hasLink) {
+                  <span class="pf-tree-link" aria-hidden="true"></span>
+                }
+                <button
+                  type="button"
+                  [class]="'pf-tree-node ' + n.cls"
+                  [attr.aria-pressed]="n.pressed"
+                  (click)="store.selectTreeNode(n.index)"
+                >
+                  {{ n.label }}
+                </button>
+              }
+            </div>
+            <p class="pf-tree-info">{{ d.treeInfo }}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">{{ d.blastTitle }}</h3>
+            @if (d.hasSummary) {
+              <p class="pf-blast-summary">{{ d.blastSummary }}</p>
+            }
+            @if (d.hasBlast) {
+              <div class="pf-blasts">
+                @for (b of d.blasts; track b.index) {
+                  <div [class]="'pf-diff ' + b.cls">
+                    <button
+                      type="button"
+                      class="pf-diff-head pf-blast-head"
+                      [attr.aria-expanded]="b.expanded"
+                      (click)="store.toggleBlastFile(b.index)"
+                    >
+                      <span class="pf-blast-file">
+                        <svg
+                          [class]="'pf-chev pf-chev-r ' + b.chevCls"
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M4.5 3l3 3-3 3"></path>
+                        </svg>
+                        <span>{{ b.file }}</span>
+                      </span>
+                      <span class="pf-blast-tags">
+                        @if (b.hasUses) {
+                          <span class="pf-badge pf-tag">{{ b.usesLabel }}</span>
+                        }
+                        @if (b.breaks) {
+                          <span class="pf-badge pf-badge-alto">Usa API que quebra</span>
+                        }
+                      </span>
+                    </button>
+                    @if (b.isOpen) {
+                      <div class="pf-hunk">
+                        @for (l of b.lines; track $index) {
+                          <span [class]="'pf-line ' + l.cls">
+                            <span class="pf-gut">{{ l.n }}</span>
+                            @for (t of l.tokens; track $index) {
+                              <span [class]="t.cls">{{ t.s }}</span>
+                            }
+                          </span>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+              @if (d.hasBlastFoot) {
+                <div class="pf-blast-foot">
+                  @if (d.hasMore) {
+                    <button type="button" class="pf-link" (click)="store.showAllBlastFiles()">
+                      {{ d.moreLabel }}
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="pf-link"
+                    style="margin-left: auto"
+                    (click)="store.toggleAllBlastFiles()"
+                  >
+                    {{ d.allLabel }}
+                  </button>
+                </div>
+              }
+            }
+            @if (d.noBlast) {
+              <p class="pf-empty-note">{{ 'drawer.noBlast' | t }}</p>
+            }
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">{{ 'drawer.breakingNotes' | t }}</h3>
+            <p [class]="'pf-alert ' + d.noteCls">{{ d.note }}</p>
+          </section>
+        }
+
+        @if (d.showDiff) {
+          <section class="pf-diff">
+            <header class="pf-diff-head">
+              <span>{{ d.diffFile }}</span>
+              @if (d.hasDelta) {
+                <span>
+                  <span class="pf-delta-add">{{ d.deltaAdd }}</span>
+                  <span class="pf-delta-del">{{ d.deltaDel }}</span>
+                </span>
+              }
+            </header>
+            <div class="pf-hunk">
+              @for (l of d.lines; track $index) {
+                <span [class]="'pf-line ' + l.cls">
+                  <span class="pf-gut">{{ l.n }}</span>
+                  @for (t of l.tokens; track $index) {
+                    <span [class]="t.cls">{{ t.s }}</span>
+                  }
+                </span>
+              }
+            </div>
+          </section>
+        }
+      </div>
+
+      <footer class="pf-drawer-foot" aria-live="polite">
+        @if (d.showIdle) {
+          @if (d.blocked) {
+            <p [class]="d.blockedCls">{{ d.blockedText }}</p>
+          }
+          <div class="pf-actions">
+            @if (d.showApprove) {
+              <button type="button" class="pf-btn pf-btn-primary" (click)="store.approvePr(d.id)">
+                {{ 'drawer.approve' | t }}
+              </button>
+            }
+            @if (d.approvedMine) {
+              <span class="pf-badge pf-badge-baixo">{{ 'drawer.approvedByYou' | t }}</span>
+            }
+            <button
+              type="button"
+              [class]="'pf-btn ' + d.mergeCls"
+              [attr.aria-disabled]="d.mergeDis"
+              (click)="d.mergeDis !== 'true' && store.mergePr(d.id)"
+            >
+              {{ 'drawer.mergeSquash' | t }}
+            </button>
+          </div>
+        }
+
+        @if (d.act.running) {
+          <div class="pf-actions">
+            <button type="button" class="pf-btn pf-btn-primary pf-btn-busy" aria-disabled="true" aria-busy="true">
+              <span class="pf-spin"></span>{{ d.act.label }}
+            </button>
+            <button
+              type="button"
+              id="pf-drawer-cancel"
+              class="pf-btn pf-btn-danger"
+              (click)="d.act.cancel()"
+            >
+              {{ 'drawer.cancelEsc' | t }}
+            </button>
+          </div>
+        }
+
+        @if (d.act.hasNote) {
+          <p [class]="d.act.noteCls">{{ d.act.note }}</p>
+        }
+
+        @if (d.showMerged) {
+          <p class="pf-note pf-note-ok">Este PR já foi mesclado.</p>
+        }
+
+        @if (d.showSecondary) {
+          @if (d.isDep) {
+            <div class="pf-actions">
+              <button
+                type="button"
+                class="pf-btn pf-mono"
+                [attr.aria-disabled]="d.busyDis"
+                (click)="store.commentOnPr(d.id, '@dependabot rebase')"
+              >
+                {{ 'drawer.rebase' | t }}
+              </button>
+              <button
+                type="button"
+                class="pf-btn pf-mono"
+                [attr.aria-disabled]="d.busyDis"
+                (click)="store.commentOnPr(d.id, '@dependabot recreate')"
+              >
+                {{ 'drawer.recreate' | t }}
+              </button>
+              <button
+                type="button"
+                class="pf-btn"
+                [attr.aria-disabled]="d.busyDis"
+                (click)="store.silencePr(d.id, '🔕 Silenciado no Radar')"
+              >
+                {{ 'drawer.silence' | t }}
+              </button>
+            </div>
+          }
+          @if (d.notDep) {
+            <div class="pf-actions">
+              <button
+                type="button"
+                class="pf-btn"
+                [attr.aria-disabled]="d.busyDis"
+                (click)="store.silencePr(d.id, '🔕 Silenciado até o próximo commit')"
+              >
+                {{ 'drawer.silenceCommit' | t }}
+              </button>
+              <button
+                type="button"
+                class="pf-btn"
+                [attr.aria-disabled]="d.busyDis"
+                (click)="store.silencePr(d.id, '🔕 Silenciado até o CI passar')"
+              >
+                {{ 'drawer.silenceCi' | t }}
+              </button>
+              <button type="button" class="pf-btn" aria-disabled="true">
+                {{ 'drawer.passToTeammate' | t }}
+              </button>
+            </div>
+          }
+        }
+      </footer>
+    </aside>
+  }
+</div>
