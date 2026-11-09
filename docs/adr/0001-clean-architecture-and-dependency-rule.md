@@ -17,8 +17,8 @@ Both the **Go v1.27 Backend** and the **Angular v22 Frontend** enforce strict **
 2. **Frontend Layers (`frontend/src/app/`):**
    - `domain` (`models`, `gateways`): Pure TypeScript models and abstract gateway tokens. Zero Angular HTTP, Router, or UI component dependencies.
    - `application` (`stores`, `use-cases`): Signal-based state stores and use cases depending only on `domain`.
-   - `infrastructure` (`http`, `sse`, `resilience`, `i18n`): Concrete gateway implementations.
-   - `presentation` (`layout`, `features`, `shared`): Standalone Angular v22 UI components.
+   - `infrastructure` (`http`, `sse`, `resilience`, `i18n`): Concrete gateway implementations and API DTO mappers.
+   - `presentation` (`common`, `features`, `layout`): Modular Standalone Angular v22 UI components divided into reusable `common/` building blocks, perspective `features/` views, and `layout/` shell navigation.
 
 ## Consequences
 - **Positive:** Domain and use-case tests run in microseconds using pure in-memory fakes without database containers or network mocks.

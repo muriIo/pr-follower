@@ -185,6 +185,16 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 			t.Fatalf("write bad.ts: %v", err)
 		}
 
+		// Also create a monolithic presentation component without common/features/layout
+		fePresDir := filepath.Join(root, "frontend", "src", "app", "presentation", "shell")
+		if err := os.MkdirAll(fePresDir, 0o755); err != nil {
+			t.Fatalf("mkdir frontend presentation: %v", err)
+		}
+		bigTemplate := strings.Repeat("<div>line</div>\n", 230)
+		if err := os.WriteFile(filepath.Join(fePresDir, "shell.component.html"), []byte(bigTemplate), 0o644); err != nil {
+			t.Fatalf("write shell.component.html: %v", err)
+		}
+
 		report, err := adrcheck.ValidateRepository(root)
 		if err == nil {
 			t.Fatal("expected ADR-0001, ADR-0002, ADR-0008, and ADR-0009 violations, got nil")

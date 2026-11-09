@@ -7,8 +7,13 @@ Accepted (2026-11-09)
 The frontend requires real-time reactive updates (SSE live repository "Seats" grid, Turn-Based CODEOWNERS Inbox, and Dependabot Radar with interactive dependency graphs) while maintaining strict Clean Architecture and AI-assisted workspace tooling.
 
 ## Decision
-1. **Angular v22 Core Conventions:**
-   - All components use **Standalone Components** (`standalone: true` default in v22), `ChangeDetectionStrategy.OnPush`, and modern control flow (`@if`, `@for`, `@switch`).
+1. **Angular v22 Core Conventions & Modular Componentization:**
+   - All components use **Standalone Components** (`standalone: true` default in v22), `ChangeDetectionStrategy.OnPush`, signal inputs/outputs (`input()`, `output()`), and modern control flow (`@if`, `@for`, `@switch`).
+   - The `src/app/presentation/` layer is strictly decomposed into three modular subdirectories:
+     - `common/`: Shared, reusable UI primitives (`status-dot`, `risk-badge`, `cancellable-action`, `diff-viewer`, `page-header`).
+     - `features/`: Dedicated perspective views and feature sub-components (`seats-view` + `seat-card`, `codeowners-inbox-view` + `inbox-pr-card`, `dependabot-radar-view` + `batch-merge-bar` + `radar-pr-card`, `timeline-view`, `inspection-drawer` + `dependabot-impact`).
+     - `layout/`: Top-level navigation and shell orchestration (`sidebar-nav`, `workspace-shell`).
+   - Monolithic component templates are forbidden: no `.component.html` file may exceed `220` lines.
    - Reactive state management in `src/app/application/stores/` is built with **Angular Signals** (`signal`, `computed`, `effect`).
    - Dependency injection uses `inject()` and typed `InjectionToken` gateways bridging `domain` ports to `infrastructure` adapters.
 2. **Angular CLI MCP Server (`ng mcp`):**

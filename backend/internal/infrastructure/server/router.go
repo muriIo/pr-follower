@@ -22,6 +22,7 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 		api.Get("/workspace", h.GetWorkspace)
 		api.Get("/events/stream", h.ServeSSE)
 		api.Post("/demo/seed", h.SeedDemoData)
+		api.Post("/repositories/follow", h.FollowRepository)
 		api.Post("/webhooks/github", h.GitHubWebhook)
 
 		api.Post("/prs/batch-merge", h.BatchMergePRs)

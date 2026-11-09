@@ -399,6 +399,35 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 		return nil
 	})
 
+	// ADR-0009 Presentation Componentization check:
+	// If presentation/ exists, it must be organized into common/, features/, and layout/,
+	// and no single *.component.html template may exceed 220 lines (no monolithic shell templates).
+	presentationDir := filepath.Join(appDir, "presentation")
+	if _, err := os.Stat(presentationDir); err == nil {
+		for _, sub := range []string{"common", "features", "layout"} {
+			if _, statErr := os.Stat(filepath.Join(presentationDir, sub)); statErr != nil {
+				report.Violations = append(report.Violations,
+					fmt.Sprintf("ADR-0009: frontend presentation layer is missing required modular directory frontend/src/app/presentation/%s", sub))
+			}
+		}
+		_ = filepath.WalkDir(presentationDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".component.html") {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			lineCount := strings.Count(string(raw), "\n") + 1
+			if lineCount > 220 {
+				report.Violations = append(report.Violations,
+					fmt.Sprintf("ADR-0009: monolithic component template %s has %d lines (max 220; split into common/ and features/ components)",
+						relPath(repoRoot, path), lineCount))
+			}
+			return nil
+		})
+	}
+
 	// ADR-0002 Frontend TDD check: every directory in src/app with implementation .ts files (excluding pure gateways/config) must have a .spec.ts file
 	_ = filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {

@@ -1,7 +1,9 @@
 package entity_test
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -190,5 +192,85 @@ func TestRepositoryAndPullRequest_Validate(t *testing.T) {
 	}
 	if err := validPR.Validate(); err != nil {
 		t.Fatalf("expected valid pull request, got %v", err)
+	}
+}
+
+func TestEntities_JSONSerializationSnakeCase(t *testing.T) {
+	t.Parallel()
+
+	repo := entity.Repository{
+		ID:            10,
+		GitHubRepoID:  5001,
+		Owner:         "arvore",
+		Name:          "hive-web",
+		FullName:      "arvore/hive-web",
+		DefaultBranch: "main",
+	}
+	repoJSON, err := json.Marshal(repo)
+	if err != nil {
+		t.Fatalf("marshal repo: %v", err)
+	}
+	for _, key := range []string{`"id":10`, `"full_name":"arvore/hive-web"`, `"default_branch":"main"`} {
+		if !strings.Contains(string(repoJSON), key) {
+			t.Errorf("expected repo JSON %s to contain %s", string(repoJSON), key)
+		}
+	}
+
+	pr := entity.PullRequest{
+		ID:             142,
+		RepositoryID:   10,
+		RepositoryName: "arvore/hive-web",
+		Number:         142,
+		Title:          "feat: live pulse",
+		AuthorLogin:    "bianca-dev",
+		IsDependabot:   false,
+		CIStatus:       entity.CIStatusSuccess,
+		MergeableState: entity.MergeableStateClean,
+		HeadSHA:        "7f8a9b1",
+		BaseRef:        "main",
+	}
+	prJSON, err := json.Marshal(pr)
+	if err != nil {
+		t.Fatalf("marshal pr: %v", err)
+	}
+	for _, key := range []string{`"id":142`, `"repository_name":"arvore/hive-web"`, `"author_login":"bianca-dev"`, `"ci_status":"SUCCESS"`} {
+		if !strings.Contains(string(prJSON), key) {
+			t.Errorf("expected pr JSON %s to contain %s", string(prJSON), key)
+		}
+	}
+
+	analysis := entity.DependabotAnalysis{
+		PullRequestID:  145,
+		PackageName:    "vitest",
+		FromVersion:    "2.1.1",
+		ToVersion:      "2.1.4",
+		SemverBumpType: entity.SemverBumpPatch,
+		DepScope:       entity.DependencyScopeDev,
+		RiskVerdict:    entity.RiskVerdictLow,
+		RiskScore:      12,
+	}
+	analysisJSON, err := json.Marshal(analysis)
+	if err != nil {
+		t.Fatalf("marshal analysis: %v", err)
+	}
+	for _, key := range []string{`"package_name":"vitest"`, `"from_version":"2.1.1"`, `"to_version":"2.1.4"`, `"risk_verdict":"LOW"`, `"risk_score":12`} {
+		if !strings.Contains(string(analysisJSON), key) {
+			t.Errorf("expected analysis JSON %s to contain %s", string(analysisJSON), key)
+		}
+	}
+
+	userState := entity.UserPRState{
+		PullRequestID: 142,
+		UserID:        1,
+		TurnState:     entity.TurnStateWaitingOnMe,
+	}
+	stateJSON, err := json.Marshal(userState)
+	if err != nil {
+		t.Fatalf("marshal user state: %v", err)
+	}
+	for _, key := range []string{`"pull_request_id":142`, `"turn_state":"WAITING_ON_ME"`} {
+		if !strings.Contains(string(stateJSON), key) {
+			t.Errorf("expected userState JSON %s to contain %s", string(stateJSON), key)
+		}
 	}
 }

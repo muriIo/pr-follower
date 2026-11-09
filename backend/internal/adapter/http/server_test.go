@@ -104,6 +104,16 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 		t.Fatalf("expected 200 on /api/v1/demo/seed, got %d: %s", rec.Code, rec.Body.String())
 	}
 
+	// 2.5 Follow Repository
+	followBody := bytes.NewBufferString(`{"owner":"arvore","name":"design-system","default_branch":"main"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/repositories/follow", followBody)
+	req.Header.Set("X-User-ID", "1")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/repositories/follow, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	// 3. Get Workspace Snapshot
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/workspace", nil)
 	req.Header.Set("X-User-ID", "1")

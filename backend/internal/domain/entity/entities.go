@@ -85,15 +85,15 @@ const (
 )
 
 type User struct {
-	ID             uint64
-	GitHubID       int64
-	Login          string
-	Name           string
-	AvatarURL      string
-	Teams          []string
-	EncryptedToken string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID             uint64    `json:"id"`
+	GitHubID       int64     `json:"github_id"`
+	Login          string    `json:"login"`
+	Name           string    `json:"name"`
+	AvatarURL      string    `json:"avatar_url"`
+	Teams          []string  `json:"teams"`
+	EncryptedToken string    `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type CodeownerRule struct {
@@ -102,16 +102,16 @@ type CodeownerRule struct {
 }
 
 type Repository struct {
-	ID                    uint64
-	GitHubRepoID          int64
-	InstallationID        int64
-	Owner                 string
-	Name                  string
-	FullName              string
-	DefaultBranch         string
-	CachedCodeownersRules []CodeownerRule
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	ID                    uint64          `json:"id"`
+	GitHubRepoID          int64           `json:"github_repo_id"`
+	InstallationID        int64           `json:"installation_id"`
+	Owner                 string          `json:"owner"`
+	Name                  string          `json:"name"`
+	FullName              string          `json:"full_name"`
+	DefaultBranch         string          `json:"default_branch"`
+	CachedCodeownersRules []CodeownerRule `json:"cached_codeowners_rules"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (r Repository) Validate() error {
@@ -129,24 +129,24 @@ type ChangedFile struct {
 }
 
 type PullRequest struct {
-	ID              uint64
-	RepositoryID    uint64
-	RepositoryName  string
-	GitHubPRID      int64
-	Number          int
-	Title           string
-	AuthorLogin     string
-	HTMLURL         string
-	IsDependabot    bool
-	IsDraft         bool
-	State           PRState
-	MergeableState  MergeableState
-	CIStatus        CIStatus
-	HeadSHA         string
-	BaseRef         string
-	ClaimedByUserID *uint64
-	ClaimedByLogin  string
-	UpdatedAt       time.Time
+	ID              uint64         `json:"id"`
+	RepositoryID    uint64         `json:"repository_id"`
+	RepositoryName  string         `json:"repository_name"`
+	GitHubPRID      int64          `json:"github_pr_id"`
+	Number          int            `json:"number"`
+	Title           string         `json:"title"`
+	AuthorLogin     string         `json:"author_login"`
+	HTMLURL         string         `json:"html_url"`
+	IsDependabot    bool           `json:"is_dependabot"`
+	IsDraft         bool           `json:"is_draft"`
+	State           PRState        `json:"state"`
+	MergeableState  MergeableState `json:"mergeable_state"`
+	CIStatus        CIStatus       `json:"ci_status"`
+	HeadSHA         string         `json:"head_sha"`
+	BaseRef         string         `json:"base_ref"`
+	ClaimedByUserID *uint64        `json:"claimed_by_user_id,omitempty"`
+	ClaimedByLogin  string         `json:"claimed_by_login,omitempty"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 func (pr PullRequest) Validate() error {
@@ -184,36 +184,36 @@ type AdvisoryAndNote struct {
 }
 
 type DependabotAnalysis struct {
-	ID                  uint64
-	PullRequestID       uint64
-	HeadSHA             string
-	Ecosystem           string
-	PackageName         string
-	FromVersion         string
-	ToVersion           string
-	SemverBumpType      SemverBumpType
-	IsDirectDep         bool
-	DepScope            DependencyScope
-	RiskVerdict         RiskVerdict
-	RiskScore           int
-	VerdictSummaryKey   string
-	DependencyPathGraph []DependencyNode
-	BlastRadiusUsages   []BlastRadiusUsage
-	AdvisoriesAndNotes  []AdvisoryAndNote
-	UpdatedAt           time.Time
+	ID                  uint64             `json:"id"`
+	PullRequestID       uint64             `json:"pull_request_id"`
+	HeadSHA             string             `json:"head_sha"`
+	Ecosystem           string             `json:"ecosystem"`
+	PackageName         string             `json:"package_name"`
+	FromVersion         string             `json:"from_version"`
+	ToVersion           string             `json:"to_version"`
+	SemverBumpType      SemverBumpType     `json:"semver_bump_type"`
+	IsDirectDep         bool               `json:"is_direct_dep"`
+	DepScope            DependencyScope    `json:"dep_scope"`
+	RiskVerdict         RiskVerdict        `json:"risk_verdict"`
+	RiskScore           int                `json:"risk_score"`
+	VerdictSummaryKey   string             `json:"verdict_summary_key"`
+	DependencyPathGraph []DependencyNode   `json:"dependency_path_graph"`
+	BlastRadiusUsages   []BlastRadiusUsage `json:"blast_radius_usages"`
+	AdvisoriesAndNotes  []AdvisoryAndNote  `json:"advisories_and_notes"`
+	UpdatedAt           time.Time          `json:"updated_at"`
 }
 
 type UserPRState struct {
-	ID                    uint64
-	PullRequestID         uint64
-	UserID                uint64
-	TurnState             TurnState
-	TeamAlreadyApproved   bool
-	ApprovedByLogin       string
-	SnoozedUntilCondition SnoozeCondition
-	SnoozedAtSHA          string
-	OwnedFilesChanged     []ChangedFile
-	UpdatedAt             time.Time
+	ID                    uint64          `json:"id"`
+	PullRequestID         uint64          `json:"pull_request_id"`
+	UserID                uint64          `json:"user_id"`
+	TurnState             TurnState       `json:"turn_state"`
+	TeamAlreadyApproved   bool            `json:"team_already_approved"`
+	ApprovedByLogin       string          `json:"approved_by_login,omitempty"`
+	SnoozedUntilCondition SnoozeCondition `json:"snoozed_until_condition,omitempty"`
+	SnoozedAtSHA          string          `json:"snoozed_at_sha,omitempty"`
+	OwnedFilesChanged     []ChangedFile   `json:"owned_files_changed"`
+	UpdatedAt             time.Time       `json:"updated_at"`
 }
 
 func (s UserPRState) IsSnoozedFor(headSHA string, ciStatus CIStatus) bool {
