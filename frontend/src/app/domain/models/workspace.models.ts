@@ -92,6 +92,14 @@ export interface TimelineEventItem {
   readonly fresh?: boolean;
 }
 
+export interface WorkspaceDataset {
+  readonly repos: readonly RepoInfo[];
+  readonly prs: readonly PullRequestItem[];
+  readonly events: readonly TimelineEventItem[];
+  readonly approvedMap?: Record<number, boolean>;
+  readonly silencedMap?: Record<number, string>;
+}
+
 export function computeSemverBumpLabel(fromVersion: string, toVersion: string): 'Major' | 'Minor' | 'Patch' {
   const fromParts = fromVersion.split('.');
   const toParts = toVersion.split('.');

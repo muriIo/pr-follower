@@ -1,5 +1,5 @@
 import { InjectionToken } from '@angular/core';
-import { SseConnectionState, TimelineEventItem } from '../models/workspace.models';
+import { RepoInfo, SseConnectionState, TimelineEventItem, WorkspaceDataset } from '../models/workspace.models';
 
 export interface ActionRequestOptions {
   readonly signal?: AbortSignal;
@@ -7,11 +7,15 @@ export interface ActionRequestOptions {
 }
 
 export interface PullRequestGateway {
+  fetchWorkspace?(options?: ActionRequestOptions): Promise<WorkspaceDataset | null>;
+  followRepository?(owner: string, name: string, defaultBranch?: string, options?: ActionRequestOptions): Promise<RepoInfo | null>;
   approvePullRequest(prId: number, options?: ActionRequestOptions): Promise<void>;
   mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha: string }>;
+  batchMergePullRequests?(prIds: readonly number[], options?: ActionRequestOptions): Promise<{ mergedIds: readonly number[] }>;
   commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void>;
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;
-  syncRepositories(options?: ActionRequestOptions): Promise<void>;
+  claimPullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
+  seedDemoWorkspace?(options?: ActionRequestOptions): Promise<void>;
   cancelServerOperation(operationId: string): Promise<void>;
 }
 

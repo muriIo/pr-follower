@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   LIVE_EVENT_GATEWAY,
   LiveEventGateway,
@@ -11,11 +11,18 @@ import { WorkspaceStore } from './workspace.store';
 
 function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: LiveEventGateway } {
   const prGateway: PullRequestGateway = {
+    fetchWorkspace: async () => null,
+    followRepository: async (owner, name, defaultBranch = 'main') => ({
+      name: `${owner}/${name}`,
+      branch: defaultBranch,
+    }),
     approvePullRequest: async () => undefined,
     mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
+    batchMergePullRequests: async (ids) => ({ mergedIds: ids }),
     commentOnPullRequest: async () => undefined,
     snoozePullRequest: async () => undefined,
-    syncRepositories: async () => undefined,
+    claimPullRequest: async () => undefined,
+    seedDemoWorkspace: async () => undefined,
     cancelServerOperation: async () => undefined,
   };
   const sseGateway: LiveEventGateway = {
@@ -69,8 +76,11 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     expect(store.drawer()!.blasts.length).toBe(7);
   });
 
-  it('executes PR approval, squash merge, and supports cooperative Escape cancellation', async () => {
+  it('executes PR approval, squash merge, followRepo, loadWorkspace from API, and supports cooperative cancellation', async () => {
     const { prGateway, sseGateway } = createFakeGateways();
+    const fetchWorkspaceSpy = vi.spyOn(prGateway, 'fetchWorkspace');
+    const followRepoSpy = vi.spyOn(prGateway, 'followRepository');
+
     TestBed.configureTestingModule({
       providers: [
         ActionCancellationManager,
@@ -81,6 +91,13 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+    expect(fetchWorkspaceSpy).toHaveBeenCalled();
+
+    // Follow a new repository via API
+    await store.followRepo('arvore', 'billing-worker', 'main');
+    expect(followRepoSpy).toHaveBeenCalledWith('arvore', 'billing-worker', 'main');
+    expect(store.repos().some((r) => r.name === 'arvore/billing-worker')).toBe(true);
+
     store.openPr(142);
 
     // Approve PR #142

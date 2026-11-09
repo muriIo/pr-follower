@@ -206,6 +206,7 @@ export class WorkspaceStore {
     this.cancellation.registerAbortCallback((opId) => {
       void this.prGateway?.cancelServerOperation(opId);
     });
+    void this.loadWorkspace();
     const disconnect = this.sseGateway?.connect(
       (evt) => {
         if (!this.pausedTimeline()) {
@@ -217,6 +218,35 @@ export class WorkspaceStore {
     if (disconnect) {
       this.destroyRef.onDestroy(disconnect);
     }
+  }
+
+  async loadWorkspace(options?: ActionRequestOptions): Promise<void> {
+    const dataset = await this.prGateway?.fetchWorkspace?.(options);
+    if (!dataset) {
+      return;
+    }
+    this.repos.set(dataset.repos);
+    this.prs.set(dataset.prs);
+    if (dataset.events.length > 0) {
+      this.events.set(dataset.events);
+    }
+    if (dataset.approvedMap) {
+      this.approvedMap.set(dataset.approvedMap);
+    }
+    if (dataset.silencedMap) {
+      this.silencedMap.set(dataset.silencedMap);
+    }
+  }
+
+  async followRepo(owner: string = 'arvore', name: string = 'hive-analytics', defaultBranch: string = 'main'): Promise<void> {
+    const followed = await this.prGateway?.followRepository?.(owner, name, defaultBranch);
+    const fullName = followed?.name ?? `${owner}/${name}`;
+    const branch = followed?.branch ?? defaultBranch;
+    if (!this.repos().some((r) => r.name === fullName)) {
+      this.repos.update((curr) => [...curr, { name: fullName, branch }]);
+    }
+    this.freshRepo.set(fullName);
+    this.appendTimelineEvent('info', `Repositório ${fullName} adicionado aos Seats`, fullName);
   }
 
   readonly openPrs = computed(() => {
@@ -695,6 +725,7 @@ export class WorkspaceStore {
   }
 
   async silencePr(prId: number, badge: string, delayMs: number = 1000): Promise<void> {
+    const condition = badge.toLowerCase().includes('ci') ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
     await this.cancellation.run(
       `merge:${prId}`,
       [
@@ -702,7 +733,7 @@ export class WorkspaceStore {
           label: 'Silenciando...',
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
-            await this.prGateway?.snoozePullRequest(prId, badge, opts);
+            await this.prGateway?.snoozePullRequest(prId, condition, opts);
           },
         },
       ],
@@ -740,7 +771,7 @@ export class WorkspaceStore {
           label: `Sincronizando ${count} repositórios...`,
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
-            await this.prGateway?.syncRepositories(opts);
+            await this.loadWorkspace(opts);
           },
         },
       ],

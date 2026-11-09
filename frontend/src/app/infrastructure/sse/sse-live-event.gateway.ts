@@ -1,8 +1,21 @@
 import { Injectable } from '@angular/core';
 import { LiveEventGateway } from '../../domain/gateways/workspace.gateways';
 import { SseConnectionState, TimelineEventItem } from '../../domain/models/workspace.models';
+import { ApiActivityEventDto, mapActivityEventToTimelineItem } from '../http/workspace-api.mapper';
 
-const LIVE_EVENT_POOL: readonly Omit<TimelineEventItem, 'key' | 't'>[] = [
+const SSE_EVENT_TYPES = [
+  'message',
+  'workspace.seeded',
+  'repository.followed',
+  'pr.approved',
+  'pr.merged',
+  'pr.snoozed',
+  'pr.claimed',
+  'dependabot.command',
+  'pr.updated',
+] as const;
+
+const FALLBACK_EVENT_POOL: readonly Omit<TimelineEventItem, 'key' | 't'>[] = [
   { kind: 'info', text: '@bianca-dev enviou um commit para #142', repo: 'arvore/hive-web', pr: 142 },
   { kind: 'ok', text: 'CI passou em #57', repo: 'arvore/design-system', pr: 57 },
   { kind: 'info', text: 'Tiago Melo respondeu um comentário em #301', repo: 'arvore/auth-service', pr: 301 },
@@ -23,9 +36,43 @@ export class SseLiveEventGateway implements LiveEventGateway {
     onEvent: (event: Omit<TimelineEventItem, 'key' | 't'>) => void,
     onStateChange: (state: SseConnectionState) => void,
   ): () => void {
+    const EventSourceCtor = (globalThis as { EventSource?: typeof EventSource }).EventSource;
+
+    if (typeof EventSourceCtor === 'function') {
+      const es = new EventSourceCtor('/api/v1/events/stream');
+      onStateChange('conectado');
+
+      es.onopen = () => {
+        onStateChange('conectado');
+      };
+
+      es.onerror = () => {
+        onStateChange('reconectando');
+      };
+
+      const handleMessage = (msg: MessageEvent) => {
+        try {
+          const parsed = JSON.parse(String(msg.data)) as ApiActivityEventDto;
+          if (parsed && parsed.summary) {
+            onEvent(mapActivityEventToTimelineItem(parsed));
+          }
+        } catch {
+          // Ignore malformed SSE comment/heartbeat frames
+        }
+      };
+
+      for (const eventType of SSE_EVENT_TYPES) {
+        es.addEventListener(eventType, handleMessage as EventListener);
+      }
+
+      return () => {
+        es.close();
+      };
+    }
+
     onStateChange('conectado');
     const timer = setInterval(() => {
-      const next = LIVE_EVENT_POOL[this.liveIndex++ % LIVE_EVENT_POOL.length];
+      const next = FALLBACK_EVENT_POOL[this.liveIndex++ % FALLBACK_EVENT_POOL.length];
       onEvent(next);
     }, this.intervalMs);
 
