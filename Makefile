@@ -1,15 +1,16 @@
-.PHONY: help db-up db-down backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check
+.PHONY: help db-up db-down adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check
 
 help:
 	@echo "PR Follower — Quality Gate & Development Commands"
 	@echo "  make db-up                    Start PostgreSQL container via Docker Compose"
 	@echo "  make db-down                  Stop PostgreSQL container"
+	@echo "  make adr-check                Validate all Architecture Decision Records (docs/adr/) against the codebase"
 	@echo "  make backend-fmt              Check Go formatting (gofmt -s)"
 	@echo "  make backend-vet              Run go vet static analysis"
 	@echo "  make backend-migration-check  Verify goose migrations are strictly forward-only (NO +goose Down)"
 	@echo "  make backend-arch-check       Verify Clean Architecture dependency boundaries"
 	@echo "  make backend-test             Run Go tests with race detector & coverage"
-	@echo "  make backend-check            Run all Backend Quality Gates"
+	@echo "  make backend-check            Run all Backend Quality Gates (including ADR compliance)"
 	@echo "  make frontend-check           Run all Frontend Quality Gates"
 	@echo "  make check                    Run full monorepo Quality Gates"
 
@@ -18,6 +19,11 @@ db-up:
 
 db-down:
 	docker compose down
+
+adr-check:
+	@echo "==> Validating Architecture Decision Records (docs/adr/) compliance..."
+	@cd backend && go test -v -run TestValidateRepository_LiveMonorepo ./internal/infrastructure/adrcheck/...
+	@echo "==> All ADRs verified."
 
 backend-fmt:
 	@echo "==> Checking Go formatting..."
@@ -58,7 +64,7 @@ backend-test:
 backend-coverage: backend-test
 	@cd backend && go tool cover -func=coverage.out
 
-backend-check: backend-fmt backend-vet backend-migration-check backend-arch-check backend-test
+backend-check: adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test
 
 frontend-lint:
 	@if [ -d frontend ]; then cd frontend && npm run lint; fi
