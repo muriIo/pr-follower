@@ -1,0 +1,221 @@
+package triage_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
+)
+
+type fakeUserRepo struct {
+	user *entity.User
+}
+
+func (f *fakeUserRepo) Upsert(_ context.Context, u *entity.User) error {
+	f.user = u
+	return nil
+}
+func (f *fakeUserRepo) GetByID(_ context.Context, _ uint64) (*entity.User, error) {
+	return f.user, nil
+}
+func (f *fakeUserRepo) GetByGitHubID(_ context.Context, _ int64) (*entity.User, error) {
+	return f.user, nil
+}
+
+type fakeRepoRepo struct {
+	repos []entity.Repository
+}
+
+func (f *fakeRepoRepo) Upsert(_ context.Context, _ *entity.Repository) error { return nil }
+func (f *fakeRepoRepo) GetByID(_ context.Context, id uint64) (*entity.Repository, error) {
+	for _, r := range f.repos {
+		if r.ID == id {
+			return &r, nil
+		}
+	}
+	return nil, entity.ErrNotFound
+}
+func (f *fakeRepoRepo) GetByGitHubRepoID(_ context.Context, _ int64) (*entity.Repository, error) {
+	return nil, entity.ErrNotFound
+}
+func (f *fakeRepoRepo) ListFollowedByUser(_ context.Context, _ uint64) ([]entity.Repository, error) {
+	return f.repos, nil
+}
+func (f *fakeRepoRepo) SetUserFollow(_ context.Context, _, _ uint64, _ bool) error { return nil }
+
+type fakePRRepo struct {
+	prs      []entity.PullRequest
+	states   map[uint64]entity.UserPRState
+	analyses map[uint64]*entity.DependabotAnalysis
+}
+
+func (f *fakePRRepo) Upsert(_ context.Context, pr *entity.PullRequest) error {
+	for i := range f.prs {
+		if f.prs[i].ID == pr.ID {
+			f.prs[i] = *pr
+			return nil
+		}
+	}
+	f.prs = append(f.prs, *pr)
+	return nil
+}
+func (f *fakePRRepo) GetByID(_ context.Context, id uint64) (*entity.PullRequest, error) {
+	for _, p := range f.prs {
+		if p.ID == id {
+			cp := p
+			return &cp, nil
+		}
+	}
+	return nil, entity.ErrNotFound
+}
+func (f *fakePRRepo) GetByRepoAndNumber(_ context.Context, _ uint64, _ int) (*entity.PullRequest, error) {
+	return nil, entity.ErrNotFound
+}
+func (f *fakePRRepo) ListOpenByRepoIDs(_ context.Context, _ []uint64) ([]entity.PullRequest, error) {
+	return f.prs, nil
+}
+func (f *fakePRRepo) SaveAnalysis(_ context.Context, a *entity.DependabotAnalysis) error {
+	f.analyses[a.PullRequestID] = a
+	return nil
+}
+func (f *fakePRRepo) GetAnalysisByPRAndSHA(_ context.Context, prID uint64, _ string) (*entity.DependabotAnalysis, error) {
+	if a, ok := f.analyses[prID]; ok {
+		return a, nil
+	}
+	return nil, entity.ErrNotFound
+}
+func (f *fakePRRepo) UpsertUserPRState(_ context.Context, s *entity.UserPRState) error {
+	f.states[s.PullRequestID] = *s
+	return nil
+}
+func (f *fakePRRepo) GetUserPRState(_ context.Context, prID, _ uint64) (*entity.UserPRState, error) {
+	if s, ok := f.states[prID]; ok {
+		return &s, nil
+	}
+	return nil, entity.ErrNotFound
+}
+func (f *fakePRRepo) ListUserPRStates(_ context.Context, _ uint64, _ []uint64) (map[uint64]entity.UserPRState, error) {
+	return f.states, nil
+}
+
+type fakePublisher struct {
+	events []entity.ActivityEvent
+}
+
+func (f *fakePublisher) Publish(_ context.Context, ev entity.ActivityEvent) error {
+	f.events = append(f.events, ev)
+	return nil
+}
+
+func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
+	t.Parallel()
+
+	userRepo := &fakeUserRepo{
+		user: &entity.User{ID: 1, Login: "murilo", Teams: []string{"@arvore/frontend"}},
+	}
+	repoRepo := &fakeRepoRepo{
+		repos: []entity.Repository{
+			{
+				ID:       10,
+				Owner:    "arvore",
+				Name:     "hive-web",
+				FullName: "arvore/hive-web",
+				CachedCodeownersRules: []entity.CodeownerRule{
+					{Pattern: "/src/app/", Owners: []string{"@murilo", "@arvore/frontend"}},
+				},
+			},
+		},
+	}
+	prRepo := &fakePRRepo{
+		prs: []entity.PullRequest{
+			{
+				ID:             100,
+				RepositoryID:   10,
+				RepositoryName: "arvore/hive-web",
+				Number:         42,
+				Title:          "feat: add seats grid",
+				AuthorLogin:    "alice",
+				IsDependabot:   false,
+				State:          entity.PRStateOpen,
+				CIStatus:       entity.CIStatusSuccess,
+				MergeableState: entity.MergeableStateClean,
+				HeadSHA:        "sha-42",
+			},
+			{
+				ID:             101,
+				RepositoryID:   10,
+				RepositoryName: "arvore/hive-web",
+				Number:         43,
+				Title:          "chore(deps): bump vitest from 2.1.0 to 2.1.1",
+				AuthorLogin:    "dependabot[bot]",
+				IsDependabot:   true,
+				State:          entity.PRStateOpen,
+				CIStatus:       entity.CIStatusSuccess,
+				MergeableState: entity.MergeableStateClean,
+				HeadSHA:        "sha-43",
+			},
+		},
+		states: map[uint64]entity.UserPRState{
+			100: {
+				PullRequestID: 100,
+				UserID:        1,
+				TurnState:     entity.TurnStateWaitingOnMe,
+				OwnedFilesChanged: []entity.ChangedFile{
+					{Path: "src/app/seats.component.ts", Additions: 18},
+				},
+			},
+		},
+		analyses: map[uint64]*entity.DependabotAnalysis{
+			101: {
+				PullRequestID:     101,
+				HeadSHA:           "sha-43",
+				PackageName:       "vitest",
+				FromVersion:       "2.1.0",
+				ToVersion:         "2.1.1",
+				SemverBumpType:    entity.SemverBumpPatch,
+				DepScope:          entity.DependencyScopeDev,
+				RiskVerdict:       entity.RiskVerdictLow,
+				RiskScore:         12,
+				VerdictSummaryKey: "dependabot.verdict.low.dev_safe",
+			},
+		},
+	}
+	pub := &fakePublisher{}
+
+	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, pub)
+
+	snapshot, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetWorkspaceSnapshot() unexpected error: %v", err)
+	}
+
+	if len(snapshot.Seats) != 1 {
+		t.Fatalf("expected 1 repo seat, got %d", len(snapshot.Seats))
+	}
+	if snapshot.Seats[0].OpenPRCount != 2 || snapshot.Seats[0].DependabotPRCount != 1 {
+		t.Errorf("unexpected seat counts: %#v", snapshot.Seats[0])
+	}
+	if len(snapshot.InboxWaitingOnMe) != 1 {
+		t.Fatalf("expected 1 PR waiting on me, got %d", len(snapshot.InboxWaitingOnMe))
+	}
+	if len(snapshot.DependabotPRs) != 1 || snapshot.DependabotPRs[0].Analysis.RiskVerdict != entity.RiskVerdictLow {
+		t.Fatalf("expected 1 low-risk dependabot PR, got %#v", snapshot.DependabotPRs)
+	}
+
+	// Snooze PR 100 until next commit
+	if err := uc.SnoozePR(context.Background(), 1, 100, entity.SnoozeConditionNextCommit); err != nil {
+		t.Fatalf("SnoozePR() error: %v", err)
+	}
+	if prRepo.states[100].TurnState != entity.TurnStateSnoozed {
+		t.Errorf("expected PR 100 turn state SNOOZED, got %q", prRepo.states[100].TurnState)
+	}
+
+	// Claim PR 101 for user 1
+	if err := uc.ClaimPR(context.Background(), 1, 101); err != nil {
+		t.Fatalf("ClaimPR() error: %v", err)
+	}
+	if len(pub.events) != 2 {
+		t.Errorf("expected 2 published SSE events, got %d", len(pub.events))
+	}
+}
