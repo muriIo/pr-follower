@@ -1,0 +1,548 @@
+package persistence
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/murilo/pr-follower/backend/internal/adapter/persistence/sqlcgen"
+	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+)
+
+type UserRepository struct {
+	q *sqlcgen.Queries
+}
+
+func NewUserRepository(db *sql.DB) *UserRepository {
+	return &UserRepository{q: sqlcgen.New(db)}
+}
+
+func (r *UserRepository) Upsert(ctx context.Context, user *entity.User) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	teamsBytes, _ := json.Marshal(user.Teams)
+	if len(teamsBytes) == 0 || string(teamsBytes) == "null" {
+		teamsBytes = []byte("[]")
+	}
+
+	row, err := r.q.UpsertUser(ctx, sqlcgen.UpsertUserParams{
+		GithubID:       user.GitHubID,
+		Login:          user.Login,
+		Name:           user.Name,
+		AvatarUrl:      user.AvatarURL,
+		TeamsJson:      string(teamsBytes),
+		EncryptedToken: user.EncryptedToken,
+	})
+	if err != nil {
+		return err
+	}
+	user.ID = uint64(row.ID)
+	user.CreatedAt = row.CreatedAt
+	user.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+func (r *UserRepository) GetByID(ctx context.Context, id uint64) (*entity.User, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetUserByID(ctx, int64(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainUser(row), nil
+}
+
+func (r *UserRepository) GetByGitHubID(ctx context.Context, ghID int64) (*entity.User, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetUserByGitHubID(ctx, ghID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainUser(row), nil
+}
+
+func toDomainUser(m sqlcgen.User) *entity.User {
+	var teams []string
+	if m.TeamsJson != "" {
+		_ = json.Unmarshal([]byte(m.TeamsJson), &teams)
+	}
+	return &entity.User{
+		ID:             uint64(m.ID),
+		GitHubID:       m.GithubID,
+		Login:          m.Login,
+		Name:           m.Name,
+		AvatarURL:      m.AvatarUrl,
+		Teams:          teams,
+		EncryptedToken: m.EncryptedToken,
+		CreatedAt:      m.CreatedAt,
+		UpdatedAt:      m.UpdatedAt,
+	}
+}
+
+type RepositoryRepository struct {
+	q *sqlcgen.Queries
+}
+
+func NewRepositoryRepository(db *sql.DB) *RepositoryRepository {
+	return &RepositoryRepository{q: sqlcgen.New(db)}
+}
+
+func (r *RepositoryRepository) Upsert(ctx context.Context, repo *entity.Repository) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	rulesBytes, _ := json.Marshal(repo.CachedCodeownersRules)
+	if len(rulesBytes) == 0 || string(rulesBytes) == "null" {
+		rulesBytes = []byte("[]")
+	}
+
+	row, err := r.q.UpsertRepository(ctx, sqlcgen.UpsertRepositoryParams{
+		GithubRepoID:   repo.GitHubRepoID,
+		InstallationID: repo.InstallationID,
+		Owner:          repo.Owner,
+		Name:           repo.Name,
+		FullName:       repo.FullName,
+		DefaultBranch:  repo.DefaultBranch,
+		CodeownersJson: string(rulesBytes),
+	})
+	if err != nil {
+		return err
+	}
+	repo.ID = uint64(row.ID)
+	repo.CreatedAt = row.CreatedAt
+	repo.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+func (r *RepositoryRepository) GetByID(ctx context.Context, id uint64) (*entity.Repository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetRepositoryByID(ctx, int64(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainRepo(row), nil
+}
+
+func (r *RepositoryRepository) GetByGitHubRepoID(ctx context.Context, ghRepoID int64) (*entity.Repository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetRepositoryByGitHubRepoID(ctx, ghRepoID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainRepo(row), nil
+}
+
+func (r *RepositoryRepository) ListFollowedByUser(ctx context.Context, userID uint64) ([]entity.Repository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	rows, err := r.q.ListFollowedRepositoriesByUser(ctx, int64(userID))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.Repository, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, *toDomainRepo(row))
+	}
+	return out, nil
+}
+
+func (r *RepositoryRepository) SetUserFollow(ctx context.Context, userID, repoID uint64, follow bool) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	if !follow {
+		return r.q.UnfollowRepository(ctx, sqlcgen.UnfollowRepositoryParams{
+			UserID:       int64(userID),
+			RepositoryID: int64(repoID),
+		})
+	}
+	return r.q.FollowRepository(ctx, sqlcgen.FollowRepositoryParams{
+		UserID:       int64(userID),
+		RepositoryID: int64(repoID),
+	})
+}
+
+func toDomainRepo(m sqlcgen.Repository) *entity.Repository {
+	var rules []entity.CodeownerRule
+	if m.CodeownersJson != "" {
+		_ = json.Unmarshal([]byte(m.CodeownersJson), &rules)
+	}
+	return &entity.Repository{
+		ID:                    uint64(m.ID),
+		GitHubRepoID:          m.GithubRepoID,
+		InstallationID:        m.InstallationID,
+		Owner:                 m.Owner,
+		Name:                  m.Name,
+		FullName:              m.FullName,
+		DefaultBranch:         m.DefaultBranch,
+		CachedCodeownersRules: rules,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
+	}
+}
+
+type PullRequestRepository struct {
+	db *sql.DB
+	q  *sqlcgen.Queries
+}
+
+func NewPullRequestRepository(db *sql.DB) *PullRequestRepository {
+	return &PullRequestRepository{
+		db: db,
+		q:  sqlcgen.New(db),
+	}
+}
+
+func (r *PullRequestRepository) Upsert(ctx context.Context, pr *entity.PullRequest) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	var claimedID sql.NullInt64
+	if pr.ClaimedByUserID != nil {
+		claimedID = sql.NullInt64{Int64: int64(*pr.ClaimedByUserID), Valid: true}
+	}
+
+	row, err := r.q.UpsertPullRequest(ctx, sqlcgen.UpsertPullRequestParams{
+		RepositoryID:    int64(pr.RepositoryID),
+		RepositoryName:  pr.RepositoryName,
+		GithubPrID:      pr.GitHubPRID,
+		Number:          int64(pr.Number),
+		Title:           pr.Title,
+		AuthorLogin:     pr.AuthorLogin,
+		HtmlUrl:         pr.HTMLURL,
+		IsDependabot:    pr.IsDependabot,
+		IsDraft:         pr.IsDraft,
+		State:           string(pr.State),
+		MergeableState:  string(pr.MergeableState),
+		CiStatus:        string(pr.CIStatus),
+		HeadSha:         pr.HeadSHA,
+		BaseRef:         pr.BaseRef,
+		ClaimedByUserID: claimedID,
+		ClaimedByLogin:  pr.ClaimedByLogin,
+	})
+	if err != nil {
+		return err
+	}
+	pr.ID = uint64(row.ID)
+	pr.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+func (r *PullRequestRepository) GetByID(ctx context.Context, id uint64) (*entity.PullRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetPullRequestByID(ctx, int64(id))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainPR(row), nil
+}
+
+func (r *PullRequestRepository) GetByRepoAndNumber(ctx context.Context, repoID uint64, number int) (*entity.PullRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetPullRequestByRepoAndNumber(ctx, sqlcgen.GetPullRequestByRepoAndNumberParams{
+		RepositoryID: int64(repoID),
+		Number:       int64(number),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainPR(row), nil
+}
+
+func (r *PullRequestRepository) ListOpenByRepoIDs(ctx context.Context, repoIDs []uint64) ([]entity.PullRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	if len(repoIDs) == 0 {
+		return []entity.PullRequest{}, nil
+	}
+
+	placeholders := make([]string, len(repoIDs))
+	args := make([]any, 0, len(repoIDs)+1)
+	for i, id := range repoIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args = append(args, int64(id))
+	}
+	args = append(args, string(entity.PRStateOpen))
+
+	query := fmt.Sprintf(`
+		SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+		       is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+		       claimed_by_user_id, claimed_by_login, updated_at
+		FROM pull_requests
+		WHERE repository_id IN (%s) AND state = $%d
+		ORDER BY updated_at DESC
+	`, strings.Join(placeholders, ","), len(repoIDs)+1)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []entity.PullRequest
+	for rows.Next() {
+		var m sqlcgen.PullRequest
+		if err := rows.Scan(
+			&m.ID, &m.RepositoryID, &m.RepositoryName, &m.GithubPrID, &m.Number, &m.Title,
+			&m.AuthorLogin, &m.HtmlUrl, &m.IsDependabot, &m.IsDraft, &m.State,
+			&m.MergeableState, &m.CiStatus, &m.HeadSha, &m.BaseRef,
+			&m.ClaimedByUserID, &m.ClaimedByLogin, &m.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, *toDomainPR(m))
+	}
+	return out, rows.Err()
+}
+
+func (r *PullRequestRepository) SaveAnalysis(ctx context.Context, a *entity.DependabotAnalysis) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	pathBytes, _ := json.Marshal(a.DependencyPathGraph)
+	blastBytes, _ := json.Marshal(a.BlastRadiusUsages)
+	advBytes, _ := json.Marshal(a.AdvisoriesAndNotes)
+
+	row, err := r.q.UpsertDependabotAnalysis(ctx, sqlcgen.UpsertDependabotAnalysisParams{
+		PullRequestID:     int64(a.PullRequestID),
+		HeadSha:           a.HeadSHA,
+		Ecosystem:         a.Ecosystem,
+		PackageName:       a.PackageName,
+		FromVersion:       a.FromVersion,
+		ToVersion:         a.ToVersion,
+		SemverBumpType:    string(a.SemverBumpType),
+		IsDirectDep:       a.IsDirectDep,
+		DepScope:          string(a.DepScope),
+		RiskVerdict:       string(a.RiskVerdict),
+		RiskScore:         int64(a.RiskScore),
+		VerdictSummaryKey: a.VerdictSummaryKey,
+		PathGraphJson:     string(pathBytes),
+		BlastRadiusJson:   string(blastBytes),
+		AdvisoriesJson:    string(advBytes),
+	})
+	if err != nil {
+		return err
+	}
+	a.ID = uint64(row.ID)
+	a.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+func (r *PullRequestRepository) GetAnalysisByPRAndSHA(ctx context.Context, prID uint64, headSHA string) (*entity.DependabotAnalysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetDependabotAnalysisByPRAndSHA(ctx, sqlcgen.GetDependabotAnalysisByPRAndSHAParams{
+		PullRequestID: int64(prID),
+		HeadSha:       headSHA,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainAnalysis(row), nil
+}
+
+func (r *PullRequestRepository) UpsertUserPRState(ctx context.Context, s *entity.UserPRState) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	ownedBytes, _ := json.Marshal(s.OwnedFilesChanged)
+
+	row, err := r.q.UpsertUserPRState(ctx, sqlcgen.UpsertUserPRStateParams{
+		PullRequestID:         int64(s.PullRequestID),
+		UserID:                int64(s.UserID),
+		TurnState:             string(s.TurnState),
+		TeamAlreadyApproved:   s.TeamAlreadyApproved,
+		ApprovedByLogin:       s.ApprovedByLogin,
+		SnoozedUntilCondition: string(s.SnoozedUntilCondition),
+		SnoozedAtSha:          s.SnoozedAtSHA,
+		OwnedFilesJson:        string(ownedBytes),
+	})
+	if err != nil {
+		return err
+	}
+	s.ID = uint64(row.ID)
+	s.UpdatedAt = row.UpdatedAt
+	return nil
+}
+
+func (r *PullRequestRepository) GetUserPRState(ctx context.Context, prID, userID uint64) (*entity.UserPRState, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetUserPRState(ctx, sqlcgen.GetUserPRStateParams{
+		PullRequestID: int64(prID),
+		UserID:        int64(userID),
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return toDomainUserPRState(row), nil
+}
+
+func (r *PullRequestRepository) ListUserPRStates(ctx context.Context, userID uint64, prIDs []uint64) (map[uint64]entity.UserPRState, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	out := make(map[uint64]entity.UserPRState, len(prIDs))
+	if len(prIDs) == 0 {
+		return out, nil
+	}
+
+	placeholders := make([]string, len(prIDs))
+	args := make([]any, 0, len(prIDs)+1)
+	args = append(args, int64(userID))
+	for i, id := range prIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, int64(id))
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, pull_request_id, user_id, turn_state, team_already_approved, approved_by_login,
+		       snoozed_until_condition, snoozed_at_sha, owned_files_json, updated_at
+		FROM pr_user_states
+		WHERE user_id = $1 AND pull_request_id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m sqlcgen.PrUserState
+		if err := rows.Scan(
+			&m.ID, &m.PullRequestID, &m.UserID, &m.TurnState, &m.TeamAlreadyApproved,
+			&m.ApprovedByLogin, &m.SnoozedUntilCondition, &m.SnoozedAtSha,
+			&m.OwnedFilesJson, &m.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		st := toDomainUserPRState(m)
+		out[st.PullRequestID] = *st
+	}
+	return out, rows.Err()
+}
+
+func toDomainPR(m sqlcgen.PullRequest) *entity.PullRequest {
+	var claimedID *uint64
+	if m.ClaimedByUserID.Valid {
+		uid := uint64(m.ClaimedByUserID.Int64)
+		claimedID = &uid
+	}
+	return &entity.PullRequest{
+		ID:              uint64(m.ID),
+		RepositoryID:    uint64(m.RepositoryID),
+		RepositoryName:  m.RepositoryName,
+		GitHubPRID:      m.GithubPrID,
+		Number:          int(m.Number),
+		Title:           m.Title,
+		AuthorLogin:     m.AuthorLogin,
+		HTMLURL:         m.HtmlUrl,
+		IsDependabot:    m.IsDependabot,
+		IsDraft:         m.IsDraft,
+		State:           entity.PRState(m.State),
+		MergeableState:  entity.MergeableState(m.MergeableState),
+		CIStatus:        entity.CIStatus(m.CiStatus),
+		HeadSHA:         m.HeadSha,
+		BaseRef:         m.BaseRef,
+		ClaimedByUserID: claimedID,
+		ClaimedByLogin:  m.ClaimedByLogin,
+		UpdatedAt:       m.UpdatedAt,
+	}
+}
+
+func toDomainAnalysis(m sqlcgen.DependabotAnalysis) *entity.DependabotAnalysis {
+	var pathGraph []entity.DependencyNode
+	var blast []entity.BlastRadiusUsage
+	var adv []entity.AdvisoryAndNote
+	if m.PathGraphJson != "" {
+		_ = json.Unmarshal([]byte(m.PathGraphJson), &pathGraph)
+	}
+	if m.BlastRadiusJson != "" {
+		_ = json.Unmarshal([]byte(m.BlastRadiusJson), &blast)
+	}
+	if m.AdvisoriesJson != "" {
+		_ = json.Unmarshal([]byte(m.AdvisoriesJson), &adv)
+	}
+	return &entity.DependabotAnalysis{
+		ID:                  uint64(m.ID),
+		PullRequestID:       uint64(m.PullRequestID),
+		HeadSHA:             m.HeadSha,
+		Ecosystem:           m.Ecosystem,
+		PackageName:         m.PackageName,
+		FromVersion:         m.FromVersion,
+		ToVersion:           m.ToVersion,
+		SemverBumpType:      entity.SemverBumpType(m.SemverBumpType),
+		IsDirectDep:         m.IsDirectDep,
+		DepScope:            entity.DependencyScope(m.DepScope),
+		RiskVerdict:         entity.RiskVerdict(m.RiskVerdict),
+		RiskScore:           int(m.RiskScore),
+		VerdictSummaryKey:   m.VerdictSummaryKey,
+		DependencyPathGraph: pathGraph,
+		BlastRadiusUsages:   blast,
+		AdvisoriesAndNotes:  adv,
+		UpdatedAt:           m.UpdatedAt,
+	}
+}
+
+func toDomainUserPRState(m sqlcgen.PrUserState) *entity.UserPRState {
+	var owned []entity.ChangedFile
+	if m.OwnedFilesJson != "" {
+		_ = json.Unmarshal([]byte(m.OwnedFilesJson), &owned)
+	}
+	return &entity.UserPRState{
+		ID:                    uint64(m.ID),
+		PullRequestID:         uint64(m.PullRequestID),
+		UserID:                uint64(m.UserID),
+		TurnState:             entity.TurnState(m.TurnState),
+		TeamAlreadyApproved:   m.TeamAlreadyApproved,
+		ApprovedByLogin:       m.ApprovedByLogin,
+		SnoozedUntilCondition: entity.SnoozeCondition(m.SnoozedUntilCondition),
+		SnoozedAtSHA:          m.SnoozedAtSha,
+		OwnedFilesChanged:     owned,
+		UpdatedAt:             m.UpdatedAt,
+	}
+}

@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/infrastructure/database/migrations"
+    queries: "internal/adapter/persistence/queries"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/adapter/persistence/sqlcgen"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_empty_slices: true

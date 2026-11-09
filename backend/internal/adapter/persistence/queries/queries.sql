@@ -1,0 +1,152 @@
+-- name: UpsertUser :one
+INSERT INTO users (github_id, login, name, avatar_url, teams_json, encrypted_token, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+ON CONFLICT (github_id) DO UPDATE SET
+    login = EXCLUDED.login,
+    name = EXCLUDED.name,
+    avatar_url = EXCLUDED.avatar_url,
+    teams_json = EXCLUDED.teams_json,
+    encrypted_token = EXCLUDED.encrypted_token,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at;
+
+-- name: GetUserByID :one
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+FROM users
+WHERE id = $1;
+
+-- name: GetUserByGitHubID :one
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+FROM users
+WHERE github_id = $1;
+
+-- name: UpsertRepository :one
+INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+ON CONFLICT (github_repo_id) DO UPDATE SET
+    installation_id = EXCLUDED.installation_id,
+    owner = EXCLUDED.owner,
+    name = EXCLUDED.name,
+    full_name = EXCLUDED.full_name,
+    default_branch = EXCLUDED.default_branch,
+    codeowners_json = EXCLUDED.codeowners_json,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at;
+
+-- name: GetRepositoryByID :one
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+FROM repositories
+WHERE id = $1;
+
+-- name: GetRepositoryByGitHubRepoID :one
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+FROM repositories
+WHERE github_repo_id = $1;
+
+-- name: ListFollowedRepositoriesByUser :many
+SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at
+FROM repositories r
+JOIN user_repo_follows urf ON urf.repository_id = r.id
+WHERE urf.user_id = $1
+ORDER BY r.full_name ASC;
+
+-- name: FollowRepository :exec
+INSERT INTO user_repo_follows (user_id, repository_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, repository_id) DO NOTHING;
+
+-- name: UnfollowRepository :exec
+DELETE FROM user_repo_follows
+WHERE user_id = $1 AND repository_id = $2;
+
+-- name: UpsertPullRequest :one
+INSERT INTO pull_requests (
+    repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+    is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+    claimed_by_user_id, claimed_by_login, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, CURRENT_TIMESTAMP
+)
+ON CONFLICT (github_pr_id) DO UPDATE SET
+    title = EXCLUDED.title,
+    is_draft = EXCLUDED.is_draft,
+    state = EXCLUDED.state,
+    mergeable_state = EXCLUDED.mergeable_state,
+    ci_status = EXCLUDED.ci_status,
+    head_sha = EXCLUDED.head_sha,
+    claimed_by_user_id = EXCLUDED.claimed_by_user_id,
+    claimed_by_login = EXCLUDED.claimed_by_login,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+          is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+          claimed_by_user_id, claimed_by_login, updated_at;
+
+-- name: GetPullRequestByID :one
+SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+       is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+       claimed_by_user_id, claimed_by_login, updated_at
+FROM pull_requests
+WHERE id = $1;
+
+-- name: GetPullRequestByRepoAndNumber :one
+SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+       is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+       claimed_by_user_id, claimed_by_login, updated_at
+FROM pull_requests
+WHERE repository_id = $1 AND number = $2;
+
+-- name: UpsertDependabotAnalysis :one
+INSERT INTO dependabot_analyses (
+    pull_request_id, head_sha, ecosystem, package_name, from_version, to_version,
+    semver_bump_type, is_direct_dep, dep_scope, risk_verdict, risk_score,
+    verdict_summary_key, path_graph_json, blast_radius_json, advisories_json, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, CURRENT_TIMESTAMP
+)
+ON CONFLICT (pull_request_id, head_sha) DO UPDATE SET
+    risk_verdict = EXCLUDED.risk_verdict,
+    risk_score = EXCLUDED.risk_score,
+    verdict_summary_key = EXCLUDED.verdict_summary_key,
+    path_graph_json = EXCLUDED.path_graph_json,
+    blast_radius_json = EXCLUDED.blast_radius_json,
+    advisories_json = EXCLUDED.advisories_json,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, pull_request_id, head_sha, ecosystem, package_name, from_version, to_version,
+          semver_bump_type, is_direct_dep, dep_scope, risk_verdict, risk_score,
+          verdict_summary_key, path_graph_json, blast_radius_json, advisories_json, updated_at;
+
+-- name: GetDependabotAnalysisByPRAndSHA :one
+SELECT id, pull_request_id, head_sha, ecosystem, package_name, from_version, to_version,
+       semver_bump_type, is_direct_dep, dep_scope, risk_verdict, risk_score,
+       verdict_summary_key, path_graph_json, blast_radius_json, advisories_json, updated_at
+FROM dependabot_analyses
+WHERE pull_request_id = $1 AND head_sha = $2;
+
+-- name: UpsertUserPRState :one
+INSERT INTO pr_user_states (
+    pull_request_id, user_id, turn_state, team_already_approved, approved_by_login,
+    snoozed_until_condition, snoozed_at_sha, owned_files_json, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, CURRENT_TIMESTAMP
+)
+ON CONFLICT (pull_request_id, user_id) DO UPDATE SET
+    turn_state = EXCLUDED.turn_state,
+    team_already_approved = EXCLUDED.team_already_approved,
+    approved_by_login = EXCLUDED.approved_by_login,
+    snoozed_until_condition = EXCLUDED.snoozed_until_condition,
+    snoozed_at_sha = EXCLUDED.snoozed_at_sha,
+    owned_files_json = EXCLUDED.owned_files_json,
+    updated_at = CURRENT_TIMESTAMP
+RETURNING id, pull_request_id, user_id, turn_state, team_already_approved, approved_by_login,
+          snoozed_until_condition, snoozed_at_sha, owned_files_json, updated_at;
+
+-- name: GetUserPRState :one
+SELECT id, pull_request_id, user_id, turn_state, team_already_approved, approved_by_login,
+       snoozed_until_condition, snoozed_at_sha, owned_files_json, updated_at
+FROM pr_user_states
+WHERE pull_request_id = $1 AND user_id = $2;
