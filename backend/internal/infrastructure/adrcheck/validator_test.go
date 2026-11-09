@@ -169,30 +169,27 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 		}
 	})
 
-	t.Run("ADR-0001 usecase & ADR-0008/ADR-0009 frontend checks", func(t *testing.T) {
+	t.Run("ADR-0001 frontend & ADR-0002/0008/0009 frontend checks", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)
 
-		// Add forbidden import in usecase
-		badUCFile := filepath.Join(root, "backend", "internal", "usecase", "triage", "bad_import.go")
-		if err := os.WriteFile(badUCFile, []byte("package triage\nimport \"net/http\"\nvar _ = http.StatusOK\n"), 0o644); err != nil {
-			t.Fatalf("write bad usecase import: %v", err)
+		// Create frontend/package.json without .mcp.json or i18n files, plus a domain file importing presentation without a spec
+		feDomainDir := filepath.Join(root, "frontend", "src", "app", "domain")
+		if err := os.MkdirAll(feDomainDir, 0o755); err != nil {
+			t.Fatalf("mkdir frontend domain: %v", err)
 		}
-
-		// Create frontend/package.json without .mcp.json or i18n files
-		feDir := filepath.Join(root, "frontend")
-		if err := os.MkdirAll(feDir, 0o755); err != nil {
-			t.Fatalf("mkdir frontend: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(feDir, "package.json"), []byte(`{"name":"frontend"}`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "frontend", "package.json"), []byte(`{"name":"frontend"}`), 0o644); err != nil {
 			t.Fatalf("write package.json: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(feDomainDir, "bad.ts"), []byte("import { Foo } from '../presentation/foo';\nexport const x = Foo;\n"), 0o644); err != nil {
+			t.Fatalf("write bad.ts: %v", err)
 		}
 
 		report, err := adrcheck.ValidateRepository(root)
 		if err == nil {
-			t.Fatal("expected ADR-0001, ADR-0008, and ADR-0009 violations, got nil")
+			t.Fatal("expected ADR-0001, ADR-0002, ADR-0008, and ADR-0009 violations, got nil")
 		}
-		for _, code := range []string{"ADR-0001", "ADR-0008", "ADR-0009"} {
+		for _, code := range []string{"ADR-0001", "ADR-0002", "ADR-0008", "ADR-0009"} {
 			if !containsViolation(report.Violations, code) {
 				t.Fatalf("expected %s violation, got: %v", code, report.Violations)
 			}

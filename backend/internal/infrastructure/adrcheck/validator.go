@@ -354,6 +354,82 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 		report.Violations = append(report.Violations,
 			"ADR-0008: frontend/public/i18n/en-US.json secondary locale file is missing")
 	}
+
+	appDir := filepath.Join(repoRoot, "frontend", "src", "app")
+	if _, err := os.Stat(appDir); err != nil {
+		return
+	}
+
+	// ADR-0001 Frontend Clean Architecture check
+	feDomainDir := filepath.Join(appDir, "domain")
+	_ = filepath.WalkDir(feDomainDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".ts") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		text := string(raw)
+		for _, forbidden := range []string{"/application/", "/infrastructure/", "/presentation/", "../application", "../infrastructure", "../presentation", "@angular/common/http"} {
+			if strings.Contains(text, forbidden) {
+				report.Violations = append(report.Violations,
+					fmt.Sprintf("ADR-0001: frontend domain file %s imports forbidden outer module %q", relPath(repoRoot, path), forbidden))
+			}
+		}
+		return nil
+	})
+
+	feAppDir := filepath.Join(appDir, "application")
+	_ = filepath.WalkDir(feAppDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".ts") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		text := string(raw)
+		for _, forbidden := range []string{"/infrastructure/", "/presentation/", "../infrastructure", "../presentation", "@angular/common/http"} {
+			if strings.Contains(text, forbidden) {
+				report.Violations = append(report.Violations,
+					fmt.Sprintf("ADR-0001: frontend application file %s imports forbidden outer module %q", relPath(repoRoot, path), forbidden))
+			}
+		}
+		return nil
+	})
+
+	// ADR-0002 Frontend TDD check: every directory in src/app with implementation .ts files (excluding pure gateways/config) must have a .spec.ts file
+	_ = filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == "gateways" {
+			return nil
+		}
+		entries, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return nil
+		}
+		hasImpl := false
+		hasSpec := false
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".ts") {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".spec.ts") {
+				hasSpec = true
+			} else if name != "index.ts" && name != "app.config.ts" && name != "app.routes.ts" {
+				hasImpl = true
+			}
+		}
+		if hasImpl && !hasSpec {
+			report.Violations = append(report.Violations,
+				fmt.Sprintf("ADR-0002: frontend directory %s has implementation .ts files but no *.spec.ts tests", relPath(repoRoot, path)))
+		}
+		return nil
+	})
 }
 
 func relPath(root, target string) string {
