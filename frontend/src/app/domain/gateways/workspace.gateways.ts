@@ -1,9 +1,24 @@
 import { InjectionToken } from '@angular/core';
-import { RepoInfo, SseConnectionState, TimelineEventItem, WorkspaceDataset } from '../models/workspace.models';
+import {
+  AuthenticatedUser,
+  LoginCredentials,
+  RepoInfo,
+  SseConnectionState,
+  TimelineEventItem,
+  WorkspaceDataset,
+} from '../models/workspace.models';
 
 export interface ActionRequestOptions {
   readonly signal?: AbortSignal;
   readonly operationId?: string;
+}
+
+export interface AuthGateway {
+  login(credentials: LoginCredentials, options?: ActionRequestOptions): Promise<AuthenticatedUser>;
+  logout(token?: string): Promise<void>;
+  loadStoredSession(): AuthenticatedUser | null;
+  saveStoredSession(user: AuthenticatedUser): void;
+  clearStoredSession(): void;
 }
 
 export interface PullRequestGateway {
@@ -33,3 +48,4 @@ export interface TranslationGateway {
 export const PULL_REQUEST_GATEWAY = new InjectionToken<PullRequestGateway>('PULL_REQUEST_GATEWAY');
 export const LIVE_EVENT_GATEWAY = new InjectionToken<LiveEventGateway>('LIVE_EVENT_GATEWAY');
 export const TRANSLATION_GATEWAY = new InjectionToken<TranslationGateway>('TRANSLATION_GATEWAY');
+export const AUTH_GATEWAY = new InjectionToken<AuthGateway>('AUTH_GATEWAY');

@@ -57,6 +57,71 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	h.deps.SSEHub.ServeHTTP(w, r)
 }
 
+func (h *Handler) AuthLogin(w http.ResponseWriter, r *http.Request) {
+	ctx, release := h.beginOperation(r)
+	defer release()
+
+	var req struct {
+		Login       string `json:"login"`
+		Name        string `json:"name"`
+		Team        string `json:"team"`
+		GitHubToken string `json:"github_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeDomainError(w, entity.ErrInvalidInput)
+		return
+	}
+	login := strings.TrimPrefix(strings.TrimSpace(req.Login), "@")
+	if login == "" {
+		writeDomainError(w, entity.ErrInvalidInput)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = strings.ToUpper(login[:1]) + login[1:]
+	}
+	team := strings.TrimSpace(req.Team)
+	if team == "" {
+		team = "@arvore/frontend"
+	} else if !strings.HasPrefix(team, "@") {
+		team = "@" + team
+	}
+
+	user := &entity.User{
+		GitHubID:       1001,
+		Login:          login,
+		Name:           name,
+		AvatarURL:      "https://avatars.githubusercontent.com/u/1001",
+		Teams:          []string{team, "@arvore/core-architects"},
+		EncryptedToken: req.GitHubToken,
+	}
+	if err := h.deps.UserRepo.Upsert(ctx, user); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token": "pf_sess_" + strconv.FormatUint(user.ID, 10) + "_" + strconv.FormatInt(time.Now().Unix(), 10),
+		"user":  user,
+	})
+}
+
+func (h *Handler) AuthMe(w http.ResponseWriter, r *http.Request) {
+	ctx, release := h.beginOperation(r)
+	defer release()
+
+	user, err := h.deps.UserRepo.GetByID(ctx, resolveUserID(r))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+func (h *Handler) AuthLogout(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logged_out": true})
+}
+
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx, release := h.beginOperation(r)
 	defer release()

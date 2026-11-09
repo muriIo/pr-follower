@@ -1,0 +1,81 @@
+<main class="pf-login-shell" aria-labelledby="pf-login-heading">
+  <section class="pf-login-card">
+    <header class="pf-login-head">
+      <div class="pf-login-brand">
+        <span class="pf-brand-mark" aria-hidden="true">PF</span>
+        <div class="pf-brand-text">
+          <strong>{{ 'app.title' | t }}</strong>
+          <span>{{ 'auth.subtitle' | t }}</span>
+        </div>
+        <button
+          type="button"
+          id="pf-login-locale-toggle"
+          class="pf-btn pf-btn-sm pf-mono"
+          (click)="toggleLocale()"
+        >
+          {{ localeStore.locale() === 'pt-BR' ? 'PT-BR' : 'EN-US' }}
+        </button>
+      </div>
+      <h1 id="pf-login-heading" class="pf-login-title">{{ 'auth.title' | t }}</h1>
+    </header>
+
+    <form class="pf-login-form" (submit)="onSubmit($event)">
+      <div class="pf-field">
+        <label class="pf-field-label" for="pf-login-handle">{{ 'auth.handleLabel' | t }}</label>
+        <input
+          id="pf-login-handle"
+          class="pf-input pf-mono"
+          type="text"
+          autocomplete="username"
+          [value]="loginHandle()"
+          [placeholder]="'auth.handlePlaceholder' | t"
+          (input)="onHandleInput($event)"
+        />
+      </div>
+
+      <div class="pf-field">
+        <label class="pf-field-label" for="pf-login-team">{{ 'auth.teamLabel' | t }}</label>
+        <input
+          id="pf-login-team"
+          class="pf-input pf-mono"
+          type="text"
+          [value]="teamHandle()"
+          (input)="onTeamInput($event)"
+        />
+      </div>
+
+      <div class="pf-field">
+        <span class="pf-field-label">{{ 'auth.quickPreset' | t }}</span>
+        <div class="pf-login-presets">
+          @for (preset of presets; track preset.login) {
+            <button
+              type="button"
+              class="pf-login-preset"
+              (click)="selectPreset(preset.login, preset.team)"
+            >
+              <span class="pf-mono">@{{ preset.login }}</span>
+              <span class="pf-mono">{{ preset.team }}</span>
+            </button>
+          }
+        </div>
+      </div>
+
+      @if (authStore.loginAction().idle) {
+        <button type="submit" id="pf-login-submit" class="pf-btn pf-btn-primary">
+          {{ 'auth.signIn' | t }}
+        </button>
+      }
+
+      <app-cancellable-action
+        [action]="authStore.loginAction()"
+        mode="header"
+        cancelButtonId="pf-login-cancel"
+      />
+    </form>
+
+    <footer class="pf-login-foot">
+      <app-status-dot dotClass="pf-dot pf-dot-ok" />
+      <span>GitHub App · CODEOWNERS &amp; Dependabot Radar</span>
+    </footer>
+  </section>
+</main>

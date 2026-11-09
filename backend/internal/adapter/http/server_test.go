@@ -96,6 +96,30 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 		t.Fatalf("expected 200 on /healthz, got %d", rec.Code)
 	}
 
+	// 1.5 Auth Login, Me & Logout
+	loginBody := bytes.NewBufferString(`{"login":"murilo","team":"@arvore/frontend"}`)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", loginBody)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/auth/login, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/auth/me, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/auth/logout, got %d: %s", rec.Code, rec.Body.String())
+	}
+
 	// 2. Demo Seed
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/demo/seed", nil)
 	rec = httptest.NewRecorder()

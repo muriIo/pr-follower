@@ -19,6 +19,10 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 	r.Get("/healthz", h.Healthz)
 
 	r.Route("/api/v1", func(api chi.Router) {
+		api.Post("/auth/login", h.AuthLogin)
+		api.Get("/auth/me", h.AuthMe)
+		api.Post("/auth/logout", h.AuthLogout)
+
 		api.Get("/workspace", h.GetWorkspace)
 		api.Get("/events/stream", h.ServeSSE)
 		api.Post("/demo/seed", h.SeedDemoData)

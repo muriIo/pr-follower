@@ -91,11 +91,20 @@
 
   <div class="pf-side-foot">
     <div class="pf-user">
-      <span class="pf-avatar" aria-hidden="true">M</span>
-      <span>@murilo</span>
+      <span class="pf-avatar" aria-hidden="true">{{ currentUser().avatarInitial }}</span>
+      <span>@{{ currentUser().login }}</span>
+      <button
+        type="button"
+        id="pf-logout-btn"
+        class="pf-logout-btn"
+        [title]="'auth.logoutTitle' | t"
+        (click)="authStore.logout()"
+      >
+        {{ 'auth.logout' | t }}
+      </button>
     </div>
     <div class="pf-user-tags">
-      <span class="pf-badge pf-tag">@arvore/frontend</span>
+      <span class="pf-badge pf-tag">{{ currentUser().primaryTeam }}</span>
       <button type="button" class="pf-badge pf-tag" (click)="toggleLocale()">
         {{ localeStore.locale() }}
       </button>

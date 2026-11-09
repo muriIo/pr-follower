@@ -63,6 +63,15 @@ const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
   'drawer.silenceCommit': 'Silenciar até próximo commit',
   'drawer.silenceCi': 'Silenciar até CI passar',
   'drawer.passToTeammate': 'Passar para colega',
+  'drawer.resize': 'Redimensionar painel',
+  'auth.subtitle': 'Triagem baseada em turno para CODEOWNERS e análise de impacto zero-clone para Dependabot.',
+  'auth.loginLabel': 'Usuário GitHub',
+  'auth.teamLabel': 'Time CODEOWNERS',
+  'auth.tokenLabel': 'Token GitHub (Opcional)',
+  'auth.submitGithub': 'Entrar com GitHub',
+  'auth.quickSeats': 'Acesso Rápido (Seats do Time)',
+  'auth.authenticating': 'Autenticando no GitHub...',
+  'auth.logout': 'Sair',
 };
 
 @Injectable({ providedIn: 'root' })

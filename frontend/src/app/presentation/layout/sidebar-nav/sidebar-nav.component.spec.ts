@@ -1,17 +1,32 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  AUTH_GATEWAY,
   LIVE_EVENT_GATEWAY,
   PULL_REQUEST_GATEWAY,
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
+import { createDefaultAuthenticatedUser } from '../../../domain/models/workspace.models';
+import { AuthStore } from '../../../application/stores/auth.store';
 import { SidebarNavComponent } from './sidebar-nav.component';
 
 describe('SidebarNavComponent', () => {
-  it('renders brand, SSE live connection status, perspective buttons, and switches locale', async () => {
+  it('renders brand, SSE live connection status, perspective buttons, switches locale, and triggers logout', async () => {
     TestBed.configureTestingModule({
       imports: [SidebarNavComponent],
       providers: [
+        AuthStore,
+        {
+          provide: AUTH_GATEWAY,
+          useValue: {
+            login: async () => createDefaultAuthenticatedUser(),
+            fetchCurrentUser: async () => createDefaultAuthenticatedUser(),
+            logout: vi.fn(async () => undefined),
+            loadStoredSession: () => createDefaultAuthenticatedUser(),
+            saveStoredSession: () => undefined,
+            clearStoredSession: vi.fn(),
+          },
+        },
         {
           provide: PULL_REQUEST_GATEWAY,
           useValue: {
@@ -39,6 +54,9 @@ describe('SidebarNavComponent', () => {
       ],
     });
 
+    const authStore = TestBed.inject(AuthStore);
+    const logoutSpy = vi.spyOn(authStore, 'logout');
+
     const fixture = TestBed.createComponent(SidebarNavComponent);
     fixture.detectChanges();
 
@@ -56,5 +74,10 @@ describe('SidebarNavComponent', () => {
     await new Promise((r) => setTimeout(r, 5));
     fixture.detectChanges();
     expect(fixture.componentInstance.localeStore.locale()).toBe('en-US');
+
+    const logoutBtn = el.querySelector('#pf-logout-btn') as HTMLButtonElement;
+    expect(logoutBtn).toBeTruthy();
+    logoutBtn.click();
+    expect(logoutSpy).toHaveBeenCalled();
   });
 });

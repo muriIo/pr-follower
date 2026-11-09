@@ -100,6 +100,44 @@ export interface WorkspaceDataset {
   readonly silencedMap?: Record<number, string>;
 }
 
+export interface AuthenticatedUser {
+  readonly id: number;
+  readonly login: string;
+  readonly name: string;
+  readonly avatarInitial: string;
+  readonly primaryTeam: string;
+  readonly teams: readonly string[];
+  readonly token: string;
+}
+
+export interface LoginCredentials {
+  readonly login: string;
+  readonly team: string;
+  readonly githubToken?: string;
+}
+
+export function createDefaultAuthenticatedUser(
+  login: string = 'murilo',
+  team: string = '@arvore/frontend',
+  token: string = 'pf_sess_default',
+): AuthenticatedUser {
+  const cleanLogin = login.replace(/^@/, '').trim() || 'murilo';
+  const cleanTeam = team.trim()
+    ? team.trim().startsWith('@')
+      ? team.trim()
+      : `@${team.trim()}`
+    : '@arvore/frontend';
+  return {
+    id: 1,
+    login: cleanLogin,
+    name: cleanLogin.charAt(0).toUpperCase() + cleanLogin.slice(1),
+    avatarInitial: cleanLogin.charAt(0).toUpperCase(),
+    primaryTeam: cleanTeam,
+    teams: [cleanTeam, '@arvore/core-architects'],
+    token,
+  };
+}
+
 export function computeSemverBumpLabel(fromVersion: string, toVersion: string): 'Major' | 'Minor' | 'Patch' {
   const fromParts = fromVersion.split('.');
   const toParts = toVersion.split('.');

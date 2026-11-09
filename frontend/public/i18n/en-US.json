@@ -59,5 +59,14 @@
   "drawer.silence": "Snooze",
   "drawer.silenceCommit": "Snooze until next commit",
   "drawer.silenceCi": "Snooze until CI passes",
-  "drawer.passToTeammate": "Pass to teammate"
+  "drawer.passToTeammate": "Pass to teammate",
+  "drawer.resize": "Resize panel",
+  "auth.subtitle": "Turn-based CODEOWNERS triage and zero-clone Dependabot blast-radius analysis.",
+  "auth.loginLabel": "GitHub Handle",
+  "auth.teamLabel": "CODEOWNERS Team",
+  "auth.tokenLabel": "GitHub Token (Optional)",
+  "auth.submitGithub": "Sign in with GitHub",
+  "auth.quickSeats": "Quick Access (Team Seats)",
+  "auth.authenticating": "Authenticating with GitHub...",
+  "auth.logout": "Sign out"
 }

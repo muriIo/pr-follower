@@ -1,30 +1,36 @@
-<div
-  class="pf-app"
-  [class.has-drawer]="store.selectedPrId() !== null"
-  (keydown.escape)="store.handleEscapeKey()"
->
-  <app-sidebar-nav />
+@if (!authStore.isAuthenticated()) {
+  <app-login-view />
+} @else {
+  <div
+    class="pf-app"
+    [class.has-drawer]="store.selectedPrId() !== null"
+    [class.is-resizing]="store.isResizingDrawer()"
+    [style.--pf-dw.px]="store.drawerWidth()"
+    (keydown.escape)="store.handleEscapeKey()"
+  >
+    <app-sidebar-nav />
 
-  <main class="pf-main">
-    <div class="pf-canvas" [class.pf-canvas-narrow]="store.view() !== 'seats'">
-      @switch (store.view()) {
-        @case ('seats') {
-          <app-seats-view />
+    <main class="pf-main">
+      <div class="pf-canvas" [class.pf-canvas-narrow]="store.view() !== 'seats'">
+        @switch (store.view()) {
+          @case ('seats') {
+            <app-seats-view />
+          }
+          @case ('inbox') {
+            <app-codeowners-inbox-view />
+          }
+          @case ('radar') {
+            <app-dependabot-radar-view />
+          }
+          @case ('timeline') {
+            <app-timeline-view />
+          }
         }
-        @case ('inbox') {
-          <app-codeowners-inbox-view />
-        }
-        @case ('radar') {
-          <app-dependabot-radar-view />
-        }
-        @case ('timeline') {
-          <app-timeline-view />
-        }
-      }
-    </div>
-  </main>
+      </div>
+    </main>
 
-  @if (store.drawer(); as d) {
-    <app-inspection-drawer [drawer]="d" />
-  }
-</div>
+    @if (store.drawer(); as d) {
+      <app-inspection-drawer [drawer]="d" />
+    }
+  </div>
+}
