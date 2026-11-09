@@ -1,5 +1,20 @@
-<aside class="pf-drawer" aria-label="Inspeção do PR">
-  <div class="pf-resize" role="separator" aria-orientation="vertical">
+<aside class="pf-drawer" aria-label="Inspeção do PR" [style.--pf-dw.px]="store.drawerWidth()">
+  <div
+    id="pf-drawer-resize"
+    class="pf-resize"
+    role="separator"
+    tabindex="0"
+    aria-orientation="vertical"
+    [attr.aria-label]="'drawer.resize' | t"
+    [attr.aria-valuemin]="420"
+    [attr.aria-valuenow]="store.drawerWidth()"
+    (pointerdown)="onResizeStart($event)"
+    (pointermove)="onResizeMove($event)"
+    (pointerup)="onResizeEnd($event)"
+    (pointercancel)="onResizeEnd($event)"
+    (dblclick)="store.resetDrawerWidth()"
+    (keydown)="onResizeKeydown($event)"
+  >
     <span class="pf-grip" aria-hidden="true">
       <svg width="6" height="14" viewBox="0 0 6 14" fill="currentColor">
         <circle cx="1.25" cy="2" r="1"></circle>

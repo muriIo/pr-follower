@@ -185,7 +185,8 @@ export class WorkspaceStore {
   readonly view = signal<PerspectiveView>('seats');
   readonly selectedPrId = signal<number | null>(null);
   readonly closingDrawer = signal(false);
-  readonly drawerWidth = signal(560);
+  readonly drawerWidth = signal(this.loadInitialDrawerWidth());
+  readonly isResizingDrawer = signal(false);
   readonly seatFilter = signal<SeatFilterType>('todos');
   readonly showMuted = signal(true);
   readonly mergedMap = signal<Record<number, boolean>>({});
@@ -626,6 +627,51 @@ export class WorkspaceStore {
   closeDrawer(): void {
     this.selectedPrId.set(null);
     this.closingDrawer.set(false);
+    this.isResizingDrawer.set(false);
+  }
+
+  startDrawerResize(): void {
+    this.isResizingDrawer.set(true);
+  }
+
+  setDrawerWidth(nextPx: number, maxPx: number = 960): void {
+    const minPx = 420;
+    const effectiveMax = Math.max(minPx, maxPx);
+    const clamped = Math.round(Math.min(effectiveMax, Math.max(minPx, nextPx)));
+    this.drawerWidth.set(clamped);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('pf-drawer-w', String(clamped));
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+  }
+
+  stepDrawerWidth(deltaPx: number, maxPx: number = 960): void {
+    this.setDrawerWidth(this.drawerWidth() + deltaPx, maxPx);
+  }
+
+  resetDrawerWidth(): void {
+    this.setDrawerWidth(560, 960);
+  }
+
+  endDrawerResize(): void {
+    this.isResizingDrawer.set(false);
+  }
+
+  private loadInitialDrawerWidth(): number {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const saved = Number(localStorage.getItem('pf-drawer-w'));
+        if (Number.isFinite(saved) && saved >= 420 && saved <= 1200) {
+          return Math.round(saved);
+        }
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+    return 560;
   }
 
   selectTreeNode(idx: number): void {

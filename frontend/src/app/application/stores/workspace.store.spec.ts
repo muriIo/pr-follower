@@ -117,4 +117,44 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     expect(store.batchAction().running).toBe(false);
     expect(store.batchAction().note).toContain('Lote cancelado');
   });
+
+  it('supports docked inspection drawer resizing, clamping, keyboard stepping, and reset', () => {
+    const { prGateway, sseGateway } = createFakeGateways();
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+
+    const store = TestBed.inject(WorkspaceStore);
+    store.resetDrawerWidth();
+    expect(store.drawerWidth()).toBe(560);
+    expect(store.isResizingDrawer()).toBe(false);
+
+    store.startDrawerResize();
+    expect(store.isResizingDrawer()).toBe(true);
+
+    store.setDrawerWidth(680, 900);
+    expect(store.drawerWidth()).toBe(680);
+
+    // Clamps below minimum (420px) and above maximum
+    store.setDrawerWidth(300, 900);
+    expect(store.drawerWidth()).toBe(420);
+    store.setDrawerWidth(1200, 820);
+    expect(store.drawerWidth()).toBe(820);
+
+    store.endDrawerResize();
+    expect(store.isResizingDrawer()).toBe(false);
+
+    // Keyboard step & reset
+    store.resetDrawerWidth();
+    expect(store.drawerWidth()).toBe(560);
+    store.stepDrawerWidth(24, 900);
+    expect(store.drawerWidth()).toBe(584);
+    store.stepDrawerWidth(-48, 900);
+    expect(store.drawerWidth()).toBe(536);
+  });
 });

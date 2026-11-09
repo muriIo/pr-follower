@@ -56,4 +56,75 @@ describe('InspectionDrawerComponent', () => {
     closeBtn.click();
     expect(store.selectedPrId()).toBeNull();
   });
+
+  it('resizes the docked drawer via pointer drag, double-click reset, and keyboard arrows', () => {
+    TestBed.configureTestingModule({
+      imports: [InspectionDrawerComponent],
+      providers: [
+        WorkspaceStore,
+        {
+          provide: PULL_REQUEST_GATEWAY,
+          useValue: {
+            fetchWorkspace: async () => null,
+            approvePullRequest: async () => undefined,
+            mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
+            commentOnPullRequest: async () => undefined,
+            snoozePullRequest: async () => undefined,
+            cancelServerOperation: async () => undefined,
+          },
+        },
+        {
+          provide: LIVE_EVENT_GATEWAY,
+          useValue: {
+            connect: (_onEvent: unknown, onState: (s: 'conectado') => void) => {
+              onState('conectado');
+              return () => undefined;
+            },
+          },
+        },
+        {
+          provide: TRANSLATION_GATEWAY,
+          useValue: { loadDictionary: async () => ({}) },
+        },
+      ],
+    });
+
+    const store = TestBed.inject(WorkspaceStore);
+    store.resetDrawerWidth();
+    store.openPr(142);
+
+    const fixture = TestBed.createComponent(InspectionDrawerComponent);
+    fixture.componentRef.setInput('drawer', store.drawer()!);
+    fixture.detectChanges();
+
+    const el = fixture.nativeElement as HTMLElement;
+    const handle = el.querySelector('#pf-drawer-resize') as HTMLElement;
+    expect(handle).toBeTruthy();
+
+    // Pointer drag left by 120px (800 -> 680) widens right-docked drawer from 560px to 680px
+    handle.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 800, pointerId: 1, bubbles: true }));
+    expect(store.isResizingDrawer()).toBe(true);
+
+    handle.dispatchEvent(new PointerEvent('pointermove', { clientX: 680, pointerId: 1, bubbles: true }));
+    fixture.detectChanges();
+    expect(store.drawerWidth()).toBe(680);
+
+    handle.dispatchEvent(new PointerEvent('pointerup', { clientX: 680, pointerId: 1, bubbles: true }));
+    expect(store.isResizingDrawer()).toBe(false);
+
+    // Double-click resets to 560px
+    handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(store.drawerWidth()).toBe(560);
+
+    // Keyboard ArrowLeft (+24px), ArrowRight (-24px), Home (reset to 560px)
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(store.drawerWidth()).toBe(584);
+
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(store.drawerWidth()).toBe(560);
+
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(store.drawerWidth()).toBe(560);
+  });
 });
