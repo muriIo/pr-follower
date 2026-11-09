@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="utf-8">
+<title>PR Follower</title>
+<script src="ba9e87d4-f6cd-417b-ba83-ac7475c902f1"></script>
+<style>/* PR Follower: tokens e componentes compartilhados entre os artboards */
+:root {
+  --canvas: #0B0D11;
+  --surface: #12151C;
+  --surface-hover: #171B24;
+  --elevated: #161A23;
+  --border: #222734;
+  --focus: #3B82F6;
+  --text: #E6E8EE;
+  --text-2: #A3ACBD;
+  --text-3: #8791A5;
+  --emerald: #10B981;
+  --amber: #F59E0B;
+  --rose: #F43F5E;
+  --indigo: #6366F1;
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+button:disabled { cursor: default; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
+
+/* Estrutura */
+.pf-app { position: relative; display: flex; height: 100vh; min-height: 560px; overflow: hidden; background: var(--canvas); color: var(--text); font-family: var(--sans); font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.pf-side { flex: 0 0 240px; display: flex; flex-direction: column; gap: 24px; padding: 16px 12px; border-right: 1px solid var(--border); }
+.pf-main { flex: 1 1 0; min-width: 0; overflow-y: auto; container: pf-main / inline-size; }
+.pf-canvas { max-width: 1320px; margin: 0 auto; padding: 32px; display: flex; flex-direction: column; gap: 24px; }
+.pf-canvas-narrow { max-width: 880px; }
+
+/* Sidebar */
+.pf-brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.pf-brand svg { color: var(--text-2); }
+.pf-section { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-3); }
+.pf-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.pf-nav-group .pf-section { padding: 0 8px 8px; }
+.pf-nav { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 8px; border-radius: 6px; color: var(--text-2); transition: background-color .12s, color .12s; }
+.pf-nav:hover { background: var(--surface); color: var(--text); }
+.pf-nav.is-active { background: var(--surface-hover); color: var(--text); font-weight: 500; }
+.pf-nav svg { flex: none; }
+.pf-nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-count { flex: none; min-width: 20px; padding: 0 6px; border-radius: 10px; font-size: 11px; font-weight: 500; line-height: 18px; text-align: center; color: var(--text-2); background: var(--border); }
+.pf-count-turn { color: #fff; background: var(--indigo); }
+.pf-side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 12px; padding: 0 8px; }
+.pf-brand-block { display: flex; flex-direction: column; gap: 2px; }
+.pf-live { display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 12px; color: var(--text-2); }
+.pf-user { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pf-avatar { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; font-size: 11px; font-weight: 600; color: var(--text); background: var(--surface-hover); border: 1px solid var(--border); }
+.pf-user-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Pontos de status */
+.pf-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.pf-dot-ok { background: var(--emerald); }
+.pf-dot-warn { background: var(--amber); }
+.pf-dot-fail { background: var(--rose); }
+.pf-dot-turn { background: var(--indigo); }
+.pf-dot-pulse { animation: pf-pulse 2s ease-in-out infinite; }
+@keyframes pf-pulse { 50% { opacity: .35; } }
+
+/* Cabeçalho da perspectiva */
+.pf-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; min-height: 44px; }
+.pf-title { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; text-wrap: balance; }
+.pf-sub { color: var(--text-2); margin-top: 2px; }
+
+/* Botões e ações */
+.pf-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pf-btn { display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; font-weight: 500; white-space: nowrap; color: var(--text); background: var(--surface); transition: background-color .12s, border-color .12s; }
+.pf-btn:hover { background: var(--surface-hover); }
+.pf-btn:disabled, .pf-btn[aria-disabled="true"] { color: var(--text-3); background: transparent; cursor: not-allowed; }
+.pf-btn-primary { color: var(--canvas); background: var(--text); border-color: var(--text); }
+.pf-btn-primary:hover { background: #FFFFFF; border-color: #FFFFFF; }
+.pf-btn-primary:disabled, .pf-btn-primary[aria-disabled="true"] { color: var(--text-3); background: transparent; border-color: var(--border); }
+.pf-running { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
+.pf-spin { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--focus); animation: pf-rot .7s linear infinite; }
+@keyframes pf-rot { to { transform: rotate(360deg); } }
+.pf-note { color: var(--text-2); }
+.pf-note-ok { color: #34D399; }
+.pf-link { color: var(--text-2); font-size: 12px; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.pf-link:hover { color: var(--text); text-decoration-color: currentColor; }
+
+/* Selos */
+.pf-badge { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid; border-radius: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.pf-badge-baixo { color: #34D399; background: rgba(16, 185, 129, .10); border-color: rgba(16, 185, 129, .20); }
+.pf-badge-medio { color: #FBBF24; background: rgba(245, 158, 11, .10); border-color: rgba(245, 158, 11, .20); }
+.pf-badge-alto { color: #FB7185; background: rgba(244, 63, 94, .10); border-color: rgba(244, 63, 94, .20); }
+.pf-turn { color: #C7D2FE; background: rgba(99, 102, 241, .16); border-color: rgba(99, 102, 241, .35); }
+.pf-tag { color: var(--text-2); border-color: var(--border); }
+.pf-mono { font-family: var(--mono); font-size: 12px; }
+.pf-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; color: var(--text-3); font-size: 12px; min-width: 0; }
+
+/* Grid de Seats */
+.pf-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-filter { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 14px; font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--text-2); transition: background-color .12s, color .12s; }
+.pf-filter:hover { background: var(--surface); color: var(--text); }
+.pf-filter.is-active { color: var(--text); background: var(--surface-hover); border-color: var(--focus); }
+.pf-seats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+.pf-seat { display: flex; flex-direction: column; min-height: 272px; padding-bottom: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; transition: border-color .3s; }
+.pf-seat.is-fresh { border-color: var(--focus); }
+.pf-seat-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 12px 14px 10px; }
+.pf-seat-name { min-width: 0; font-size: 15px; font-weight: 500; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pf-seat-ci { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; white-space: nowrap; }
+.pf-ci-stable { color: #34D399; }
+.pf-kpis { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 10px; }
+.pf-badge-zero { color: var(--text-3); border-color: var(--border); }
+button.pf-badge:hover { filter: brightness(1.2); }
+.pf-seat-body { flex: 1; display: flex; flex-direction: column; padding: 8px 6px 0; border-top: 1px solid var(--border); }
+.pf-srow { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; border: 1px solid transparent; border-radius: 6px; transition: background-color .12s, opacity .12s; }
+.pf-srow:hover { background: var(--surface-hover); }
+.pf-srow.is-sel { border-color: var(--focus); background: var(--surface-hover); }
+.pf-srow.is-dim { opacity: .72; }
+.pf-srow.is-dim:hover, .pf-srow.is-dim:focus-within, .pf-srow.is-dim.is-sel { opacity: 1; }
+.pf-srow-open { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; }
+.pf-srow-act { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 8px 6px; }
+.pf-srow-act:empty { display: none; }
+.pf-btn-sm { height: 26px; padding: 0 8px; font-size: 12px; }
+.pf-srow .pf-spin { width: 12px; height: 12px; }
+.pf-srow-note { font-size: 12px; color: var(--text-2); }
+@container pf-main (max-width: 720px) { .pf-seats { grid-template-columns: minmax(0, 1fr); } }
+.pf-seat-empty { flex: 1; display: flex; align-items: center; padding: 0 8px; color: var(--text-3); }
+.pf-pr { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; transition: background-color .12s; }
+.pf-pr:hover { background: var(--surface-hover); }
+.pf-pr.is-sel { border-color: var(--focus); background: var(--surface-hover); }
+.pf-pr-title { color: var(--text); overflow-wrap: anywhere; }
+.pf-seat-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding: 9px 14px; margin-top: 6px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
+.pf-seat-foot .pf-grow { margin-left: auto; }
+.pf-ci-fail { color: #FB7185; }
+.pf-ci-warn { color: #FBBF24; }
+.pf-ci-ok { color: var(--text-3); }
+
+/* Listas de triagem */
+.pf-group { display: flex; flex-direction: column; gap: 8px; }
+.pf-list { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.pf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; width: 100%; min-height: 56px; padding: 10px 14px; border: 1px solid transparent; border-bottom-color: var(--border); transition: background-color .12s; }
+.pf-row:last-child { border-bottom-color: transparent; }
+.pf-row:hover { background: var(--surface-hover); }
+.pf-row.is-sel { border-color: var(--focus); background: var(--surface-hover); }
+.pf-row-main { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pf-row-side { flex: none; display: flex; align-items: center; gap: 12px; color: var(--text-3); font-size: 12px; }
+.pf-empty { padding: 48px 16px; text-align: center; color: var(--text-2); border: 1px solid var(--border); border-radius: 8px; }
+
+/* Minha Vez */
+.pf-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; color: var(--text-2); font-size: 12px; }
+.pf-toggle:hover { color: var(--text); }
+.pf-switch { flex: none; position: relative; width: 28px; height: 16px; border-radius: 8px; background: var(--border); transition: background-color .12s; }
+.pf-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-2); transition: transform .12s, background-color .12s; }
+.pf-toggle[aria-checked="true"] .pf-switch { background: var(--indigo); }
+.pf-toggle[aria-checked="true"] .pf-switch::after { transform: translateX(12px); background: #fff; }
+.pf-cards { display: flex; flex-direction: column; gap: 8px; }
+.pf-card { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; transition: background-color .12s, opacity .12s; }
+.pf-card:hover { background: var(--surface-hover); }
+.pf-card.is-sel { border-color: var(--focus); background: var(--surface-hover); }
+.pf-card.is-muted { opacity: .72; }
+.pf-card.is-muted:hover, .pf-card.is-muted:focus-visible, .pf-card.is-muted.is-sel { opacity: 1; }
+.pf-card-title { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.pf-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.pf-banner { padding: 10px 12px; border: 1px solid rgba(99, 102, 241, .35); border-radius: 8px; color: #C7D2FE; background: rgba(99, 102, 241, .10); }
+.pf-diff-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.pf-delta-add { color: #34D399; }
+.pf-delta-del { color: #FB7185; }
+.pf-gut { display: inline-block; width: 28px; margin-right: 10px; text-align: right; color: var(--text-3); user-select: none; }
+.pf-tk-hdr, .pf-tk-com { color: var(--text-3); }
+.pf-tk-kw { color: #A5B4FC; }
+.pf-tk-str { color: #FCD34D; }
+.pf-tk-type { color: #93C5FD; }
+.pf-tk-num { color: #FDBA74; }
+.pf-tk-add { color: #34D399; }
+.pf-tk-del { color: #FB7185; }
+.pf-btn-primary.pf-btn-busy[aria-disabled="true"] { cursor: progress; gap: 8px; color: var(--text); background: var(--surface-hover); border-color: var(--border); }
+.pf-btn-danger { color: #FB7185; background: transparent; border-color: transparent; }
+.pf-btn-danger:hover { background: rgba(244, 63, 94, .10); }
+a.pf-btn { text-decoration: none; }
+
+/* Radar: progresso do lote */
+.pf-batch-run { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pf-progress { flex: 1 1 100%; height: 4px; border-radius: 2px; overflow: hidden; background: var(--border); }
+.pf-progress span { display: block; height: 100%; background: var(--emerald); transition: width .3s; }
+.pf-batch-run .pf-running { flex: 1; color: var(--text); }
+
+/* Radar: drawer de impacto */
+.pf-rv { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid; border-radius: 8px; }
+.pf-rv-head { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; }
+.pf-rv p { color: var(--text); }
+.pf-rv-baixo { background: rgba(16, 185, 129, .10); border-color: rgba(16, 185, 129, .20); }
+.pf-rv-baixo .pf-rv-head { color: #34D399; }
+.pf-rv-medio { background: rgba(245, 158, 11, .10); border-color: rgba(245, 158, 11, .20); }
+.pf-rv-medio .pf-rv-head { color: #FBBF24; }
+.pf-rv-alto { background: rgba(244, 63, 94, .10); border-color: rgba(244, 63, 94, .20); }
+.pf-rv-alto .pf-rv-head { color: #FB7185; }
+.pf-tree { display: flex; flex-direction: column; align-items: flex-start; }
+.pf-tree-node { display: inline-flex; align-items: center; min-height: 32px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 16px; font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--surface); transition: background-color .12s; }
+.pf-tree-node:hover { background: var(--surface-hover); }
+.pf-tree-node.is-on { border-color: var(--focus); }
+.pf-node-baixo { color: #34D399; }
+.pf-node-medio { color: #FBBF24; }
+.pf-node-alto { color: #FB7185; }
+.pf-tree-link { position: relative; display: block; width: 1px; height: 18px; margin-left: 20px; background: var(--text-3); }
+.pf-tree-link::after { content: ""; position: absolute; left: -3px; bottom: 0; border: 3.5px solid transparent; border-bottom-width: 0; border-top: 5px solid var(--text-3); }
+.pf-tree-info { padding-top: 4px; color: var(--text-2); font-size: 12px; }
+button.pf-diff-head { width: 100%; }
+button.pf-diff-head:hover { color: var(--text); background: var(--surface-hover); }
+.pf-chev { flex: none; transition: transform .12s; }
+.pf-chev.is-open { transform: rotate(180deg); }
+.pf-line-hit { color: var(--text); background: rgba(244, 63, 94, .12); }
+.pf-alert { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-2); background: var(--surface); }
+.pf-alert-warn { color: #FCD34D; background: rgba(245, 158, 11, .10); border-color: rgba(245, 158, 11, .20); }
+.pf-empty-note { color: var(--text-3); }
+
+/* Lote seguro */
+.pf-batch { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.pf-batch-text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 320px; min-width: 0; }
+.pf-batch-title { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+
+/* Linha do tempo */
+.pf-event { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 40px; padding: 8px 14px; border: 1px solid transparent; border-bottom-color: var(--border); transition: background-color .12s; }
+.pf-event:last-child { border-bottom-color: transparent; }
+.pf-event[aria-disabled="true"] { cursor: default; }
+.pf-event:not([aria-disabled="true"]):hover { background: var(--surface-hover); }
+.pf-event-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pf-event.is-new { animation: pf-in .35s ease-out; }
+@keyframes pf-in { from { background: var(--surface-hover); } }
+
+/* Drawer de inspeção */
+/* Painel acoplado: divide a largura com o canvas, sem sobrepor */
+.pf-drawer { position: relative; flex: 0 0 var(--pf-dw, 560px); display: flex; flex-direction: column; width: var(--pf-dw, 560px); max-width: calc(100% - 600px); min-height: 0; background: var(--elevated); border-left: 1px solid var(--border); animation: pf-dock-in .18s ease-out; }
+.pf-drawer.is-closing { animation: pf-dock-out .16s ease-in forwards; }
+@keyframes pf-dock-in { from { margin-right: calc(-1 * var(--pf-dw, 560px)); } }
+@keyframes pf-dock-out { to { margin-right: calc(-1 * var(--pf-dw, 560px)); } }
+.pf-drawer-head { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.pf-drawer-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-2); }
+.pf-drawer-title { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
+.pf-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-2); }
+.pf-close:hover { background: var(--surface-hover); color: var(--text); }
+.pf-drawer-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; padding: 20px; }
+.pf-drawer-sec { display: flex; flex-direction: column; gap: 8px; }
+.pf-verdict { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pf-signals { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.pf-signal { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+.pf-signal:last-child { border-bottom: 0; }
+.pf-signal-key { flex: 0 0 104px; color: var(--text-3); }
+.pf-signal-val { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pf-diff { border: 1px solid var(--border); border-radius: 8px; background: var(--canvas); overflow-x: auto; }
+.pf-diff-file { padding: 8px 12px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: nowrap; }
+.pf-hunk { padding: 6px 0; min-width: fit-content; }
+.pf-line { display: block; padding: 0 12px; font-family: var(--mono); font-size: 12px; line-height: 20px; white-space: pre; color: var(--text-2); }
+.pf-line-hdr { color: var(--text-3); }
+.pf-line-add { color: var(--text); background: rgba(16, 185, 129, .10); }
+.pf-line-del { color: var(--text); background: rgba(244, 63, 94, .10); }
+.pf-drawer-foot { display: flex; flex-direction: column; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+.pf-blocked { color: #FBBF24; }
+
+@media (pointer: coarse) {
+  .pf-btn, .pf-nav, .pf-close, .pf-filter { min-height: 44px; }
+  .pf-close { min-width: 44px; }
+}
+/* Janela estreita: a sidebar vira trilho de ícones para o painel continuar acoplado */
+@media (min-width: 761px) and (max-width: 1040px) {
+  .pf-app.has-drawer .pf-side { flex: 0 0 56px; align-items: center; padding: 16px 8px; }
+  .pf-app.has-drawer .pf-brand span, .pf-app.has-drawer .pf-live span:not(.pf-dot), .pf-app.has-drawer .pf-nav-group .pf-section, .pf-app.has-drawer .pf-count, .pf-app.has-drawer .pf-user span:not(.pf-avatar), .pf-app.has-drawer .pf-user-tags { display: none; }
+  .pf-app.has-drawer .pf-nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .pf-app.has-drawer .pf-nav { justify-content: center; width: 40px; padding: 0; }
+  .pf-app.has-drawer .pf-brand-block { align-items: center; gap: 8px; }
+  .pf-app.has-drawer .pf-brand, .pf-app.has-drawer .pf-live, .pf-app.has-drawer .pf-side-foot { padding: 0; }
+  .pf-app.has-drawer .pf-main { min-width: 300px; }
+  .pf-app.has-drawer .pf-drawer { flex: 0 1 var(--pf-dw, 560px); min-width: 360px; max-width: calc(100% - 356px); }
+}
+@media (max-width: 760px) {
+  .pf-app { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
+  .pf-side { flex: none; border-right: 0; border-bottom: 1px solid var(--border); }
+  .pf-side-foot { flex-direction: row; align-items: center; justify-content: space-between; }
+  .pf-main { overflow: visible; }
+  .pf-canvas { padding: 20px 16px; }
+  .pf-seats { grid-template-columns: minmax(0, 1fr); }
+  .pf-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 10; width: 100%; max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition: none !important; }
+  .pf-spin { animation: pf-rot 1.6s linear infinite !important; animation-iteration-count: infinite !important; animation-duration: 1.6s !important; }
+}
+
+/* Tooltips */
+[data-tip] { cursor: help; }
+button[data-tip], a[data-tip] { cursor: pointer; }
+button[aria-disabled="true"][data-tip] { cursor: not-allowed; }
+.pf-tooltip { position: fixed; z-index: 50; max-width: 260px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; line-height: 1.4; color: var(--text); background: #1E2330; box-shadow: 0 6px 18px rgba(0, 0, 0, .4); pointer-events: none; transform: translate(-50%, -100%); animation: pf-tip .1s ease-out; }
+.pf-tooltip.is-below { transform: translateX(-50%); }
+@keyframes pf-tip { from { opacity: 0; } }
+
+/* Raio de impacto com vários arquivos */
+.pf-blast-summary { color: var(--text-2); font-size: 12px; }
+.pf-blasts { display: flex; flex-direction: column; gap: 6px; }
+.pf-blast-test { opacity: .72; }
+.pf-blast-test:hover, .pf-blast-test:focus-within { opacity: 1; }
+button.pf-blast-head { white-space: normal; text-align: left; border-bottom-color: transparent; }
+.pf-blast-file { display: flex; align-items: flex-start; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.pf-blast-file .pf-chev { margin-top: 3px; }
+.pf-chev-r.is-open { transform: rotate(90deg); }
+.pf-blast-tags { flex: none; display: flex; align-items: center; gap: 6px; font-family: var(--sans); }
+.pf-blast-open .pf-hunk { border-top: 1px solid var(--border); }
+.pf-blast-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 2px; }
+
+/* Alça para redimensionar o painel */
+.pf-resize { position: absolute; top: 0; bottom: 0; left: -5px; z-index: 20; width: 10px; display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; }
+.pf-resize::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background-color .12s; }
+.pf-resize:hover::before, .pf-resize:focus-visible::before, .pf-app.is-resizing .pf-resize::before { background: var(--focus); }
+.pf-resize:focus-visible { outline: none; }
+.pf-grip { position: relative; display: flex; align-items: center; justify-content: center; width: 10px; height: 24px; border-radius: 3px; color: var(--text-3); background: var(--surface-hover); border: 1px solid var(--border); }
+.pf-resize:hover .pf-grip, .pf-resize:focus-visible .pf-grip, .pf-app.is-resizing .pf-grip { color: var(--text); border-color: var(--focus); }
+.pf-app.is-resizing { cursor: col-resize; user-select: none; }
+@media (max-width: 760px) { .pf-resize { display: none; } }
+</style>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>/* cyrillic-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwRGFWfOw.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwYGFWfOw.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwTGFWfOw.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwSGFWfOw.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("3503f28e-e91b-4be2-a76a-e844195ed215") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwRGFWfOw.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwYGFWfOw.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwTGFWfOw.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwSGFWfOw.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("3503f28e-e91b-4be2-a76a-e844195ed215") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwRGFWfOw.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwYGFWfOw.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwTGFWfOw.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwSGFWfOw.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("3503f28e-e91b-4be2-a76a-e844195ed215") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx3cwhsk.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxTcwhsk.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxPcwhsk.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx_cwhsk.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwhsk.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("210e08dd-de87-4711-8910-eb8ca9d14820") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx3cwhsk.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxTcwhsk.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxPcwhsk.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx_cwhsk.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwhsk.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("210e08dd-de87-4711-8910-eb8ca9d14820") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<style>body{margin:0}</style>
+</helmet>
+<div class="pf-app {{appCls}}" sc-camel-on-key-down="{{onKey}}" sc-camel-on-mouse-over="{{tipOver}}" sc-camel-on-mouse-out="{{tipOut}}" sc-camel-on-focus="{{tipFocus}}" sc-camel-on-blur="{{tipHide}}" sc-camel-on-mouse-down="{{tipHide}}" style="font-family: 'Geist', 'Inter', ui-sans-serif, system-ui, sans-serif; color: #E6E8EE; background: #0B0D11">
+
+  <nav class="pf-side" aria-label="Perspectivas">
+    <div class="pf-brand-block">
+      <div class="pf-brand">
+        <svg width="16" height="16" sc-camel-view-box="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="4" cy="3.5" r="1.75"></circle><circle cx="4" cy="12.5" r="1.75"></circle><circle cx="12" cy="12.5" r="1.75"></circle><path d="M4 5.25v5.5M12 10.75V7a2.5 2.5 0 0 0-2.5-2.5H8"></path></svg>
+        <span>PR Follower</span>
+      </div>
+      <div class="pf-live" role="status" data-tip="{{conn.tip}}"><span class="{{conn.dot}}"></span><span>{{conn.label}}</span></div>
+    </div>
+
+    <div class="pf-nav-group">
+      <div class="pf-section">Perspectivas</div>
+      <button class="pf-nav {{nav.inbox.cls}}" title="Minha Vez (CODEOWNERS)" aria-current="{{nav.inbox.cur}}" sc-camel-on-click="{{nav.inbox.go}}">
+        <svg width="16" height="16" sc-camel-view-box="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 9.5 4 3h8l2 6.5V13H2V9.5Z"></path><path d="M2 9.5h3.5l1 1.5h3l1-1.5H14"></path></svg>
+        <span class="pf-nav-label">Minha Vez (CODEOWNERS)</span>
+        <sc-if value="{{nav.inbox.has}}" hint-placeholder-val="{{true}}"><span class="pf-count pf-count-turn">{{nav.inbox.n}}</span></sc-if>
+      </button>
+      <button class="pf-nav {{nav.radar.cls}}" title="Radar Dependabot" aria-current="{{nav.radar.cur}}" sc-camel-on-click="{{nav.radar.go}}">
+        <svg width="16" height="16" sc-camel-view-box="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6"></circle><circle cx="8" cy="8" r="2.5"></circle><path d="M8 8l4-4"></path></svg>
+        <span class="pf-nav-label">Radar Dependabot</span>
+        <sc-if value="{{nav.radar.has}}" hint-placeholder-val="{{true}}"><span class="pf-count">{{nav.radar.n}}</span></sc-if>
+      </button>
+      <button class="pf-nav {{nav.seats.cls}}" title="Seats de Repositórios" aria-current="{{nav.seats.cur}}" sc-camel-on-click="{{nav.seats.go}}">
+        <svg width="16" height="16" sc-camel-view-box="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1"></rect><rect x="9" y="2" width="5" height="5" rx="1"></rect><rect x="2" y="9" width="5" height="5" rx="1"></rect><rect x="9" y="9" width="5" height="5" rx="1"></rect></svg>
+        <span class="pf-nav-label">Seats de Repositórios</span>
+        <sc-if value="{{nav.seats.has}}" hint-placeholder-val="{{true}}"><span class="pf-count">{{nav.seats.n}}</span></sc-if>
+      </button>
+      <button class="pf-nav {{nav.timeline.cls}}" title="Linha do Tempo" aria-current="{{nav.timeline.cur}}" sc-camel-on-click="{{nav.timeline.go}}">
+        <svg width="16" height="16" sc-camel-view-box="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h3"></path></svg>
+        <span class="pf-nav-label">Linha do Tempo</span>
+        <sc-if value="{{nav.timeline.has}}" hint-placeholder-val="{{false}}"><span class="pf-count">{{nav.timeline.n}}</span></sc-if>
+      </button>
+    </div>
+
+    <div class="pf-side-foot">
+      <div class="pf-user">
+        <span class="pf-avatar" aria-hidden="true">M</span>
+        <span>@murilo</span>
+      </div>
+      <div class="pf-user-tags">
+        <span class="pf-badge pf-tag">@arvore/frontend</span>
+        <span class="pf-badge pf-tag">PT-BR</span>
+      </div>
+    </div>
+  </nav>
+
+  <main class="pf-main" sc-camel-on-scroll="{{tipHide}}">
+    <div class="pf-canvas {{canvasCls}}">
+      <header class="pf-head">
+        <div>
+          <h1 class="pf-title">{{title}}</h1>
+          <sc-if value="{{hasSub}}" hint-placeholder-val="{{true}}"><p class="pf-sub">{{sub}}</p></sc-if>
+        </div>
+        <sc-if value="{{isInbox}}" hint-placeholder-val="{{false}}">
+          <button class="pf-toggle" data-tip="Inclui PRs fora da sua fila: aguardando autor, aprovados pelo time ou barrados pelo gate." role="switch" aria-checked="{{mutedChecked}}" sc-camel-on-click="{{toggleMuted}}">
+            <span class="pf-switch"></span>
+            <span>Mostrar PRs silenciados / aguardando autor ({{mutedToggleCount}})</span>
+          </button>
+        </sc-if>
+        <sc-if value="{{isSeats}}" hint-placeholder-val="{{true}}">
+          <div class="pf-actions" aria-live="polite">
+            <sc-if value="{{a.sync.idle}}" hint-placeholder-val="{{true}}"><button class="pf-btn" data-tip="Busca agora o estado dos PRs, sem esperar o próximo evento do SSE." sc-camel-on-click="{{runSync}}">Sincronizar</button></sc-if>
+            <sc-if value="{{a.sync.running}}" hint-placeholder-val="{{false}}">
+              <span class="pf-running"><span class="pf-spin"></span>{{a.sync.label}}</span>
+              <button class="pf-btn" sc-camel-on-click="{{a.sync.cancel}}">Cancelar</button>
+            </sc-if>
+            <sc-if value="{{a.sync.hasNote}}" hint-placeholder-val="{{false}}"><span class="{{a.sync.noteCls}}">{{a.sync.note}}</span></sc-if>
+            <button class="pf-btn pf-btn-primary" data-tip="Em breve: adicionar um repositório aos Seats.">+ Seguir Repositório</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{isTimeline}}" hint-placeholder-val="{{false}}">
+          <div class="pf-actions"><button class="pf-btn" data-tip="Para de inserir novos eventos na lista. Nada se perde: eles aparecem ao retomar." sc-camel-on-click="{{togglePause}}">{{pauseLabel}}</button></div>
+        </sc-if>
+      </header>
+
+      <sc-if value="{{isSeats}}" hint-placeholder-val="{{true}}">
+        <div class="pf-filters" role="group" aria-label="Filtrar repositórios">
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="3">
+            <button class="pf-filter {{f.cls}}" aria-pressed="{{f.pressed}}" sc-camel-on-click="{{f.pick}}">{{f.label}}</button>
+          </sc-for>
+        </div>
+
+        <div class="pf-seats">
+          <sc-for list="{{seats}}" as="s" hint-placeholder-count="4">
+            <article class="pf-seat {{s.cls}}">
+              <header class="pf-seat-head">
+                <h2 class="pf-seat-name">{{s.name}}</h2>
+                <span class="pf-badge pf-tag pf-mono" data-tip="Branch padrão do repositório.">{{s.branch}}</span>
+                <span class="pf-seat-ci {{s.ciCls}}" data-tip="{{s.ciTip}}"><span class="{{s.ciDot}}"></span>{{s.ciLabel}}</span>
+              </header>
+              <div class="pf-kpis">
+                <span class="pf-badge {{s.turnCls}}" data-tip="PRs que esperam sua revisão por CODEOWNERS neste repositório.">{{s.turn}} Sua Vez</span>
+                <button class="pf-badge {{s.depCls}}" data-tip="Abrir o Radar Dependabot." sc-camel-on-click="{{s.goRadar}}">{{s.deps}} Dependabot</button>
+                <span class="pf-badge pf-tag">{{s.openLabel}}</span>
+              </div>
+              <div class="pf-seat-body">
+                <sc-if value="{{s.isEmpty}}" hint-placeholder-val="{{false}}"><p class="pf-seat-empty">Nada aberto. Repositório em dia.</p></sc-if>
+                <sc-for list="{{s.stream}}" as="p" hint-placeholder-count="3">
+                  <div class="pf-srow {{p.sel}} {{p.dim}}">
+                    <button class="pf-srow-open" sc-camel-on-click="{{p.open}}">
+                      <span class="pf-pr-title"><span class="pf-mono" style="color: #A3ACBD">#{{p.id}}</span> {{p.title}}</span>
+                      <span class="pf-meta">
+                        <sc-if value="{{p.showTurn}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-turn">Sua Vez</span></sc-if>
+                        <sc-if value="{{p.hasOwn}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-tag" data-tip="Arquivos deste PR sob sua responsabilidade em CODEOWNERS.">{{p.ownLabel}}</span></sc-if>
+                        <sc-if value="{{p.showRisk}}" hint-placeholder-val="{{false}}"><span class="pf-badge {{p.vCls}}" data-tip="{{p.riskTip}}">{{p.riskLabel}}</span></sc-if>
+                        <sc-if value="{{p.isApproved}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-tag" data-tip="{{p.approvedTip}}">{{p.approvedLabel}}</span></sc-if>
+                      </span>
+                    </button>
+                    <sc-if value="{{p.hasQuick}}" hint-placeholder-val="{{false}}">
+                      <div class="pf-srow-act" aria-live="polite">
+                        <sc-if value="{{p.act.idle}}" hint-placeholder-val="{{true}}"><button class="pf-btn pf-btn-sm" data-tip="{{p.quickTip}}" sc-camel-on-click="{{p.quick}}">{{p.quickLabel}}</button></sc-if>
+                        <sc-if value="{{p.act.running}}" hint-placeholder-val="{{false}}">
+                          <span class="pf-spin" role="status" aria-label="{{p.act.label}}"></span>
+                          <button class="pf-btn pf-btn-sm" data-tip="Interrompe a ação. O que já foi enviado ao GitHub não é desfeito." sc-camel-on-click="{{p.act.cancel}}">Cancelar</button>
+                        </sc-if>
+                        <sc-if value="{{p.act.hasNote}}" hint-placeholder-val="{{false}}"><span class="pf-srow-note">{{p.act.note}}</span></sc-if>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </article>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{isInbox}}" hint-placeholder-val="{{false}}">
+        <sc-if value="{{inboxEmpty}}" hint-placeholder-val="{{false}}"><p class="pf-empty">Você está em dia. Nenhum PR espera sua ação.</p></sc-if>
+        <sc-if value="{{hasActive}}" hint-placeholder-val="{{true}}">
+          <section class="pf-group">
+            <h2 class="pf-section">Aguardando Sua Revisão — {{active.length}}</h2>
+            <div class="pf-cards">
+              <sc-for list="{{active}}" as="p" hint-placeholder-count="2">
+                <button class="pf-card {{p.sel}}" sc-camel-on-click="{{p.open}}">
+                  <span class="pf-mono" style="color: #A3ACBD">{{p.repo}} #{{p.id}}</span>
+                  <span class="pf-card-title">{{p.title}}</span>
+                  <span class="pf-meta">
+                    <span>{{p.authorLabel}}</span><span aria-hidden="true">•</span>
+                    <span class="{{p.ciTextCls}}">{{p.ciLabel}}</span><span aria-hidden="true">•</span>
+                    <span>Sem conflitos</span>
+                  </span>
+                  <span class="pf-tags">
+                    <sc-if value="{{p.hasPill}}" hint-placeholder-val="{{true}}"><span class="pf-badge pf-turn" data-tip="Você só precisa revisar os arquivos sob sua responsabilidade em CODEOWNERS.">{{p.ownPill}}</span></sc-if>
+                    <sc-if value="{{p.hasClaim}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-tag" data-tip="Quem assumiu esta revisão. Os colegas veem que ela já tem responsável.">{{p.claim}}</span></sc-if>
+                  </span>
+                </button>
+              </sc-for>
+            </div>
+          </section>
+        </sc-if>
+        <sc-if value="{{showMutedSection}}" hint-placeholder-val="{{true}}">
+          <section class="pf-group">
+            <h2 class="pf-section pf-section-muted">Silenciados pelo Gate ou Aprovados pelo Time — {{muted.length}}</h2>
+            <div class="pf-cards">
+              <sc-for list="{{muted}}" as="p" hint-placeholder-count="3">
+                <button class="pf-card is-muted {{p.sel}}" sc-camel-on-click="{{p.open}}">
+                  <span class="pf-mono" style="color: #A3ACBD">{{p.repo}} #{{p.id}}</span>
+                  <span class="pf-card-title">{{p.title}}</span>
+                  <span class="pf-tags"><span class="pf-badge pf-tag" data-tip="{{p.badgeTip}}">{{p.badge}}</span></span>
+                </button>
+              </sc-for>
+            </div>
+          </section>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{isRadar}}" hint-placeholder-val="{{false}}">
+        <sc-if value="{{batch.has}}" hint-placeholder-val="{{true}}">
+          <section class="pf-batch" aria-live="polite">
+            <div class="pf-batch-text">
+              <h2 class="pf-batch-title">{{batch.title}}</h2>
+            </div>
+            <sc-if value="{{a.batch.idle}}" hint-placeholder-val="{{true}}">
+              <div class="pf-actions">
+                <sc-if value="{{batch.canApprove}}" hint-placeholder-val="{{true}}"><button class="pf-btn pf-btn-primary" data-tip="Registra sua aprovação em cada PR do lote, sem mesclar." sc-camel-on-click="{{runBatchApprove}}">{{batch.approveLabel}}</button></sc-if>
+                <button class="pf-btn {{batch.mergeCls}}" aria-disabled="{{batch.mergeDis}}" data-tip="{{batch.mergeTip}}" sc-camel-on-click="{{runBatch}}">{{batch.mergeLabel}}</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{a.batch.running}}" hint-placeholder-val="{{false}}">
+              <div class="pf-batch-run">
+                <div class="pf-progress"><span style="width: {{a.batch.pct}}%"></span></div>
+                <span class="pf-running"><span class="pf-spin"></span>{{a.batch.label}}</span>
+                <button class="pf-btn" data-tip="Para antes do próximo PR. Os já processados não são desfeitos." sc-camel-on-click="{{a.batch.cancel}}">Cancelar Lote</button>
+              </div>
+            </sc-if>
+          </section>
+        </sc-if>
+        <sc-if value="{{a.batch.hasNote}}" hint-placeholder-val="{{false}}"><p class="{{a.batch.noteCls}}" role="status">{{a.batch.note}}</p></sc-if>
+        <sc-if value="{{radarEmpty}}" hint-placeholder-val="{{false}}"><p class="pf-empty">Nenhum PR do Dependabot aberto.</p></sc-if>
+        <sc-for list="{{radar}}" as="g" hint-placeholder-count="3">
+          <section class="pf-group">
+            <h2 class="pf-section">{{g.label}}</h2>
+            <div class="pf-cards">
+              <sc-for list="{{g.items}}" as="p" hint-placeholder-count="2">
+                <button class="pf-card {{p.sel}}" sc-camel-on-click="{{p.open}}">
+                  <span class="pf-mono" style="color: #A3ACBD">{{p.repo}} #{{p.id}}</span>
+                  <span class="pf-card-title">{{p.radarTitle}}</span>
+                  <span class="pf-meta"><span data-tip="{{p.metaTip}}">{{p.radarMeta}}</span><span class="{{p.ciTextCls}}">{{p.ciShort}}</span><sc-if value="{{p.approvedMine}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-badge-baixo">Aprovado por você</span></sc-if></span>
+                </button>
+              </sc-for>
+            </div>
+          </section>
+        </sc-for>
+      </sc-if>
+
+      <sc-if value="{{isTimeline}}" hint-placeholder-val="{{false}}">
+        <sc-for list="{{eventGroups}}" as="g" hint-placeholder-count="3">
+          <section class="pf-group">
+            <h2 class="pf-section">{{g.label}}</h2>
+            <div class="pf-list">
+              <sc-for list="{{g.items}}" as="e" hint-placeholder-count="3">
+                <button class="pf-event {{e.cls}}" aria-disabled="{{e.ariaDis}}" data-tip="{{e.tip}}" sc-camel-on-click="{{e.open}}">
+                  <span class="pf-mono" style="color: #8791A5">{{e.time}}</span>
+                  <span class="{{e.dot}}"></span>
+                  <span class="pf-event-text">{{e.text}}</span>
+                  <span class="pf-mono" style="color: #8791A5">{{e.repo}}</span>
+                </button>
+              </sc-for>
+            </div>
+          </section>
+        </sc-for>
+      </sc-if>
+    </div>
+  </main>
+
+  <sc-if value="{{hasDrawer}}" hint-placeholder-val="{{false}}">
+    <aside class="pf-drawer {{drawerCls}}" aria-label="Inspeção do PR">
+      <div class="pf-resize" role="separator" sc-camel-tab-index="0" aria-orientation="vertical" aria-label="Redimensionar painel" aria-valuemin="420" aria-valuenow="{{drawerW}}" data-tip="Arraste para ajustar a largura. Clique duas vezes para voltar ao padrão." sc-camel-on-pointer-down="{{resizeStart}}" sc-camel-on-pointer-move="{{resizeMove}}" sc-camel-on-pointer-up="{{resizeEnd}}" sc-camel-on-pointer-cancel="{{resizeEnd}}" sc-camel-on-double-click="{{resizeReset}}" sc-camel-on-key-down="{{resizeKey}}">
+        <span class="pf-grip" aria-hidden="true"><svg width="6" height="14" sc-camel-view-box="0 0 6 14" fill="currentColor"><circle cx="1.25" cy="2" r="1"></circle><circle cx="4.75" cy="2" r="1"></circle><circle cx="1.25" cy="7" r="1"></circle><circle cx="4.75" cy="7" r="1"></circle><circle cx="1.25" cy="12" r="1"></circle><circle cx="4.75" cy="12" r="1"></circle></svg></span>
+      </div>
+      <header class="pf-drawer-head">
+        <div class="pf-drawer-top">
+          <span class="pf-mono">{{d.repo}} #{{d.id}}</span>
+          <span class="pf-actions">
+            <a class="pf-btn pf-btn-sm" href="{{d.ghUrl}}" target="_blank" rel="noopener">Abrir no GitHub ↗</a>
+            <button id="pf-drawer-close" class="pf-close" aria-label="Fechar inspeção" sc-camel-on-click="{{close}}">
+              <svg width="14" height="14" sc-camel-view-box="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 2.5l9 9M11.5 2.5l-9 9"></path></svg>
+            </button>
+          </span>
+        </div>
+        <h2 class="pf-drawer-title">{{d.title}}</h2>
+      </header>
+
+      <div class="pf-drawer-body" sc-camel-on-scroll="{{tipHide}}">
+        <sc-if value="{{d.focused}}" hint-placeholder-val="{{true}}">
+          <p class="pf-banner">{{d.banner}}</p>
+        </sc-if>
+
+        <sc-if value="{{d.general}}" hint-placeholder-val="{{false}}">
+          <section class="pf-verdict">
+            <span class="pf-badge {{d.vCls}}">{{d.vLabel}}</span>
+            <p>{{d.why}}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">Sinais</h3>
+            <div class="pf-signals">
+              <sc-for list="{{d.signals}}" as="x" hint-placeholder-count="3">
+                <div class="pf-signal">
+                  <span class="pf-signal-key">{{x.k}}</span>
+                  <span class="{{x.dot}}"></span>
+                  <span class="pf-signal-val">{{x.v}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </sc-if>
+
+        <sc-if value="{{d.isDep}}" hint-placeholder-val="{{false}}">
+          <section class="pf-rv pf-rv-{{d.verdict}}">
+            <div class="pf-rv-head" data-tip="Nota de 0 a 100: tipo de atualização, produção ou dev, imports no seu código e estado do CI.">{{d.rvHead}}</div>
+            <p>{{d.rvDetail}}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">Árvore de Dependência</h3>
+            <div class="pf-tree">
+              <sc-for list="{{d.tree}}" as="n" hint-placeholder-count="3">
+                <sc-if value="{{n.hasLink}}" hint-placeholder-val="{{true}}"><span class="pf-tree-link" aria-hidden="true"></span></sc-if>
+                <button class="pf-tree-node {{n.cls}}" aria-pressed="{{n.pressed}}" sc-camel-on-click="{{n.pick}}">{{n.label}}</button>
+              </sc-for>
+            </div>
+            <p class="pf-tree-info">{{d.treeInfo}}</p>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">{{d.blastTitle}}</h3>
+            <sc-if value="{{d.hasSummary}}" hint-placeholder-val="{{false}}"><p class="pf-blast-summary">{{d.blastSummary}}</p></sc-if>
+            <sc-if value="{{d.hasBlast}}" hint-placeholder-val="{{true}}">
+              <div class="pf-blasts">
+                <sc-for list="{{d.blasts}}" as="b" hint-placeholder-count="1">
+                  <div class="pf-diff {{b.cls}}">
+                    <button class="pf-diff-head pf-blast-head" aria-expanded="{{b.expanded}}" sc-camel-on-click="{{b.toggle}}">
+                      <span class="pf-blast-file">
+                        <svg class="pf-chev pf-chev-r {{b.chevCls}}" width="12" height="12" sc-camel-view-box="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 3l3 3-3 3"></path></svg>
+                        <span>{{b.file}}</span>
+                      </span>
+                      <span class="pf-blast-tags">
+                        <sc-if value="{{b.hasUses}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-tag" data-tip="Quantas vezes o arquivo usa este pacote.">{{b.usesLabel}}</span></sc-if>
+                        <sc-if value="{{b.breaks}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-badge-alto" data-tip="Este arquivo usa uma API citada nas notas de quebra abaixo.">Usa API que quebra</span></sc-if>
+                      </span>
+                    </button>
+                    <sc-if value="{{b.isOpen}}" hint-placeholder-val="{{true}}">
+                      <div class="pf-hunk">
+                        <sc-for list="{{b.lines}}" as="l" hint-placeholder-count="5"><span class="pf-line {{l.cls}}"><span class="pf-gut">{{l.n}}</span><sc-for list="{{l.tokens}}" as="t" hint-placeholder-count="1"><span class="{{t.cls}}">{{t.s}}</span></sc-for></span></sc-for>
+                      </div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+              <sc-if value="{{d.hasBlastFoot}}" hint-placeholder-val="{{false}}">
+                <div class="pf-blast-foot">
+                  <sc-if value="{{d.hasMore}}" hint-placeholder-val="{{true}}"><button class="pf-link" sc-camel-on-click="{{d.showMore}}">{{d.moreLabel}}</button></sc-if>
+                  <button class="pf-link" style="margin-left: auto" sc-camel-on-click="{{d.toggleAll}}">{{d.allLabel}}</button>
+                </div>
+              </sc-if>
+            </sc-if>
+            <sc-if value="{{d.noBlast}}" hint-placeholder-val="{{false}}"><p class="pf-empty-note">Nenhum import deste pacote no seu código de produção.</p></sc-if>
+          </section>
+
+          <section class="pf-drawer-sec">
+            <h3 class="pf-section">Notas de Quebra &amp; CVEs</h3>
+            <p class="pf-alert {{d.noteCls}}">{{d.note}}</p>
+          </section>
+        </sc-if>
+
+        <sc-if value="{{d.showDiff}}" hint-placeholder-val="{{true}}">
+          <section class="pf-diff">
+            <header class="pf-diff-head">
+              <span>{{d.diffFile}}</span>
+              <sc-if value="{{d.hasDelta}}" hint-placeholder-val="{{true}}"><span><span class="pf-delta-add">{{d.deltaAdd}}</span> <span class="pf-delta-del">{{d.deltaDel}}</span></span></sc-if>
+            </header>
+            <div class="pf-hunk">
+              <sc-for list="{{d.lines}}" as="l" hint-placeholder-count="8"><span class="pf-line {{l.cls}}"><span class="pf-gut">{{l.n}}</span><sc-for list="{{l.tokens}}" as="t" hint-placeholder-count="1"><span class="{{t.cls}}">{{t.s}}</span></sc-for></span></sc-for>
+            </div>
+          </section>
+        </sc-if>
+      </div>
+
+      <footer class="pf-drawer-foot" aria-live="polite">
+        <sc-if value="{{d.showIdle}}" hint-placeholder-val="{{true}}">
+          <sc-if value="{{d.blocked}}" hint-placeholder-val="{{false}}"><p class="{{d.blockedCls}}">{{d.blockedText}}</p></sc-if>
+          <div class="pf-actions">
+            <sc-if value="{{d.showApprove}}" hint-placeholder-val="{{true}}"><button class="pf-btn pf-btn-primary" data-tip="Registra sua aprovação sem mesclar o PR." sc-camel-on-click="{{d.approve}}">Aprovar</button></sc-if>
+            <sc-if value="{{d.approvedMine}}" hint-placeholder-val="{{false}}"><span class="pf-badge pf-badge-baixo">Aprovado por você</span></sc-if>
+            <button class="pf-btn {{d.mergeCls}}" aria-disabled="{{d.mergeDis}}" data-tip="{{d.mergeTip}}" sc-camel-on-click="{{d.merge}}">Mesclar via squash</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{d.act.running}}" hint-placeholder-val="{{false}}">
+          <div class="pf-actions">
+            <button class="pf-btn pf-btn-primary pf-btn-busy" aria-disabled="true" aria-busy="true" data-tip="Ação em andamento. Use Cancelar (Esc) para interromper."><span class="pf-spin"></span>{{d.act.label}}</button>
+            <button id="pf-drawer-cancel" class="pf-btn pf-btn-danger" data-tip="Interrompe a ação. O que já foi enviado ao GitHub não é desfeito." sc-camel-on-click="{{d.act.cancel}}">Cancelar (Esc)</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{d.act.hasNote}}" hint-placeholder-val="{{false}}"><p class="{{d.act.noteCls}}">{{d.act.note}}</p></sc-if>
+        <sc-if value="{{d.showMerged}}" hint-placeholder-val="{{false}}"><p class="pf-note pf-note-ok">Este PR já foi mesclado.</p></sc-if>
+        <sc-if value="{{d.showSecondary}}" hint-placeholder-val="{{true}}">
+          <sc-if value="{{d.isDep}}" hint-placeholder-val="{{false}}">
+            <div class="pf-actions">
+              <button class="pf-btn pf-mono" aria-disabled="{{d.busyDis}}" data-tip="{{d.tips.rebase}}" sc-camel-on-click="{{d.rebase}}">@dependabot rebase</button>
+              <button class="pf-btn pf-mono" aria-disabled="{{d.busyDis}}" data-tip="{{d.tips.recreate}}" sc-camel-on-click="{{d.recreate}}">@dependabot recreate</button>
+              <button class="pf-btn" aria-disabled="{{d.busyDis}}" data-tip="{{d.tips.silence}}" sc-camel-on-click="{{d.silence}}">Silenciar</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{d.notDep}}" hint-placeholder-val="{{true}}">
+            <div class="pf-actions">
+              <button class="pf-btn" aria-disabled="{{d.busyDis}}" data-tip="{{d.tips.silenceCommit}}" sc-camel-on-click="{{d.silenceCommit}}">Silenciar até próximo commit</button>
+              <button class="pf-btn" aria-disabled="{{d.busyDis}}" data-tip="{{d.tips.silenceCi}}" sc-camel-on-click="{{d.silenceCi}}">Silenciar até CI passar</button>
+              <button class="pf-btn" aria-disabled="true" data-tip="Em breve: escolher um colega para assumir esta revisão.">Passar para colega</button>
+            </div>
+          </sc-if>
+        </sc-if>
+      </footer>
+    </aside>
+  </sc-if>
+
+  <sc-if value="{{hasTip}}" hint-placeholder-val="{{false}}">
+    <div class="pf-tooltip {{tip.cls}}" role="tooltip" style="left: {{tip.x}}px; top: {{tip.y}}px">{{tip.text}}</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;visaoInicial&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;seats&quot;,&quot;inbox&quot;,&quot;radar&quot;,&quot;timeline&quot;],&quot;default&quot;:&quot;seats&quot;,&quot;section&quot;:&quot;Estado&quot;},&quot;conexao&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;conectado&quot;,&quot;reconectando&quot;,&quot;desconectado&quot;],&quot;default&quot;:&quot;conectado&quot;,&quot;section&quot;:&quot;Estado&quot;},&quot;aoVivo&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;sim&quot;,&quot;nao&quot;],&quot;default&quot;:&quot;sim&quot;,&quot;section&quot;:&quot;Estado&quot;},&quot;prInicial&quot;:{&quot;editor&quot;:null},&quot;acaoEmVoo&quot;:{&quot;editor&quot;:null},&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  constructor(...args) {
+    super(...args);
+    const props = this.props || args[0] || {};
+    this.ctrls = {};
+    this.timers = new Set();
+    this.liveIdx = 0;
+    this.prs = this.buildPrs();
+    this.repos = [
+      { name: 'arvore/hive-web', branch: 'main' },
+      { name: 'arvore/checkout-api', branch: 'main' },
+      { name: 'arvore/design-system', branch: 'main' },
+      { name: 'arvore/auth-service', branch: 'main' }
+    ];
+    const selected = props.prInicial ? Number(props.prInicial) : null;
+    const acts = {};
+    if (props.acaoEmVoo === 'merge' && selected) acts['merge:' + selected] = { status: 'running', label: 'Aprovando PR...' };
+    if (props.acaoEmVoo === 'batch') acts.batch = { status: 'running', label: 'Mesclando 2 de 4...', pct: 50 };
+    this.state = {
+      view: props.visaoInicial || 'seats',
+      selected,
+      merged: {},
+      ciOver: {},
+      acts,
+      events: this.seedEvents(),
+      unread: 0,
+      seatFilter: 'todos',
+      silenced: {},
+      drawerW: 560,
+      approved: {},
+      showMuted: true,
+      treeNode: null,
+      blastOpen: { 0: true },
+      blastAll: false,
+      paused: false,
+      fresh: null
+    };
+  }
+
+  componentDidMount() {
+    this.tick = setInterval(() => this.liveStep(), 7000);
+    let saved = null;
+    try { saved = Number(localStorage.getItem('pf-drawer-w')); } catch (e) { /* armazenamento indisponível: usa o padrão */ }
+    if (saved) this.commitWidth(saved, false);
+    if (this.state.selected) this.focusDrawer(this.isBusy(this.state) ? 'pf-drawer-cancel' : 'pf-drawer-close');
+  }
+
+  isBusy(s) {
+    const a = s.selected && s.acts['merge:' + s.selected];
+    return !!a && a.status === 'running';
+  }
+
+  focusDrawer(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    this.tipMuted = true;
+    el.focus({ preventScroll: true });
+    this.tipMuted = false;
+  }
+
+  /* Largura do painel: aplicada direto na variável CSS para o arraste ficar fluido */
+  rootEl() {
+    return document.querySelector('.pf-app');
+  }
+
+  applyWidth(px) {
+    const root = this.rootEl();
+    if (!root) return px;
+    const side = root.querySelector('.pf-side');
+    const max = Math.max(420, root.clientWidth - (side ? side.offsetWidth : 240) - 360);
+    const w = Math.round(Math.min(Math.max(px, 420), max));
+    root.style.setProperty('--pf-dw', w + 'px');
+    this.dragW = w;
+    return w;
+  }
+
+  commitWidth(px, save) {
+    const w = this.applyWidth(px);
+    this.setState({ drawerW: w });
+    if (save) { try { localStorage.setItem('pf-drawer-w', String(w)); } catch (e) { /* preferência só desta sessão */ } }
+  }
+
+  /* Tooltip único em position: fixed, para não ser cortado pelas áreas com rolagem */
+  showTip(el) {
+    clearTimeout(this.tipTimer);
+    this.tipEl = el;
+    this.tipTimer = setTimeout(() => {
+      if (this.tipEl !== el || !el.isConnected) return;
+      const r = el.getBoundingClientRect();
+      const below = r.top < 56;
+      this.setState({ tip: {
+        text: el.getAttribute('data-tip'),
+        x: Math.round(Math.min(Math.max(r.left + r.width / 2, 140), window.innerWidth - 140)),
+        y: Math.round(below ? r.bottom + 6 : r.top - 6),
+        cls: below ? 'is-below' : ''
+      } });
+    }, 250);
+  }
+
+  hideTip() {
+    clearTimeout(this.tipTimer);
+    this.tipEl = null;
+    if (this.state.tip) this.setState({ tip: null });
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.tick);
+    clearTimeout(this.tipTimer);
+    this.timers.forEach(clearTimeout);
+    Object.values(this.ctrls).forEach((c) => c.abort());
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    if (prevProps.visaoInicial !== this.props.visaoInicial && this.props.visaoInicial) this.setState({ view: this.props.visaoInicial });
+    if (!prevState.selected && this.state.selected) this.focusDrawer('pf-drawer-close');
+    /* O botão clicado some durante a ação: o foco acompanha para o Esc continuar funcionando */
+    const was = this.isBusy(prevState);
+    const is = this.isBusy(this.state);
+    if (!was && is) this.focusDrawer('pf-drawer-cancel');
+    if (was && !is) this.focusDrawer('pf-drawer-close');
+  }
+
+  later(fn, ms) {
+    const t = setTimeout(() => { this.timers.delete(t); fn(); }, ms);
+    this.timers.add(t);
+  }
+
+  /* Dados de exemplo. rank define a ordem no mini stream do Seat. */
+  buildPrs() {
+    const hdr = (s) => ({ t: 'hdr', s });
+    const ctx = (s) => ({ t: 'ctx', s: '  ' + s });
+    const add = (s) => ({ t: 'add', s: '+ ' + s });
+    const del = (s) => ({ t: 'del', s: '- ' + s });
+    const human = [
+      { id: 142, rank: 1, repo: 'arvore/hive-web', title: 'feat(seats): add real-time CI status pulse to repo tiles', seatTitle: 'feat(seats): add real-time CI status pulse', author: '@bianca-dev', branch: 'feat/seat-ci-pulse', verdict: 'baixo', ci: 'ok', ciText: '12 de 12 checks passaram', owners: 'voce', ownersText: 'Você é dono de 1 arquivo', size: '14 arquivos', turn: true, ownFiles: 1, ownPill: '🎯 Toca apenas 1 arquivo seu (de 14 no PR)', claim: 'Assumido por @murilo', why: 'Mudança pequena e visual, limitada ao componente do Seat e coberta por testes.', file: 'src/app/features/seats-grid/seat-card.component.ts', deltaAdd: '+24', deltaDel: '-3', focusRule: '/src/app/ (@murilo, @arvore/frontend)', hunk: [hdr('@@ -18,6 +18,27 @@ export class SeatCardComponent {'), ctx('readonly repo = input.required<Repo>();'), ctx('private readonly ci = inject(CiStatusStore);'), ctx(''), del('readonly status = computed(() => this.ci.get(this.repo().name));'), del('readonly tone = computed(() => toneOf(this.status()));'), del('readonly label = computed(() => labelOf(this.status()));'), add('readonly status = toSignal('), add('  this.ci.watch(this.repo().name),'), add('  { initialValue: UNKNOWN_STATUS },'), add(');'), add(''), add('readonly tone = computed(() => toneOf(this.status()));'), add('readonly label = computed(() => labelOf(this.status()));'), add('readonly pulsing = signal(false);'), add(''), add('private pulseTimer?: number;'), add(''), add('constructor() {'), add('  effect(() => {'), add('    if (this.status().changedAt) {'), add('      this.startPulse();'), add('    }'), add('  });'), add('}'), add(''), add('private startPulse(): void {'), add('  this.pulsing.set(true);'), add('  clearTimeout(this.pulseTimer);'), add('  this.pulseTimer = window.setTimeout(() => this.pulsing.set(false), PULSE_MS);'), add('}')] },
+      { id: 139, rank: 3, repo: 'arvore/hive-web', title: 'refactor(auth): token refresh', author: 'tiago-melo', branch: 'refactor/token-refresh', verdict: 'medio', ci: 'ok', ciText: '12 de 12 checks passaram', owners: 'ok', ownersText: 'Aprovado por @bianca', size: '4 arquivos, +88 −61', turn: false, approvedBy: '@bianca', why: 'Reorganiza a renovação de token sem alterar o contrato da API. Já aprovado pelo time.', file: 'src/auth/refresh.ts', hunk: [hdr('@@ -9,3 +9,3 @@ export async function refresh() {'), del('const res = await post("/token", old);'), add('const res = await tokenClient.renew(old);'), ctx('return store(res);')] },
+      { id: 412, rank: 1, repo: 'arvore/checkout-api', title: 'fix(pix): idempotency key on retries', author: '@ana-prado', branch: 'fix/pix-idempotency', verdict: 'medio', ci: 'ok', ciText: '14 de 14 checks passaram', owners: 'voce', ownersText: 'Você é dono de 2 arquivos', size: '6 arquivos, +118 −37', turn: true, ownFiles: 2, ownPill: '🎯 Toca 2 arquivos seus (de 6 no PR)', deltaAdd: '+2', deltaDel: '-1', focusRule: '/src/payments/ (@murilo, @arvore/backend)', why: 'Boa cobertura de testes, mas altera o caminho de pagamento em produção.', file: 'src/payments/pix.ts', hunk: [hdr('@@ -58,3 +58,4 @@ async function charge(order) {'), del('return gateway.pix(order);'), add('const key = idempotencyKey(order.id);'), add('return gateway.pix(order, { key });')] },
+      { id: 408, rank: 3, repo: 'arvore/checkout-api', title: 'feat(cart): persist applied coupons', author: 'diego-ramos', branch: 'feat/persist-coupons', verdict: 'baixo', ci: 'ok', ciText: '14 de 14 checks passaram', owners: 'ok', ownersText: 'Aprovado por @rafael', size: '2 arquivos, +31 −4', turn: false, approvedBy: '@rafael', why: 'Mudança aditiva e isolada no carrinho. Já aprovada pelo time.', file: 'src/cart/coupons.ts', hunk: [hdr('@@ -5,2 +5,3 @@'), ctx('cart.coupons.push(coupon);'), add('await repo.save(cart);')] },
+      { id: 57, rank: 1, repo: 'arvore/design-system', title: 'feat(tokens): add drawer elevation', author: 'carla-nunes', branch: 'feat/elevation-drawer', verdict: 'baixo', ci: 'ok', ciText: '6 de 6 checks passaram', owners: 'ok', ownersText: 'Sem dono obrigatório', size: '2 arquivos, +9 −0', turn: false, why: 'Adiciona um token novo sem alterar os existentes.', file: 'tokens/elevation.json', hunk: [hdr('@@ -8,3 +8,6 @@'), ctx('"modal": { "shadow": "0 24px 48px #0008" },'), add('"drawer": {'), add('  "shadow": "-16px 0 40px #0006"'), add('},')] },
+      { id: 301, rank: 1, repo: 'arvore/auth-service', title: 'refactor(session): rotate refresh tokens', author: 'tiago-melo', branch: 'refactor/rotate-refresh', verdict: 'alto', ci: 'ok', ciText: '10 de 10 checks passaram', owners: 'pend', ownersText: 'Aguardando @arvore/seguranca', size: '38 arquivos, +1.204 −871', turn: false, why: 'Altera a autenticação de todas as rotas e invalida as sessões ativas no deploy.', file: 'src/session/rotate.ts', hunk: [hdr('@@ -12,3 +12,3 @@ export async function rotate(sid) {'), del('return sessions.touch(sid);'), add('return sessions.reissue(sid, { family: true });'), ctx('}')] },
+      { id: 298, rank: 2, repo: 'arvore/auth-service', title: 'feat(mfa): add recovery codes', author: 'bianca-reis', branch: 'feat/mfa-recovery', verdict: 'medio', ci: 'ok', ciText: '10 de 10 checks passaram', owners: 'pend', ownersText: 'Aguardando @arvore/seguranca', size: '7 arquivos, +212 −3', turn: false, why: 'Recurso novo atrás de feature flag, com uma migração aditiva.', file: 'src/mfa/recovery.ts', hunk: [hdr('@@ -0,0 +1,2 @@'), add('export const CODES = 10;'), add('export const generate = () => randomCodes(CODES);')] }
+      ,
+      { id: 138, rank: 9, repo: 'arvore/hive-mobile', title: 'fix(sse): debounce reconnect on network change', author: '@tiago-melo', branch: 'fix/sse-debounce', verdict: 'baixo', ci: 'ok', ciText: '8 de 8 checks passaram', owners: 'ok', ownersText: 'Você comentou no SHA atual', size: '2 arquivos, +17 −5', turn: false, muteBadge: '⏳ Aguardando Autor (você comentou no SHA atual)', muteTip: 'Volta para sua fila quando o autor enviar um novo commit.', why: 'Ajuste pequeno no cliente SSE. Volta para sua fila quando o autor enviar um novo commit.', file: 'src/sse/client.ts', hunk: [hdr('@@ -21,2 +21,2 @@'), del('onOnline(() => connect());'), add('onOnline(debounce(connect, 500));')] },
+      { id: 136, rank: 9, repo: 'arvore/hive-admin', title: 'chore(ci): cache pnpm store across jobs', approvedBy: '@carlos', author: '@ana-prado', branch: 'chore/ci-pnpm-cache', verdict: 'baixo', ci: 'ok', ciText: '9 de 9 checks passaram', owners: 'ok', ownersText: 'Aprovado por @carlos', size: '1 arquivo, +6 −1', turn: false, muteBadge: '✅ Time já aprovou (@carlos de @arvore/frontend)', muteTip: 'A aprovação de um colega do seu time dispensa a sua revisão.', why: 'Mudança restrita ao pipeline. Sua revisão foi dispensada pela aprovação do time.', file: '.github/workflows/ci.yml', hunk: [hdr('@@ -14,1 +14,2 @@'), del('run: pnpm install'), add('cache: pnpm'), add('run: pnpm install --frozen-lockfile')] },
+      { id: 144, rank: 9, repo: 'arvore/hive-admin', title: 'feat(radar): group alerts by ecosystem', author: '@carla-nunes', branch: 'feat/radar-groups', verdict: 'medio', ci: 'run', ciText: 'CI rodando, 3 de 9 checks', owners: 'pend', ownersText: 'Rascunho, revisão ainda não solicitada', size: '5 arquivos, +96 −20', turn: false, muteBadge: '🚧 Oculto pelo Gate (Rascunho / CI Pendente)', muteTip: 'Entra na sua fila quando sair do rascunho e o CI passar.', why: 'Ainda em rascunho. Entra na sua fila quando sair do rascunho e o CI passar.', file: 'src/radar/group.ts', hunk: [hdr('@@ -3,1 +3,1 @@'), del('return alerts;'), add('return groupBy(alerts, (a) => a.ecosystem);')] }
+    ];
+    const whyDep = {
+      baixo: 'Atualização em devDependencies com CI verde. O pacote não chega ao bundle de produção.',
+      medio: 'Minor em dependência de runtime. O changelog não lista breaking changes, mas o código roda em produção.',
+      alto: 'Major com breaking changes no changelog. Exige ajuste de código antes de mesclar.'
+    };
+    const dep = (id, rank, repo, pkg, from, to, depType, verdict, extra) => {
+      return Object.assign({
+        id, rank, repo, pkg, from, to, depType, verdict, dep: true,
+        title: 'bump ' + pkg + ' from ' + from + ' to ' + to,
+        radarTitle: pkg + ' (' + from + ' -> ' + to + ')',
+        author: 'dependabot[bot]',
+        branch: 'dependabot/npm_and_yarn/' + pkg + '-' + to,
+        ci: 'ok',
+        ciText: 'Todos os checks passaram',
+        note: 'Nenhuma breaking change ou CVE registrada nesta versão.',
+        via: [],
+        owners: 'ok', ownersText: 'Sem dono obrigatório', size: '2 arquivos, lockfile incluído',
+        turn: false, why: whyDep[verdict], file: 'package.json',
+        hunk: [hdr('@@ -18,3 +18,3 @@ "' + depType + '": {'), del('"' + pkg + '": "^' + from + '",'), add('"' + pkg + '": "^' + to + '",')]
+      }, extra || {});
+    };
+    return human.concat([
+      dep(89, 2, 'arvore/checkout-api', 'axios', '1.7.7', '2.0.0', 'dependencies', 'alto', {
+        radarTitle: 'bump axios from 1.7.7 to 2.0.0',
+        radarMeta: 'Major • Prod Transitiva via @nestjs/axios • Importado em 1 arquivo',
+        score: 88,
+        rvDetail: 'Atualização MAJOR em dependência transitiva de Produção (via @nestjs/axios) com 1 import ativo.',
+        via: [{ label: '⚙️ @nestjs/axios v3.1.0 (Prod)', info: 'Dependência de produção que traz o axios para o projeto.' }],
+        blast: { file: 'src/infra/payment-gateway.client.ts:4', start: 2, hit: 4, lines: ["import { Inject, Injectable } from '@nestjs/common';", "import { ConfigService } from '@nestjs/config';", "import axios, { AxiosInstance } from 'axios';", "import { PaymentRequest } from './payment.types';", 'export const GATEWAY_TIMEOUT_MS = 8000;'] },
+        note: '⚠️ Breaking Change: v2.0.0 remove export default legado em CommonJS.',
+        noteWarn: true
+      }),
+      dep(145, 2, 'arvore/hive-web', 'vitest', '2.1.1', '2.1.4', 'devDependencies', 'baixo', {
+        radarMeta: 'Dev Direta • 0 imports em produção',
+        score: 12,
+        rvDetail: 'Dependência direta de dev, 0 imports em produção, CI passando.'
+      }),
+      dep(146, 4, 'arvore/hive-web', 'nanoid', '3.3.6', '3.3.8', 'devDependencies', 'baixo', {
+        radarMeta: 'Transitiva • 0 imports no código',
+        score: 18,
+        rvDetail: 'Dependência transitiva de build/dev, 0 imports diretos no seu código, CI passando.',
+        via: [{ label: '⚙️ postcss v8.4.47 (Dev)', info: 'Dependência de build que traz o nanoid para o projeto.' }],
+        file: 'pnpm-lock.yaml',
+        hunk: [hdr('@@ -412,2 +412,2 @@'), del('nanoid@3.3.6:'), add('nanoid@3.3.8:')]
+      }),
+      dep(147, 5, 'arvore/hive-web', 'prettier', '3.3.2', '3.3.3', 'devDependencies', 'baixo', {
+        radarMeta: 'Dev Direta • 0 imports em produção',
+        score: 9,
+        rvDetail: 'Dependência direta de dev, 0 imports em produção, CI passando.'
+      }),
+      dep(88, 2, 'arvore/design-system', 'storybook', '8.3.2', '8.3.5', 'devDependencies', 'baixo', {
+        radarMeta: 'Dev Direta • 0 imports em produção',
+        score: 16,
+        rvDetail: 'Dependência direta de dev, 0 imports em produção, CI passando.'
+      }),
+      dep(233, 3, 'arvore/checkout-api', 'fastify', '4.28.1', '4.29.0', 'dependencies', 'medio', {
+        radarMeta: 'Minor • Prod Direta • Importado em 7 arquivos',
+        score: 46,
+        rvDetail: 'Atualização minor em dependência direta de Produção com 7 arquivos afetados, 3 deles usando API obsoleta. CI passando.',
+        note: '⚠️ Breaking Change na v5: a v4.29.0 já marca reply.redirect(code, url) como obsoleto.',
+        noteWarn: true,
+        blasts: [
+          { file: 'src/http/redirect.controller.ts:8', kind: 'prod', breaks: true, uses: 3, snippets: [
+            { start: 7, hit: 8, lines: ['async function toCheckout(req, reply) {', "  return reply.redirect(302, '/checkout');", '}'] },
+            { start: 19, hit: 20, lines: ['if (expired) {', "  return reply.redirect(301, '/login');", '}'] },
+            { start: 41, hit: 42, lines: ['const target = resolveTarget(req);', '  return reply.redirect(307, target);', '}'] }
+          ] },
+          { file: 'src/http/webhook.routes.ts:12', kind: 'prod', breaks: true, uses: 1, snippets: [{ start: 11, hit: 12, lines: ["app.get('/webhook/retry', (req, reply) => {", "  reply.redirect(303, '/webhook/status');", '});'] }] },
+          { file: 'src/http/checkout.routes.ts:21', kind: 'prod', breaks: true, uses: 1, snippets: [{ start: 20, hit: 21, lines: ['if (!cart.items.length) {', "  return reply.redirect(302, '/cart');", '}'] }] },
+          { file: 'src/main.ts:1', kind: 'prod', uses: 1, snippets: [{ start: 1, hit: 1, lines: ["import fastify from 'fastify';", "import { registerRoutes } from './routes';", '', 'const app = fastify({ logger: true });', 'registerRoutes(app);'] }] },
+          { file: 'src/http/plugins/cors.plugin.ts:2', kind: 'prod', uses: 1, snippets: [{ start: 1, hit: 2, lines: ["import cors from '@fastify/cors';", "import { FastifyInstance } from 'fastify';", '', 'export const corsPlugin = (app: FastifyInstance) => app.register(cors);'] }] },
+          { file: 'test/http/webhook.routes.spec.ts:1', kind: 'test', uses: 1, snippets: [{ start: 1, hit: 1, lines: ["import fastify from 'fastify';", "import { webhookRoutes } from '../../src/http/webhook.routes';"] }] },
+          { file: 'test/http/app.spec.ts:3', kind: 'test', uses: 1, snippets: [{ start: 2, hit: 3, lines: ["import { describe, it } from 'vitest';", "import fastify from 'fastify';"] }] }
+        ]
+      }),
+      dep(231, 4, 'arvore/checkout-api', 'pg', '8.12.0', '8.13.0', 'dependencies', 'medio', {
+        ci: 'fail',
+        ciText: 'Falhou em testes de integração',
+        radarMeta: 'Minor • Prod Direta • Importado em 1 arquivo',
+        score: 58,
+        rvDetail: 'Atualização minor em dependência direta de Produção com 1 import ativo e CI falhando.',
+        blast: { file: 'src/infra/db.ts:1', start: 1, hit: 1, lines: ["import { Pool } from 'pg';", '', 'export const pool = new Pool({', '  connectionString: process.env.DATABASE_URL,', '});'] }
+      })
+    ]);
+  }
+
+  seedEvents() {
+    const now = Date.now();
+    const m = (n) => now - n * 60000;
+    return [
+      { key: 1, t: m(1), kind: 'ok', text: 'CI passou em #142', repo: 'arvore/hive-web', pr: 142 },
+      { key: 2, t: m(3), kind: 'turn', text: 'CODEOWNERS pediu sua revisão em #412', repo: 'arvore/checkout-api', pr: 412 },
+      { key: 3, t: m(9), kind: 'fail', text: 'CI falhou em #231', repo: 'arvore/checkout-api', pr: 231 },
+      { key: 4, t: m(24), kind: 'info', text: 'Dependabot abriu #145 para vitest', repo: 'arvore/hive-web', pr: 145 },
+      { key: 5, t: m(41), kind: 'ok', text: '@bianca aprovou #139', repo: 'arvore/hive-web', pr: 139 },
+      { key: 6, t: m(95), kind: 'info', text: 'Ana Prado comentou em #412', repo: 'arvore/checkout-api', pr: 412 },
+      { key: 7, t: m(190), kind: 'info', text: 'Bianca Reis abriu #298', repo: 'arvore/auth-service', pr: 298 }
+    ];
+  }
+
+  livePool() {
+    return [
+      { kind: 'info', text: '@bianca-dev enviou um commit para #142', repo: 'arvore/hive-web', pr: 142 },
+      { kind: 'ok', text: 'CI passou em #57', repo: 'arvore/design-system', pr: 57 },
+      { kind: 'info', text: 'Tiago Melo respondeu um comentário em #301', repo: 'arvore/auth-service', pr: 301 },
+      { kind: 'info', text: 'Dependabot atualizou o lockfile de #88', repo: 'arvore/design-system', pr: 88 },
+      { kind: 'ok', text: '@rafael aprovou #408', repo: 'arvore/checkout-api', pr: 408 }
+    ];
+  }
+
+  /* SSE simulado */
+  liveStep() {
+    if ((this.props.aoVivo || 'sim') !== 'sim') return;
+    if ((this.props.conexao || 'conectado') !== 'conectado') return;
+    if (this.state.paused) return;
+    const pool = this.livePool();
+    const ev = pool[this.liveIdx++ % pool.length];
+    if (this.state.merged[ev.pr]) return;
+    this.addEvent(ev.kind, ev.text, ev.repo, ev.pr);
+    this.setState({ fresh: ev.repo });
+    this.later(() => this.setState({ fresh: null }), 1800);
+  }
+
+  addEvent(kind, text, repo, pr) {
+    this.setState((s) => ({
+      events: [{ key: Date.now() + Math.random(), t: Date.now(), kind, text, repo, pr, fresh: true }].concat(s.events),
+      unread: s.view === 'timeline' ? 0 : s.unread + 1
+    }));
+  }
+
+  /* Ações de rede: troque wait() por fetch(url, { signal }) na integração real */
+  wait(ms, signal) {
+    return new Promise((resolve, reject) => {
+      let t;
+      const abort = () => { clearTimeout(t); reject(new DOMException('Cancelado', 'AbortError')); };
+      if (signal.aborted) return abort();
+      t = setTimeout(resolve, ms);
+      signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+
+  setAct(key, val) {
+    this.setState((s) => {
+      const acts = { ...s.acts };
+      if (val) acts[key] = val; else delete acts[key];
+      return { acts };
+    });
+  }
+
+  finish(key, status, note) {
+    delete this.ctrls[key];
+    /* Sem mensagem: o próprio estado da interface já mostra o resultado */
+    if (!note) { this.setAct(key, null); return; }
+    this.setAct(key, { status, note });
+    this.later(() => this.setAct(key, null), 6000);
+  }
+
+  async run(key, steps, done, cancelled) {
+    const ctrl = new AbortController();
+    this.ctrls[key] = ctrl;
+    let i = 0;
+    try {
+      for (; i < steps.length; i++) {
+        this.setAct(key, { status: 'running', label: steps[i].label, pct: steps[i].pct });
+        await this.wait(steps[i].ms, ctrl.signal);
+        if (steps[i].then) steps[i].then();
+      }
+      this.finish(key, 'ok', done());
+    } catch (e) {
+      if (e.name !== 'AbortError') throw e;
+      this.finish(key, 'cancel', cancelled(i));
+    }
+  }
+
+  cancel(key) {
+    if (this.ctrls[key]) this.ctrls[key].abort();
+    else this.finish(key, 'cancel', key === 'batch' ? 'Lote cancelado. 1 PR mesclado, 3 continuam abertos.' : 'Cancelado. Nada foi enviado ao GitHub.');
+  }
+
+  markMerged(p) {
+    this.setState((s) => ({ merged: { ...s.merged, [p.id]: true } }));
+    this.addEvent('ok', 'Você mesclou #' + p.id + ' via squash', p.repo, p.id);
+  }
+
+  markApproved(p) {
+    this.setState((s) => ({ approved: { ...s.approved, [p.id]: true } }));
+    this.addEvent('ok', 'Você aprovou #' + p.id, p.repo, p.id);
+  }
+
+  runApprove(p) {
+    this.run('merge:' + p.id,
+      [{ label: 'Aprovando PR...', ms: 1200 }],
+      () => { this.markApproved(p); return null; },
+      () => 'Cancelado. Nada foi enviado ao GitHub.');
+  }
+
+  runMerge(p) {
+    const sha = Math.random().toString(16).slice(2, 9);
+    this.run('merge:' + p.id,
+      [{ label: 'Mesclando via squash...', ms: 1600 }],
+      () => { this.markMerged(p); return 'Mesclado via squash em ' + sha + '.'; },
+      () => 'Cancelado. O PR continua aberto e aprovado.');
+  }
+
+  runSilence(p, badge) {
+    this.run('merge:' + p.id,
+      [{ label: 'Silenciando...', ms: 1000 }],
+      () => { this.setState((s) => ({ silenced: { ...s.silenced, [p.id]: badge } })); return 'PR silenciado.'; },
+      () => 'Cancelado. O PR continua na sua fila.');
+  }
+
+  turnOn(p) {
+    return !!p.turn && !this.state.silenced[p.id] && !this.state.approved[p.id];
+  }
+
+  /* Destaque de sintaxe do diff */
+  tokens(s, t) {
+    const out = [{ s: s.slice(0, 2), cls: t === 'add' ? 'pf-tk-add' : t === 'del' ? 'pf-tk-del' : '' }];
+    const code = s.slice(2);
+    const re = /(\/\/.*$)|('[^']*'|"[^"]*"|`[^`]*`)|(@[A-Za-z]+)|\b(import|export|class|const|let|return|if|else|from|readonly|private|public|protected|async|await|function|new|this|true|false|null|void|constructor)\b|\b([A-Z][A-Za-z0-9_]*)\b|\b(\d+)\b/g;
+    let last = 0;
+    let m;
+    while ((m = re.exec(code))) {
+      if (m.index > last) out.push({ s: code.slice(last, m.index), cls: '' });
+      const cls = m[1] ? 'pf-tk-com' : m[2] ? 'pf-tk-str' : m[3] || m[4] ? 'pf-tk-kw' : m[5] ? 'pf-tk-type' : 'pf-tk-num';
+      out.push({ s: m[0], cls });
+      last = m.index + m[0].length;
+    }
+    if (last < code.length) out.push({ s: code.slice(last), cls: '' });
+    return out;
+  }
+
+  diffLines(hunk) {
+    let n = 1;
+    return hunk.map((l) => {
+      if (l.t === 'hdr') {
+        const m = /\+(\d+)/.exec(l.s);
+        n = m ? Number(m[1]) : 1;
+        return { cls: 'pf-line-hdr', n: '', tokens: [{ s: l.s, cls: 'pf-tk-hdr' }] };
+      }
+      const num = l.t === 'del' ? '' : String(n++);
+      return { cls: 'pf-line-' + l.t, n: num, tokens: this.tokens(l.s, l.t) };
+    });
+  }
+
+  card(p) {
+    const silenced = this.state.silenced[p.id];
+    const ci = this.ciOf(p).ci;
+    return {
+      ...this.vm(p),
+      authorLabel: p.author.charAt(0) === '@' ? p.author : '@' + p.author,
+      ciLabel: { ok: 'CI Verde', run: 'CI Pendente', fail: 'CI Falhando' }[ci],
+      ciTextCls: { ok: 'pf-ci-stable', run: 'pf-ci-warn', fail: 'pf-ci-fail' }[ci],
+      hasPill: !!p.ownPill,
+      hasClaim: !!p.claim,
+      badge: silenced || p.muteBadge || '✅ Você aprovou',
+      badgeTip: silenced ? 'Silenciado por você. Volta à fila quando a condição for atendida.' : p.muteTip || 'Sua aprovação foi registrada. O PR ainda não foi mesclado.'
+    };
+  }
+
+  runBatch(list) {
+    const n = list.length;
+    this.batchTotal = n;
+    this.run('batch',
+      list.map((p, i) => ({ label: 'Mesclando ' + (i + 1) + ' de ' + n + '...', pct: ((i + 1) / n) * 100, ms: 1100, then: () => this.markMerged(p) })),
+      () => n + ' PRs mesclados via squash.',
+      (i) => i === 0 ? 'Lote cancelado. Nenhum PR foi mesclado.' : 'Lote cancelado. ' + this.pl(i, 'PR mesclado', 'PRs mesclados') + ', ' + (n - i) + ' continuam abertos.');
+  }
+
+  runSync() {
+    this.run('sync',
+      [{ label: 'Sincronizando ' + this.repos.length + ' repositórios...', ms: 2400 }],
+      () => 'Sincronizado agora.',
+      () => 'Sincronização cancelada.');
+  }
+
+  runBatchApprove(list) {
+    const n = list.length;
+    this.batchTotal = n;
+    this.run('batch',
+      list.map((p, i) => ({ label: 'Aprovando ' + (i + 1) + ' de ' + n + '...', pct: ((i + 1) / n) * 100, ms: 700, then: () => this.markApproved(p) })),
+      () => null,
+      (i) => i === 0 ? 'Lote cancelado. Nenhum PR foi aprovado.' : 'Lote cancelado. ' + this.pl(i, 'PR aprovado', 'PRs aprovados') + ', ' + (n - i) + ' sem aprovação.');
+  }
+
+  runComment(p, cmd) {
+    this.run('merge:' + p.id,
+      [{ label: 'Enviando ' + cmd + '...', ms: 1000 }],
+      () => 'Comentário enviado: ' + cmd + '.',
+      () => 'Cancelado. Nada foi enviado ao GitHub.');
+  }
+
+  /* Modelo de exibição */
+  act(key) {
+    const a = this.state.acts[key];
+    const running = !!a && a.status === 'running';
+    const hasNote = !!a && !running;
+    return {
+      idle: !a, running, hasNote,
+      label: a ? a.label : '',
+      pct: a && a.pct ? a.pct : 0,
+      note: a ? a.note : '',
+      noteCls: a && a.status === 'ok' ? 'pf-note pf-note-ok' : 'pf-note',
+      cancel: () => this.cancel(key)
+    };
+  }
+
+  open(id) {
+    this.setState({ selected: id, closing: false, treeNode: null, blastOpen: { 0: true }, blastAll: false });
+  }
+
+  /* Veredito, árvore e raio de impacto do drawer do Radar */
+  depDetail(p) {
+    const st = this.state;
+    const tier = { baixo: '🟢 Baixo Risco', medio: '🟡 Médio Risco', alto: '🔴 Alto Risco' }[p.verdict];
+    const major = (v) => v.split('.')[0];
+    const minor = (v) => v.split('.')[1];
+    const bump = major(p.from) !== major(p.to) ? 'Major' : minor(p.from) !== minor(p.to) ? 'Minor' : 'Patch';
+    const nodes = [{ label: '📦 ' + p.repo.split('/')[1] + ' (root)', info: 'Raiz do projeto, definida no package.json.' }]
+      .concat(p.via)
+      .concat([{ label: '🎯 ' + p.pkg + ' ' + p.from + ' → ' + p.to + ' (' + bump + ' Bump)', info: 'Pacote que esta atualização altera.', target: true }]);
+    const current = st.treeNode === null ? nodes.length - 1 : st.treeNode;
+    /* Ordem esperada dos dados: usa API que quebra, demais de produção, testes */
+    const all = p.blasts || (p.blast ? [{ file: p.blast.file, kind: 'prod', uses: 1, snippets: [p.blast] }] : []);
+    const visible = st.blastAll ? all : all.slice(0, 5);
+    const hidden = st.blastAll ? [] : all.slice(5);
+    const prod = all.filter((f) => f.kind === 'prod').length;
+    const tests = all.length - prod;
+    const breaks = all.filter((f) => f.breaks).length;
+    const allOpen = !hidden.length && all.length > 0 && all.every((f, i) => st.blastOpen[i]);
+    return {
+      rvHead: tier + ' (Score ' + p.score + '/100)',
+      rvDetail: p.rvDetail,
+      tree: nodes.map((n, i) => ({
+        label: n.label,
+        hasLink: i > 0,
+        pressed: i === current ? 'true' : 'false',
+        cls: (i === current ? 'is-on ' : '') + (n.target ? 'pf-node-' + p.verdict : ''),
+        pick: () => this.setState({ treeNode: i })
+      })),
+      treeInfo: nodes[current].info,
+      blastTitle: 'Raio de Impacto no Código — ' + this.pl(all.length, 'arquivo afetado', 'arquivos afetados'),
+      blastSummary: this.pl(prod, 'em produção', 'em produção') + ' · ' + this.pl(tests, 'em testes', 'em testes') + ' · ' + this.pl(breaks, 'usa API que quebra', 'usam API que quebra'),
+      hasSummary: all.length > 1,
+      hasBlast: all.length > 0,
+      noBlast: all.length === 0,
+      blasts: visible.map((f, i) => {
+        const isOpen = !!st.blastOpen[i];
+        const lines = [];
+        f.snippets.forEach((sn, k) => {
+          if (k > 0) lines.push({ cls: 'pf-line-hdr', n: '', tokens: [{ s: '⋯', cls: 'pf-tk-hdr' }] });
+          sn.lines.forEach((code, c) => lines.push({
+            n: String(sn.start + c),
+            cls: sn.start + c === sn.hit ? 'pf-line-hit' : '',
+            tokens: this.tokens('  ' + code, 'ctx')
+          }));
+        });
+        return {
+          file: f.file,
+          cls: (f.kind === 'test' ? 'pf-blast-test ' : '') + (isOpen ? 'pf-blast-open' : ''),
+          isOpen,
+          expanded: isOpen ? 'true' : 'false',
+          chevCls: isOpen ? 'is-open' : '',
+          toggle: () => this.setState((s) => ({ blastOpen: { ...s.blastOpen, [i]: !s.blastOpen[i] } })),
+          hasUses: f.uses > 1,
+          usesLabel: f.uses + ' usos',
+          breaks: !!f.breaks,
+          lines
+        };
+      }),
+      hasBlastFoot: all.length > 1,
+      hasMore: hidden.length > 0,
+      moreLabel: 'Ver mais ' + this.pl(hidden.length, 'arquivo', 'arquivos') + (hidden.every((f) => f.kind === 'test') ? ' (testes)' : ''),
+      showMore: () => this.setState({ blastAll: true }),
+      allLabel: allOpen ? 'Recolher todos' : 'Expandir todos',
+      toggleAll: () => {
+        if (allOpen) { this.setState({ blastOpen: { 0: true }, blastAll: false }); return; }
+        const open = {};
+        all.forEach((f, i) => { open[i] = true; });
+        this.setState({ blastOpen: open, blastAll: true });
+      },
+      note: p.note,
+      noteCls: p.noteWarn ? 'pf-alert-warn' : ''
+    };
+  }
+
+  close() {
+    this.setState({ closing: true });
+    this.later(() => { if (this.state.closing) this.setState({ selected: null, closing: false }); }, 160);
+  }
+
+  go(view) {
+    if (view !== this.state.view && this.state.selected) this.close();
+    this.setState((s) => ({ view, unread: view === 'timeline' ? 0 : s.unread }));
+  }
+
+  ciOf(p) {
+    return this.state.ciOver[p.id] || { ci: p.ci, ciText: p.ciText };
+  }
+
+  vm(p) {
+    const ci = this.ciOf(p);
+    const vLabel = { baixo: 'Baixo Risco', medio: 'Médio Risco', alto: 'Alto Risco' }[p.verdict];
+    return {
+      ...p,
+      vLabel,
+      vCls: 'pf-badge-' + p.verdict,
+      isTurn: this.turnOn(p),
+      approvedMine: !!this.state.approved[p.id],
+      sel: this.state.selected === p.id ? 'is-sel' : '',
+      open: () => this.open(p.id),
+      metaTip: !p.dep ? '' : p.via && p.via.length ? 'Transitiva: chega ao projeto por meio de outro pacote. Veja o caminho na árvore do drawer.' : p.depType === 'devDependencies' ? 'Usada só em desenvolvimento. Não entra no build de produção.' : 'Declarada no package.json e carregada em produção.',
+      pkgLine: p.dep ? p.pkg + ' ' + p.from + ' → ' + p.to : '',
+      ciShort: { ok: 'CI verde', run: 'CI rodando', fail: 'CI falhando' }[ci.ci],
+      ciTextCls: { ok: 'pf-ci-ok', run: 'pf-ci-warn', fail: 'pf-ci-fail' }[ci.ci]
+    };
+  }
+
+  pl(n, one, many) {
+    return n + ' ' + (n === 1 ? one : many);
+  }
+
+  streamRow(p) {
+    const v = this.vm(p);
+    const tier = { baixo: '🟢 Baixo Risco', medio: '🟡 Médio Risco', alto: '🔴 Alto Risco' }[p.verdict];
+    const dev = p.depType === 'devDependencies';
+    const safe = !!p.dep && p.verdict === 'baixo' && this.ciOf(p).ci === 'ok';
+    const showTurn = this.turnOn(p) && !p.dep;
+    const mine = !!this.state.approved[p.id];
+    const approved = !!p.approvedBy || (mine && !p.dep);
+    return {
+      ...v,
+      title: p.seatTitle || p.title,
+      showTurn,
+      hasOwn: !!p.ownFiles,
+      ownLabel: this.pl(p.ownFiles || 0, 'arquivo seu', 'arquivos seus'),
+      showRisk: !showTurn && !approved && (!mine || !!p.dep),
+      riskTip: p.dep ? (dev ? 'Só afeta desenvolvimento e build. Não chega à produção.' : 'Código que roda em produção. Veja o raio de impacto no drawer.') : 'Veja o veredito completo no drawer.',
+      riskLabel: p.dep ? tier + (dev ? ' (Dev)' : ' (Prod)') : v.vLabel,
+      isApproved: approved || mine,
+      approvedTip: mine ? 'Sua aprovação foi registrada. O PR ainda não foi mesclado.' : 'Já aprovado por alguém do time. Sua revisão não é necessária.',
+      approvedLabel: mine ? 'Aprovado por você' : 'Aprovado pelo Time (' + p.approvedBy + ')',
+      dim: p.approvedBy && !mine ? 'is-dim' : '',
+      hasQuick: safe,
+      act: this.act('merge:' + p.id),
+      quickTip: mine ? 'Mescla o PR com squash.' : 'Registra sua aprovação sem mesclar. Depois, use Squash.',
+      quickLabel: mine ? 'Squash' : 'Aprovar',
+      quick: () => (mine ? this.runMerge(p) : this.runApprove(p))
+    };
+  }
+
+  buildSeats(open) {
+    return this.repos.map((r) => {
+      const all = open.filter((p) => p.repo === r.name);
+      const deps = all.filter((p) => p.dep && !this.state.silenced[p.id]);
+      const turn = all.filter((p) => this.turnOn(p)).length;
+      const fails = all.filter((p) => this.ciOf(p).ci === 'fail').length;
+      const runs = all.filter((p) => this.ciOf(p).ci === 'run').length;
+      const risky = deps.some((p) => p.verdict !== 'baixo');
+      const state = fails ? 'fail' : runs ? 'run' : 'ok';
+      return {
+        name: r.name,
+        branch: r.branch,
+        cls: this.state.fresh === r.name ? 'is-fresh' : '',
+        ciDot: { fail: 'pf-dot pf-dot-fail pf-dot-pulse', run: 'pf-dot pf-dot-warn pf-dot-pulse', ok: 'pf-dot pf-dot-ok' }[state],
+        ciCls: { fail: 'pf-ci-fail', run: 'pf-ci-warn', ok: 'pf-ci-stable' }[state],
+        ciLabel: { fail: fails + ' CI Falhando', run: runs + ' CI Rodando', ok: 'CI Estável' }[state],
+        ciTip: { fail: 'PRs abertos deste repositório com CI falhando.', run: 'PRs abertos deste repositório com CI ainda rodando.', ok: 'Nenhum PR aberto com CI falhando ou rodando.' }[state],
+        turn,
+        turnCls: turn ? 'pf-turn' : 'pf-badge-zero',
+        deps: deps.length,
+        depCls: !deps.length ? 'pf-badge-zero' : risky ? 'pf-badge-medio' : 'pf-badge-baixo',
+        goRadar: () => this.go('radar'),
+        openLabel: this.pl(all.length, 'PR Aberto', 'PRs Abertos'),
+        isEmpty: all.length === 0,
+        stream: all.slice().sort((a, b) => a.rank - b.rank).slice(0, 3).map((p) => this.streamRow(p))
+      };
+    });
+  }
+
+  buildDrawer() {
+    const p = this.prs.find((x) => x.id === this.state.selected);
+    if (!p) return { act: this.act('none'), signals: [], lines: [] };
+    const v = this.vm(p);
+    const ci = this.ciOf(p);
+    const merged = !!this.state.merged[p.id];
+    const act = this.act('merge:' + p.id);
+    const dotCi = { ok: 'pf-dot pf-dot-ok', run: 'pf-dot pf-dot-warn pf-dot-pulse', fail: 'pf-dot pf-dot-fail' }[ci.ci];
+    const dotOwners = { ok: 'pf-dot pf-dot-ok', voce: 'pf-dot pf-dot-turn', pend: 'pf-dot pf-dot-warn' }[p.owners];
+    let blockedText = '';
+    if (ci.ci === 'fail') blockedText = 'Mesclagem bloqueada: o CI está falhando.';
+    else if (ci.ci === 'run') blockedText = 'Mesclagem bloqueada: o CI ainda está rodando.';
+    else if (p.owners === 'pend') blockedText = 'Mesclagem bloqueada: falta aprovação de CODEOWNERS.';
+    const mine = !!this.state.approved[p.id];
+    const busyTip = act.running ? 'Aguarde ou cancele a ação em andamento.' : '';
+    const guard = (fn) => () => { if (!this.isBusy(this.state)) fn(); };
+    const needsApproval = !blockedText && !mine && !p.approvedBy;
+    if (needsApproval) blockedText = 'Aprove antes de mesclar.';
+    return {
+      ...v,
+      ...(p.dep ? this.depDetail(p) : {}),
+      act,
+      isDep: !!p.dep,
+      notDep: !p.dep,
+      showDiff: !p.dep,
+      showApprove: !mine,
+      approvedMine: mine,
+      mergeCls: mine && !blockedText ? 'pf-btn-primary' : '',
+      blockedCls: needsApproval ? 'pf-note' : 'pf-blocked',
+      approve: () => this.runApprove(p),
+      rebase: guard(() => this.runComment(p, '@dependabot rebase')),
+      recreate: guard(() => this.runComment(p, '@dependabot recreate')),
+      silence: guard(() => this.runSilence(p, '🔕 Silenciado no Radar')),
+      signals: [
+        { k: 'CI', v: ci.ciText, dot: dotCi },
+        { k: 'CODEOWNERS', v: p.ownersText, dot: dotOwners },
+        { k: 'Tamanho', v: p.size, dot: 'pf-dot' }
+      ],
+      lines: this.diffLines(p.hunk),
+      diffFile: p.file,
+      hasDelta: !!p.deltaAdd,
+      focused: !!p.focusRule,
+      general: !p.focusRule && !p.dep,
+      banner: 'Você foi acionado via regra ' + p.focusRule + '. Exibindo apenas o diff dos arquivos sob sua responsabilidade.',
+      ghUrl: 'https://github.com/' + p.repo + '/pull/' + p.id,
+      showIdle: act.idle && !merged,
+      showMerged: act.idle && merged,
+      showSecondary: !merged && !act.hasNote,
+      blocked: !!blockedText,
+      blockedText,
+      mergeDis: blockedText ? 'true' : 'false',
+      mergeTip: blockedText || 'Mescla o PR com squash: todos os commits viram um só na branch padrão.',
+      busyDis: act.running ? 'true' : 'false',
+      tips: {
+        rebase: busyTip || 'Pede ao Dependabot para atualizar a branch com a base.',
+        recreate: busyTip || 'Recria o PR do zero e descarta edições feitas na branch.',
+        silence: busyTip || 'Tira este PR do Radar e da contagem do Dependabot.',
+        silenceCommit: busyTip || 'O PR sai da sua fila e volta quando houver um novo commit.',
+        silenceCi: busyTip || 'O PR sai da sua fila e volta quando o CI ficar verde.'
+      },
+      merge: () => { if (!blockedText) this.runMerge(p); },
+      silenceCommit: guard(() => this.runSilence(p, '🔕 Silenciado até o próximo commit')),
+      silenceCi: guard(() => this.runSilence(p, '🔕 Silenciado até o CI passar'))
+    };
+  }
+
+  renderVals() {
+    const st = this.state;
+    const open = this.prs.filter((p) => !st.merged[p.id]);
+    const deps = open.filter((p) => p.dep && !st.silenced[p.id]);
+    const turns = open.filter((p) => this.turnOn(p));
+    const active = turns.filter((p) => !p.dep).map((p) => this.card(p));
+    const muted = open.filter((p) => p.muteBadge || st.silenced[p.id] || (st.approved[p.id] && !p.dep)).map((p) => this.card(p));
+    const view = st.view;
+
+    const navItem = (key, n) => ({
+      n, has: n > 0,
+      cls: view === key ? 'is-active' : '',
+      cur: view === key ? 'page' : 'false',
+      go: () => this.go(key)
+    });
+
+    const connMap = {
+      conectado: { dot: 'pf-dot pf-dot-ok pf-dot-pulse', label: 'Ao vivo (SSE)', tip: 'Conectado: os eventos do GitHub chegam em tempo real.' },
+      reconectando: { dot: 'pf-dot pf-dot-warn pf-dot-pulse', label: 'Reconectando (SSE)', tip: 'Conexão perdida. Tentando reconectar; os dados podem estar defasados.' },
+      desconectado: { dot: 'pf-dot pf-dot-fail', label: 'Desconectado (SSE)', tip: 'Sem conexão. Os dados não estão sendo atualizados.' }
+    };
+
+    const allSeats = this.buildSeats(open);
+    const inTurn = allSeats.filter((s) => s.turn > 0);
+    const withDeps = allSeats.filter((s) => s.deps > 0);
+    const filterSets = { todos: allSeats, turn: inTurn, deps: withDeps };
+    const filters = [['todos', 'Todos'], ['turn', 'Com PRs na Minha Vez'], ['deps', 'Dependabot Pendente']].map(([id, label]) => ({
+      label: label + ' (' + filterSets[id].length + ')',
+      cls: st.seatFilter === id ? 'is-active' : '',
+      pressed: st.seatFilter === id ? 'true' : 'false',
+      pick: () => this.setState({ seatFilter: id })
+    }));
+
+    const radarGroups = [['alto', '🔴 Alto Risco — Requer Análise de Impacto'], ['baixo', '🟢 Baixo Risco — Seguros para Merge Rápido'], ['medio', '🟡 Médio Risco — Revisar Antes de Mesclar']]
+      .map(([k, label]) => {
+        const items = deps.filter((p) => p.verdict === k).map((p) => this.vm(p));
+        return { label: label + ' (' + items.length + ')', items };
+      })
+      .filter((g) => g.items.length);
+
+    const safe = deps.filter((p) => p.verdict === 'baixo' && this.ciOf(p).ci === 'ok');
+    const batchRunning = this.act('batch').running;
+    const batchN = batchRunning && this.batchTotal ? this.batchTotal : safe.length;
+    const safeApproved = safe.filter((p) => st.approved[p.id]);
+    const safePending = safe.filter((p) => !st.approved[p.id]);
+
+    const groupOf = (t) => {
+      const m = (Date.now() - t) / 60000;
+      return m <= 5 ? 'Agora' : m <= 60 ? 'Última hora' : 'Hoje cedo';
+    };
+    const dots = { ok: 'pf-dot pf-dot-ok', fail: 'pf-dot pf-dot-fail', turn: 'pf-dot pf-dot-turn', info: 'pf-dot' };
+    const eventGroups = [];
+    st.events.forEach((e) => {
+      const label = groupOf(e.t);
+      let g = eventGroups.find((x) => x.label === label);
+      if (!g) { g = { label, items: [] }; eventGroups.push(g); }
+      const d = new Date(e.t);
+      const noPr = !e.pr || !!st.merged[e.pr];
+      g.items.push({
+        ...e,
+        time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'),
+        dot: dots[e.kind],
+        cls: e.fresh ? 'is-new' : '',
+        noPr,
+        ariaDis: noPr ? 'true' : 'false',
+        tip: !e.pr ? '' : st.merged[e.pr] ? 'Este PR já foi mesclado e não pode mais ser inspecionado aqui.' : '',
+        open: () => { if (!noPr) this.open(e.pr); }
+      });
+    });
+
+    const titles = {
+      seats: ['Seats de Repositórios', 'Monitoramento em tempo real dos repositórios seguidos'],
+      inbox: ['Minha Vez (CODEOWNERS)', ''],
+      radar: ['Radar Dependabot', this.pl(deps.length, 'PR aberto', 'PRs abertos') + ' em ' + new Set(deps.map((p) => p.repo)).size + ' repositórios, agrupados por risco.'],
+      timeline: ['Linha do Tempo', 'Eventos recebidos por SSE, do mais recente ao mais antigo.']
+    };
+
+    const conn = connMap[this.props.conexao || 'conectado'] || connMap.conectado;
+
+    return {
+      drawerW: st.drawerW,
+      resizeStart: (e) => {
+        e.preventDefault();
+        this.hideTip();
+        this.dragging = true;
+        this.dragW = st.drawerW;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        this.rootEl().classList.add('is-resizing');
+      },
+      resizeMove: (e) => {
+        if (this.dragging) this.applyWidth(this.rootEl().getBoundingClientRect().right - e.clientX);
+      },
+      resizeEnd: () => {
+        if (!this.dragging) return;
+        this.dragging = false;
+        this.rootEl().classList.remove('is-resizing');
+        this.commitWidth(this.dragW, true);
+      },
+      resizeReset: () => this.commitWidth(560, true),
+      resizeKey: (e) => {
+        const step = { ArrowLeft: 24, ArrowRight: -24 }[e.key];
+        if (step) { e.preventDefault(); this.commitWidth(st.drawerW + step, true); }
+        if (e.key === 'Home') { e.preventDefault(); this.commitWidth(560, true); }
+      },
+      tip: st.tip || {},
+      hasTip: !!st.tip,
+      tipOver: (e) => {
+        const el = e.target.closest ? e.target.closest('[data-tip]') : null;
+        if (!el || !el.getAttribute('data-tip')) { if (this.tipEl) this.hideTip(); return; }
+        if (el !== this.tipEl) this.showTip(el);
+      },
+      tipOut: (e) => {
+        if (this.tipEl && e.relatedTarget && this.tipEl.contains(e.relatedTarget)) return;
+        this.hideTip();
+      },
+      tipFocus: (e) => {
+        if (this.tipMuted || !e.target.matches(':focus-visible')) return;
+        const el = e.target.closest('[data-tip]');
+        if (el && el.getAttribute('data-tip')) this.showTip(el);
+      },
+      tipHide: () => this.hideTip(),
+      onKey: (e) => {
+        if (e.key !== 'Escape' || !st.selected) return;
+        if (this.isBusy(st)) this.cancel('merge:' + st.selected);
+        else this.close();
+      },
+      close: () => this.close(),
+      nav: {
+        inbox: navItem('inbox', turns.length),
+        radar: navItem('radar', deps.length),
+        seats: navItem('seats', this.repos.length),
+        timeline: navItem('timeline', st.unread)
+      },
+      conn,
+      title: titles[view][0],
+      sub: titles[view][1],
+      hasSub: !!titles[view][1],
+      canvasCls: view === 'seats' ? '' : 'pf-canvas-narrow',
+      isSeats: view === 'seats',
+      isInbox: view === 'inbox',
+      isRadar: view === 'radar',
+      isTimeline: view === 'timeline',
+      a: { sync: this.act('sync'), batch: this.act('batch') },
+      runSync: () => this.runSync(),
+      runBatch: () => { if (safeApproved.length) this.runBatch(safeApproved); },
+      runBatchApprove: () => this.runBatchApprove(safePending),
+      filters,
+      seats: filterSets[st.seatFilter],
+      active,
+      hasActive: active.length > 0,
+      muted,
+      showMutedSection: st.showMuted && muted.length > 0,
+      mutedChecked: st.showMuted ? 'true' : 'false',
+      toggleMuted: () => this.setState((s) => ({ showMuted: !s.showMuted })),
+      mutedToggleCount: muted.length,
+      inboxEmpty: active.length === 0,
+      radar: radarGroups,
+      radarEmpty: radarGroups.length === 0,
+      batch: {
+        has: safe.length > 0 || batchRunning,
+        title: '🟢 ' + batchN + ' PRs de Baixo Risco prontos para mesclagem segura (devDependencies ou transitivos sem import direto e CI verde)',
+        canApprove: safePending.length > 0,
+        approveLabel: safeApproved.length ? 'Aprovar os ' + safePending.length + ' Restantes' : 'Aprovar Todos os ' + batchN,
+        mergeDis: safeApproved.length === 0 ? 'true' : 'false',
+        mergeTip: safeApproved.length === 0 ? 'Aprove pelo menos um PR do lote antes de mesclar.' : 'Mescla com squash os PRs do lote que já têm sua aprovação.',
+        mergeCls: safePending.length === 0 ? 'pf-btn-primary' : '',
+        mergeLabel: safeApproved.length && safePending.length ? 'Mesclar ' + safeApproved.length + ' Aprovado(s)' : 'Mesclar Todos os ' + batchN
+      },
+      eventGroups,
+      togglePause: () => this.setState((s) => ({ paused: !s.paused })),
+      pauseLabel: st.paused ? 'Retomar' : 'Pausar',
+      hasDrawer: !!st.selected,
+      appCls: st.selected ? 'has-drawer' : '',
+      drawerCls: st.closing ? 'is-closing' : '',
+      d: this.buildDrawer()
+    };
+  }
+}
+</script>
+
+
+</body></html>
