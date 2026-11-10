@@ -1,0 +1,48 @@
+<section class="pf-drawer-sec">
+  <h3 class="pf-section">{{ 'drawer.files.title' | t }} ({{ files().length }})</h3>
+  @if (files().length === 0) {
+    <p class="pf-empty-note">{{ 'drawer.files.unavailable' | t }}</p>
+  } @else {
+    <div class="pf-blasts">
+      @for (f of files(); track f.index) {
+        <div [class]="f.expanded ? 'pf-diff is-open' : 'pf-diff'">
+          <button
+            type="button"
+            class="pf-diff-head pf-blast-head"
+            [attr.aria-expanded]="f.expanded"
+            (click)="toggleFile.emit(f.index)"
+          >
+            <span class="pf-blast-file">
+              <svg
+                [class]="f.expanded ? 'pf-chev pf-chev-r is-open' : 'pf-chev pf-chev-r'"
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M4.5 3l3 3-3 3"></path>
+              </svg>
+              <span class="pf-changed-path">{{ f.path }}</span>
+            </span>
+            <span class="pf-blast-tags">
+              <span class="pf-delta-add">{{ f.deltaAdd }}</span>
+              <span class="pf-delta-del">{{ f.deltaDel }}</span>
+            </span>
+          </button>
+          @if (f.expanded) {
+            @if (f.hasDiff) {
+              <app-diff-viewer [showHeader]="false" [lines]="f.lines" />
+            } @else {
+              <p class="pf-empty-note pf-changed-nodiff">{{ 'drawer.files.noDiff' | t }}</p>
+            }
+          }
+        </div>
+      }
+    </div>
+  }
+</section>

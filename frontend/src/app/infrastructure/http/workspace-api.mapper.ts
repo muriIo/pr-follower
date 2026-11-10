@@ -1,6 +1,7 @@
 import {
   BlastFileItem,
   CiState,
+  CodeownersState,
   DependencyViaNode,
   DiffHunkLine,
   MergeState,
@@ -138,7 +139,8 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
       ...(codeowners === 'present' || codeowners === 'absent' ? { codeowners } : {}),
     };
   });
-  const reposWithoutCodeowners = new Set(repos.filter((r) => r.codeowners === 'absent').map((r) => r.name));
+  const codeownersByRepo = new Map(repos.map((r) => [r.name, r.codeowners]));
+  const codeownersOf = (repoName: string): CodeownersState | undefined => codeownersByRepo.get(repoName);
 
   const repoRulesMap = new Map<string, string>();
   for (const s of seats) {
@@ -153,14 +155,12 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   const silencedMap: Record<number, string> = {};
 
   for (const item of snapshot.inbox_waiting_on_me ?? []) {
-    const noCodeowners = reposWithoutCodeowners.has(item.pull_request.repository_name);
-    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap, noCodeowners);
+    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap, codeownersOf(item.pull_request.repository_name));
     prs.push(mapped);
   }
 
   for (const item of snapshot.inbox_dimmed ?? []) {
-    const noCodeowners = reposWithoutCodeowners.has(item.pull_request.repository_name);
-    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, false, repoRulesMap, noCodeowners);
+    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, false, repoRulesMap, codeownersOf(item.pull_request.repository_name));
     prs.push(mapped);
     if (item.user_state.turn_state === 'APPROVED_BY_ME') {
       approvedMap[mapped.id] = true;
@@ -174,7 +174,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   }
 
   for (const item of snapshot.dependabot_prs ?? []) {
-    prs.push(mapDependabotPrToModel(item.pull_request, item.analysis));
+    prs.push(mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name)));
   }
 
   const events: TimelineEventItem[] = (dto.timeline ?? []).map((ev, index) => ({
@@ -239,7 +239,7 @@ function mapMergeState(state: ApiPullRequestDto['mergeable_state']): MergeState 
 
 function parsePatchToHunkLines(patch?: string): readonly DiffHunkLine[] {
   if (!patch) {
-    return [{ t: 'hdr', s: '@@ -1,1 +1,1 @@' }];
+    return [];
   }
   return patch.split('\n').map((rawLine): DiffHunkLine => {
     if (rawLine.startsWith('@@')) {
@@ -255,32 +255,46 @@ function parsePatchToHunkLines(patch?: string): readonly DiffHunkLine[] {
   });
 }
 
+/** CODEOWNERS state for someone who does not own the changed files (no review tracking yet). */
+function ownersForNonOwner(codeowners: CodeownersState | undefined, approvedBy?: string): OwnersState {
+  if (codeowners === 'absent') return 'none';
+  if (approvedBy) return 'ok';
+  if (codeowners === undefined) return 'unknown';
+  return 'others';
+}
+
+const OWNERS_REASON: Record<OwnersState, string> = {
+  voce: 'Você é dono de arquivos alterados neste PR (CODEOWNERS).',
+  ok: 'Já aprovado por alguém do time.',
+  others: 'Os arquivos alterados pertencem a outros donos no CODEOWNERS.',
+  none: 'Este repositório não tem CODEOWNERS: nenhuma revisão é atribuída automaticamente.',
+  unknown: 'Ainda não verificamos o CODEOWNERS deste repositório.',
+};
+
 function mapInboxPrToModel(
   pr: ApiPullRequestDto,
   st: ApiUserPrStateDto,
   isActionable: boolean,
   repoRulesMap: Map<string, string>,
-  noCodeowners: boolean,
+  codeowners: CodeownersState | undefined,
 ): PullRequestItem {
   const prId = pr.number || pr.id;
   const { ci, ciText } = mapCiStatus(pr.ci_status);
   const ownedFiles = st.owned_files_changed ?? [];
-  const firstFile = ownedFiles[0];
   const approvedBy = st.approved_by_login
     ? st.approved_by_login.startsWith('@')
       ? st.approved_by_login
       : `@${st.approved_by_login}`
     : undefined;
 
-  // Without a CODEOWNERS file nobody's review is pending by ownership; the UI says so.
-  const owners: OwnersState = noCodeowners ? 'none' : isActionable ? 'voce' : approvedBy ? 'ok' : 'pend';
-  const ownersText = noCodeowners
-    ? ''
-    : isActionable
-      ? `Você é dono de ${ownedFiles.length || 1} arquivo(s)`
-      : approvedBy
-        ? `Aprovado por ${approvedBy}`
-        : 'Revisão pendente';
+  const owners: OwnersState = isActionable ? 'voce' : ownersForNonOwner(codeowners, approvedBy);
+  const ownersText = {
+    voce: ownedFiles.length > 0 ? `Você é dono de ${ownedFiles.length} arquivo(s)` : 'Você é dono de arquivos alterados',
+    ok: `Aprovado por ${approvedBy}`,
+    others: 'Os arquivos alterados têm outros donos',
+    none: '',
+    unknown: '',
+  }[owners];
 
   let muteBadge: string | undefined;
   let muteTip: string | undefined;
@@ -291,9 +305,12 @@ function mapInboxPrToModel(
     } else if (st.turn_state === 'WAITING_ON_AUTHOR') {
       muteBadge = '⏳ Aguardando Autor (você comentou no SHA atual)';
       muteTip = 'Volta para sua fila quando o autor enviar um novo commit.';
-    } else if (st.turn_state === 'HIDDEN_GATE' || pr.is_draft) {
-      muteBadge = '🚧 Oculto pelo Gate (Rascunho / CI Pendente)';
-      muteTip = 'Entra na sua fila quando sair do rascunho e o CI passar.';
+    } else if (pr.is_draft) {
+      muteBadge = '🚧 Rascunho';
+      muteTip = 'Entra na fila quando o autor marcar o PR como pronto para revisão.';
+    } else if (st.turn_state === 'HIDDEN_GATE' && pr.ci_status === 'PENDING') {
+      muteBadge = '🚧 CI em execução';
+      muteTip = 'Entra na fila quando o CI terminar.';
     }
   }
 
@@ -304,57 +321,94 @@ function mapInboxPrToModel(
     title: pr.title,
     author: pr.author_login.startsWith('@') ? pr.author_login : `@${pr.author_login}`,
     branch: pr.base_ref || 'main',
-    verdict: 'baixo',
+    verdict: null,
     ci,
     ciText,
     owners,
     ownersText,
     merge: mapMergeState(pr.mergeable_state),
-    size: `${Math.max(ownedFiles.length, 1)} arquivo(s)`,
     turn: isActionable,
     ownFiles: ownedFiles.length || undefined,
-    ownPill:
-      ownedFiles.length > 0 ? `🎯 Toca ${ownedFiles.length} arquivo(s) seu(s)` : undefined,
+    ownPill: ownedFiles.length > 0 ? `🎯 Toca ${ownedFiles.length} arquivo(s) seu(s)` : undefined,
     claim: pr.claimed_by_login ? `Assumido por @${pr.claimed_by_login.replace(/^@/, '')}` : undefined,
     approvedBy,
     muteBadge,
     muteTip,
-    why: isActionable
-      ? 'Acionado via regra CODEOWNERS para arquivos sob sua responsabilidade.'
-      : 'Filtrado automaticamente pelo Gate de Turno.',
-    file: firstFile?.path ?? 'src/index.ts',
-    deltaAdd: firstFile ? `+${firstFile.additions}` : undefined,
-    deltaDel: firstFile ? `-${firstFile.deletions}` : undefined,
+    why: OWNERS_REASON[owners],
+    files: ownedFiles.map((f) => ({
+      path: f.path,
+      additions: f.additions,
+      deletions: f.deletions,
+      hunk: parsePatchToHunkLines(f.patch),
+    })),
     focusRule: isActionable ? repoRulesMap.get(pr.repository_name) : undefined,
-    hunk: parsePatchToHunkLines(firstFile?.patch),
   };
 }
 
+/** Dependabot titles look like "chore(deps): bump axios from 1.7.7 to 2.0.0". */
+const DEPENDABOT_TITLE = /\bbump (\S+) from (\S+) to (\S+)/i;
+
 function mapDependabotPrToModel(
   pr: ApiPullRequestDto,
-  analysis?: ApiDependabotAnalysisDto,
+  analysis: ApiDependabotAnalysisDto | undefined,
+  codeowners: CodeownersState | undefined,
 ): PullRequestItem {
   const prId = pr.number || pr.id;
   const { ci, ciText } = mapCiStatus(pr.ci_status);
-  const verdictMap: Record<string, RiskVerdictTier> = {
-    LOW: 'baixo',
-    MEDIUM: 'medio',
-    HIGH: 'alto',
-  };
-  const verdict: RiskVerdictTier = verdictMap[analysis?.risk_verdict ?? 'LOW'] ?? 'baixo';
-  const pkg = analysis?.package_name ?? 'dependency';
-  const from = analysis?.from_version ?? '0.0.0';
-  const to = analysis?.to_version ?? '0.0.1';
-  const depType = analysis?.dep_scope === 'DEV' ? 'devDependencies' : 'dependencies';
+  const owners = ownersForNonOwner(codeowners);
+  const base = {
+    id: prId,
+    rank: 2,
+    repo: pr.repository_name,
+    title: pr.title,
+    author: pr.author_login,
+    branch: pr.base_ref || 'main',
+    ci,
+    ciText,
+    owners,
+    ownersText: owners === 'others' ? 'Os arquivos alterados têm outros donos' : '',
+    merge: mapMergeState(pr.mergeable_state),
+    turn: false,
+    dep: true,
+    files: [],
+  } satisfies Partial<PullRequestItem>;
 
-  const graph = analysis?.dependency_path_graph ?? [];
+  if (!analysis) {
+    // Nothing analysed this bump yet: say only what the PR title tells us.
+    const match = DEPENDABOT_TITLE.exec(pr.title);
+    const [pkg, from, to] = match ? [match[1], match[2], match[3]] : [undefined, undefined, undefined];
+    return {
+      ...base,
+      verdict: null,
+      radarTitle: pkg ? `${pkg} (${from} -> ${to})` : pr.title,
+      radarMeta: 'Sem análise de impacto',
+      pkg,
+      from,
+      to,
+      rvDetail: 'Análise de impacto ainda não executada.',
+      via: [],
+      blasts: [],
+      note: '',
+      noteWarn: false,
+      why: 'Análise de impacto ainda não executada para este PR.',
+    };
+  }
+
+  const verdictMap: Record<string, RiskVerdictTier> = { LOW: 'baixo', MEDIUM: 'medio', HIGH: 'alto' };
+  const verdict = verdictMap[analysis.risk_verdict] ?? null;
+  const pkg = analysis.package_name;
+  const from = analysis.from_version;
+  const to = analysis.to_version;
+  const depType = analysis.dep_scope === 'DEV' ? 'devDependencies' : 'dependencies';
+
+  const graph = analysis.dependency_path_graph ?? [];
   const intermediateNodes = graph.length > 2 ? graph.slice(1, -1) : [];
   const via: DependencyViaNode[] = intermediateNodes.map((n) => ({
     label: `⚙️ ${n.name} v${n.version} (${n.scope === 'DEV' ? 'Dev' : 'Prod'})`,
     info: `Dependência intermediária que traz ${pkg} para o projeto.`,
   }));
 
-  const usages = analysis?.blast_radius_usages ?? [];
+  const usages = analysis.blast_radius_usages ?? [];
   const blasts: BlastFileItem[] = usages.map((u) => ({
     file: `${u.file_path}:${u.line_number}`,
     kind: u.file_path.includes('test') || u.file_path.includes('spec') ? 'test' : 'prod',
@@ -369,50 +423,25 @@ function mapDependabotPrToModel(
     ],
   }));
 
-  const breakingNote = analysis?.advisories_and_notes?.[0];
+  const breakingNote = analysis.advisories_and_notes?.[0];
   const scopeLabel =
-    analysis?.dep_scope === 'DEV'
-      ? 'Dev Direta'
-      : analysis?.is_direct_dep
-        ? 'Prod Direta'
-        : 'Prod Transitiva';
+    analysis.dep_scope === 'DEV' ? 'Dev Direta' : analysis.is_direct_dep ? 'Prod Direta' : 'Prod Transitiva';
 
   return {
-    id: prId,
-    rank: 2,
-    repo: pr.repository_name,
-    title: pr.title,
+    ...base,
     radarTitle: `${pkg} (${from} -> ${to})`,
     radarMeta: `${scopeLabel} • ${usages.length} import(s) no código`,
-    author: pr.author_login,
-    branch: pr.base_ref || 'main',
     verdict,
-    ci,
-    ciText,
-    owners: 'ok',
-    ownersText: 'Sem dono obrigatório',
-    merge: mapMergeState(pr.mergeable_state),
-    size: '2 arquivos, lockfile incluído',
-    turn: false,
-    dep: true,
     pkg,
     from,
     to,
     depType,
-    score: analysis?.risk_score ?? 10,
+    score: analysis.risk_score,
     rvDetail: `${scopeLabel} (${pkg} ${from} → ${to}) com ${usages.length} import(s) detectado(s).`,
     via,
     blasts,
-    note: breakingNote
-      ? `⚠️ ${breakingNote.summary}`
-      : 'Nenhuma breaking change ou CVE registrada nesta versão.',
+    note: breakingNote ? `⚠️ ${breakingNote.summary}` : 'Nenhuma breaking change ou CVE registrada nesta versão.',
     noteWarn: Boolean(breakingNote?.is_breaking_note),
     why: 'Análise zero-clone concluída a partir do lockfile e AST do repositório.',
-    file: 'package.json',
-    hunk: [
-      { t: 'hdr', s: `@@ -18,3 +18,3 @@ "${depType}": {` },
-      { t: 'del', s: `- "${pkg}": "^${from}",` },
-      { t: 'add', s: `+ "${pkg}": "^${to}",` },
-    ],
   };
 }

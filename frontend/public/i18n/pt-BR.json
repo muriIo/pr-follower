@@ -52,7 +52,6 @@
   "drawer.blastRadius": "Raio de Impacto no Código",
   "drawer.noBlast": "Nenhum import deste pacote no seu código de produção.",
   "drawer.breakingNotes": "Notas de Quebra & CVEs",
-  "drawer.approveBeforeMerge": "Aprove antes de mesclar.",
   "drawer.ci.none": "Nenhum CI reportado para este commit",
   "drawer.codeowners.none": "Repositório sem CODEOWNERS",
   "drawer.blocked.conflict": "Mesclagem bloqueada: há conflitos com a branch base.",
@@ -107,5 +106,9 @@
   "import.error.failed": "Não foi possível falar com o GitHub. Tente novamente.",
   "seats.access.removed": "Sem acesso: o GitHub App foi desinstalado ou o repositório foi removido dele.",
   "seats.access.suspended": "Acesso suspenso: a instalação do GitHub App foi suspensa.",
-  "seats.access.fix": "Corrigir acesso"
+  "seats.access.fix": "Corrigir acesso",
+  "drawer.codeowners.unknown": "CODEOWNERS ainda não verificado",
+  "drawer.files.title": "Arquivos alterados",
+  "drawer.files.unavailable": "A prévia dos arquivos alterados ainda não está disponível.",
+  "drawer.files.noDiff": "Sem diff disponível para este arquivo."
 }

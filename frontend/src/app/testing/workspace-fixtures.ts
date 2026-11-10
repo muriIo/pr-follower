@@ -40,13 +40,39 @@ export function createInitialTimelineEvents(nowMs: number = Date.now()): readonl
   ];
 }
 
+/** Fixture literals keep a compact single-file shape; toFixtureItems maps them to the model. */
+type LegacyPr = Omit<PullRequestItem, 'files' | 'owners'> & {
+  readonly owners: PullRequestItem['owners'] | 'pend';
+  readonly file?: string;
+  readonly deltaAdd?: string;
+  readonly deltaDel?: string;
+  readonly hunk?: readonly DiffHunkLine[];
+};
+
+function toFixtureItems(prs: readonly LegacyPr[]): readonly PullRequestItem[] {
+  return prs.map(({ file, deltaAdd, deltaDel, hunk, owners, ...rest }) => ({
+    ...rest,
+    owners: owners === 'pend' ? 'others' : owners,
+    files: file
+      ? [
+          {
+            path: file,
+            additions: Number((deltaAdd ?? '+0').slice(1)) || 0,
+            deletions: Number((deltaDel ?? '-0').slice(1)) || 0,
+            hunk: hunk ?? [],
+          },
+        ]
+      : [],
+  }));
+}
+
 export function createInitialPrDataset(): readonly PullRequestItem[] {
   const hdr = (s: string): DiffHunkLine => ({ t: 'hdr', s });
   const ctx = (s: string): DiffHunkLine => ({ t: 'ctx', s: '  ' + s });
   const add = (s: string): DiffHunkLine => ({ t: 'add', s: '+ ' + s });
   const del = (s: string): DiffHunkLine => ({ t: 'del', s: '- ' + s });
 
-  const human: PullRequestItem[] = [
+  const human: LegacyPr[] = [
     {
       id: 142,
       rank: 1,
@@ -335,8 +361,8 @@ export function createInitialPrDataset(): readonly PullRequestItem[] {
     to: string,
     depType: 'dependencies' | 'devDependencies',
     verdict: RiskVerdictTier,
-    extra: Partial<PullRequestItem> = {},
-  ): PullRequestItem => ({
+    extra: Partial<LegacyPr> = {},
+  ): LegacyPr => ({
     id,
     rank,
     repo,
@@ -368,7 +394,7 @@ export function createInitialPrDataset(): readonly PullRequestItem[] {
     ...extra,
   });
 
-  return [
+  return toFixtureItems([
     ...human,
     makeDep(89, 2, 'arvore/checkout-api', 'axios', '1.7.7', '2.0.0', 'dependencies', 'alto', {
       radarTitle: 'bump axios from 1.7.7 to 2.0.0',
@@ -549,5 +575,5 @@ export function createInitialPrDataset(): readonly PullRequestItem[] {
         lines: ["import { Pool } from 'pg';", '', 'export const pool = new Pool({', '  connectionString: process.env.DATABASE_URL,', '});'],
       },
     }),
-  ];
+  ]);
 }

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, HostListener, inject, i
 import { DrawerViewModel, WorkspaceStore } from '../../../application/stores/workspace.store';
 import { TranslatePipe } from '../../../infrastructure/i18n/json-translation.gateway';
 import { CancellableActionComponent } from '../../common/cancellable-action/cancellable-action.component';
-import { DiffViewerComponent } from '../../common/diff-viewer/diff-viewer.component';
+import { ChangedFilesComponent } from './changed-files/changed-files.component';
 import { RiskBadgeComponent } from '../../common/risk-badge/risk-badge.component';
 import { StatusDotComponent } from '../../common/status-dot/status-dot.component';
 import { DependabotImpactComponent } from './dependabot-impact/dependabot-impact.component';
@@ -14,7 +14,7 @@ import { DependabotImpactComponent } from './dependabot-impact/dependabot-impact
     StatusDotComponent,
     RiskBadgeComponent,
     CancellableActionComponent,
-    DiffViewerComponent,
+    ChangedFilesComponent,
     DependabotImpactComponent,
     TranslatePipe,
   ],
