@@ -1,5 +1,7 @@
 package entity
 
+import "strings"
+
 // The PR state shown to users comes from GitHub: these helpers translate GitHub's
 // vocabulary and never invent a value we were not told.
 
@@ -90,4 +92,22 @@ const (
 // CodeownersKnown reports whether the repository was checked for a CODEOWNERS file.
 func (r Repository) CodeownersKnown() bool {
 	return r.CodeownersStatus != CodeownersUnknown
+}
+
+// RemotePullRequest is an open pull request as GitHub lists it, before PR Follower stores it.
+// The list carries no merge state or CI: those come from other reads (never guessed).
+type RemotePullRequest struct {
+	GitHubPRID  int64
+	Number      int
+	Title       string
+	AuthorLogin string
+	HTMLURL     string
+	IsDraft     bool
+	HeadSHA     string
+	BaseRef     string
+}
+
+// IsDependabotAuthor reports whether a PR author login is Dependabot ("dependabot[bot]").
+func IsDependabotAuthor(login string) bool {
+	return strings.Contains(strings.ToLower(login), "dependabot")
 }

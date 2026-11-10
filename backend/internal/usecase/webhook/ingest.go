@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -62,7 +61,7 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		return err
 	}
 
-	isDependabot := strings.Contains(strings.ToLower(p.AuthorLogin), "dependabot")
+	isDependabot := entity.IsDependabotAuthor(p.AuthorLogin)
 
 	pr := &entity.PullRequest{
 		RepositoryID:   repo.ID,

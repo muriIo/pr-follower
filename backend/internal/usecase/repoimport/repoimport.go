@@ -25,13 +25,23 @@ type UseCase struct {
 	tokens  port.UserTokenSource
 	github  port.GitHubUserAPI
 	repos   port.RepositoryRepository
+	prs     port.PullRequestSnapshotStore
+	checks  port.CheckRunRecorder
 	users   port.UserRepository
 	events  port.EventPublisher
 	nowFunc func() time.Time
 }
 
-func NewUseCase(tokens port.UserTokenSource, github port.GitHubUserAPI, repos port.RepositoryRepository, users port.UserRepository, events port.EventPublisher) *UseCase {
-	return &UseCase{tokens: tokens, github: github, repos: repos, users: users, events: events, nowFunc: time.Now}
+func NewUseCase(
+	tokens port.UserTokenSource,
+	github port.GitHubUserAPI,
+	repos port.RepositoryRepository,
+	prs port.PullRequestSnapshotStore,
+	checks port.CheckRunRecorder,
+	users port.UserRepository,
+	events port.EventPublisher,
+) *UseCase {
+	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, nowFunc: time.Now}
 }
 
 // ListAccounts returns the installations (user and organization accounts) the user can reach.
@@ -123,6 +133,11 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 	if err := uc.repos.Upsert(ctx, repo); err != nil {
 		return nil, err
 	}
+	// Read the open PRs before recording the follow: a failure leaves the repository unfollowed, so
+	// the user can simply import it again (every step converges, ADR-0011).
+	if err := uc.backfillOpenPullRequests(ctx, token, repo, *target); err != nil {
+		return nil, err
+	}
 	if err := uc.repos.SetUserFollow(ctx, userID, repo.ID, true); err != nil {
 		return nil, err
 	}
@@ -135,6 +150,84 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 		OccurredAt:     uc.nowFunc().UTC(),
 	})
 	return repo, nil
+}
+
+// backfillOpenPullRequests stores the repository's open PRs and their CI, so they show up without
+// waiting for their next webhook. A PR that is already stored is kept as is: webhooks keep it
+// current, and the older listing must never rewind it. Merge state stays unknown (the list does
+// not carry it) and no activity is published per PR.
+func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository) error {
+	open, err := uc.github.ListOpenPullRequests(ctx, token, target.Owner, target.Name)
+	if err != nil {
+		return err
+	}
+	for _, remote := range open {
+		if err := ctx.Err(); err != nil {
+			return context.Cause(ctx)
+		}
+		if _, err := uc.prs.GetByRepoAndNumber(ctx, repo.ID, remote.Number); err == nil {
+			continue
+		} else if !errors.Is(err, entity.ErrNotFound) {
+			return err
+		}
+		ci, err := uc.recordCheckRuns(ctx, token, repo, target, remote.HeadSHA)
+		if err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return context.Cause(ctx)
+		}
+		pr := &entity.PullRequest{
+			RepositoryID:   repo.ID,
+			RepositoryName: repo.FullName,
+			GitHubPRID:     remote.GitHubPRID,
+			Number:         remote.Number,
+			Title:          remote.Title,
+			AuthorLogin:    remote.AuthorLogin,
+			HTMLURL:        remote.HTMLURL,
+			IsDependabot:   entity.IsDependabotAuthor(remote.AuthorLogin),
+			IsDraft:        remote.IsDraft,
+			State:          entity.PRStateOpen,
+			MergeableState: entity.MergeableStateUnknown,
+			CIStatus:       ci,
+			HeadSHA:        remote.HeadSHA,
+			BaseRef:        remote.BaseRef,
+			UpdatedAt:      uc.nowFunc().UTC(),
+		}
+		if err := uc.prs.Upsert(ctx, pr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordCheckRuns reads a commit's check runs from GitHub, keeps those not behind what a webhook
+// already reported, and derives the commit's CI from everything known.
+func (uc *UseCase) recordCheckRuns(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, sha string) (entity.CIStatus, error) {
+	runs, err := uc.github.ListCommitCheckRuns(ctx, token, target.Owner, target.Name, sha)
+	if err != nil {
+		return "", err
+	}
+	for _, run := range runs {
+		run.RepositoryID = repo.ID
+		stored, err := uc.checks.GetCheckRun(ctx, run.ID)
+		switch {
+		case err == nil:
+			if *stored == run || !run.Supersedes(*stored) {
+				continue
+			}
+		case !errors.Is(err, entity.ErrNotFound):
+			return "", err
+		}
+		if err := uc.checks.UpsertCheckRun(ctx, run); err != nil {
+			return "", err
+		}
+	}
+	known, err := uc.checks.ListCheckRuns(ctx, repo.ID, sha)
+	if err != nil {
+		return "", err
+	}
+	return entity.DeriveCIStatus(known), nil
 }
 
 // codeownersPaths is where GitHub looks for CODEOWNERS, in its order of precedence.
