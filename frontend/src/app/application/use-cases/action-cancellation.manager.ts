@@ -104,13 +104,8 @@ export class ActionCancellationManager {
       active.controller.abort();
       return;
     }
-    this.finish(
-      key,
-      'cancel',
-      key === 'batch'
-        ? 'Lote cancelado. 1 PR mesclado, 3 continuam abertos.'
-        : 'Cancelado. Nada foi enviado ao GitHub.',
-    );
+    // Nothing is running: there is nothing to report, so just clear the action.
+    this.finish(key, 'cancel', null);
   }
 
   private setAction(key: string, entry: ActionStateEntry | null): void {

@@ -1,5 +1,11 @@
 export type PerspectiveView = 'seats' | 'inbox' | 'radar' | 'timeline' | 'import';
-export type SeatFilterType = 'todos' | 'turn' | 'deps';
+export type SeatFilterType = 'all' | 'turn' | 'deps';
+
+/**
+ * Display text that is rendered in the user's language: either an i18n key with parameters
+ * (what production code emits) or a literal string (test fixtures, user content).
+ */
+export type I18nText = string | { readonly key: string; readonly params?: Readonly<Record<string, string | number>> };
 export type RiskVerdictTier = 'baixo' | 'medio' | 'alto';
 /** CI of the PR head as GitHub reported it; `none` means no check was ever reported (e.g. no CI). */
 export type CiState = 'ok' | 'run' | 'fail' | 'none';
@@ -22,8 +28,8 @@ export interface DiffHunkLine {
 }
 
 export interface DependencyViaNode {
-  readonly label: string;
-  readonly info: string;
+  readonly label: I18nText;
+  readonly info: I18nText;
 }
 
 export interface BlastSnippet {
@@ -59,26 +65,26 @@ export interface PullRequestItem {
   readonly title: string;
   readonly seatTitle?: string;
   readonly radarTitle?: string;
-  readonly radarMeta?: string;
+  readonly radarMeta?: I18nText;
   readonly author: string;
   readonly branch: string;
   /** Dependabot risk verdict; null for human PRs and for bumps not analysed yet. */
   readonly verdict: RiskVerdictTier | null;
   readonly ci: CiState;
-  readonly ciText: string;
+  readonly ciText: I18nText;
   readonly owners: OwnersState;
-  readonly ownersText: string;
+  readonly ownersText: I18nText;
   readonly merge?: MergeState;
   /** Only when known. */
   readonly size?: string;
   readonly turn: boolean;
   readonly ownFiles?: number;
-  readonly ownPill?: string;
-  readonly claim?: string;
+  readonly ownPill?: I18nText;
+  readonly claim?: I18nText;
   readonly approvedBy?: string;
-  readonly muteBadge?: string;
-  readonly muteTip?: string;
-  readonly why: string;
+  readonly muteBadge?: I18nText;
+  readonly muteTip?: I18nText;
+  readonly why: I18nText;
   readonly files: readonly ChangedFileItem[];
   readonly focusRule?: string;
   readonly dep?: boolean;
@@ -87,7 +93,7 @@ export interface PullRequestItem {
   readonly to?: string;
   readonly depType?: 'dependencies' | 'devDependencies';
   readonly score?: number;
-  readonly rvDetail?: string;
+  readonly rvDetail?: I18nText;
   readonly via?: readonly DependencyViaNode[];
   readonly blast?: {
     readonly file: string;
@@ -96,7 +102,7 @@ export interface PullRequestItem {
     readonly lines: readonly string[];
   };
   readonly blasts?: readonly BlastFileItem[];
-  readonly note?: string;
+  readonly note?: I18nText;
   readonly noteWarn?: boolean;
 }
 
@@ -134,7 +140,7 @@ export interface WorkspaceDataset {
   readonly prs: readonly PullRequestItem[];
   readonly events: readonly TimelineEventItem[];
   readonly approvedMap?: Record<number, boolean>;
-  readonly silencedMap?: Record<number, string>;
+  readonly silencedMap?: Record<number, I18nText>;
 }
 
 /** The signed-in GitHub user (ADR-0010). Tokens never reach the browser. */
@@ -188,7 +194,7 @@ export function computeSemverBumpLabel(fromVersion: string, toVersion: string): 
 
 export function isActionableTurn(
   pr: PullRequestItem,
-  silenced: Record<number, string>,
+  silenced: Readonly<Record<number, unknown>>,
   approved: Record<number, boolean>,
 ): boolean {
   return Boolean(pr.turn && !silenced[pr.id] && !approved[pr.id]);

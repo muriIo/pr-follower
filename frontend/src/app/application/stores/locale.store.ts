@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { I18nText } from '../../domain/models/workspace.models';
 import { TRANSLATION_GATEWAY } from '../../domain/gateways/workspace.gateways';
 
 const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
@@ -18,9 +19,9 @@ const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
   'seats.access.removed': 'Sem acesso: o GitHub App foi desinstalado ou o repositório foi removido dele.',
   'seats.access.suspended': 'Acesso suspenso: a instalação do GitHub App foi suspensa.',
   'seats.access.fix': 'Corrigir acesso',
-  'seats.filter.all': 'Todos',
-  'seats.filter.turn': 'Com PRs na Minha Vez',
-  'seats.filter.deps': 'Dependabot Pendente',
+  'seats.filter.all': 'Todos ({count})',
+  'seats.filter.turn': 'Com PRs na Minha Vez ({count})',
+  'seats.filter.deps': 'Dependabot Pendente ({count})',
   'seats.ci.stable': 'CI Estável',
   'seats.ci.failing': 'CI Falhando',
   'seats.ci.running': 'CI Rodando',
@@ -123,6 +124,150 @@ const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
   'import.error.not_found': 'O GitHub não confirmou o acesso a esse repositório. Ajuste as permissões do app.',
   'import.error.not_configured': 'A importação de repositórios não está configurada neste servidor.',
   'import.error.failed': 'Não foi possível falar com o GitHub. Tente novamente.',
+  "risk.baixo": "Baixo Risco",
+  "risk.medio": "Médio Risco",
+  "risk.alto": "Alto Risco",
+  "risk.tier.baixo": "🟢 Baixo Risco",
+  "risk.tier.medio": "🟡 Médio Risco",
+  "risk.tier.alto": "🔴 Alto Risco",
+  "risk.tier.none": "⚪ Sem análise",
+  "seats.ownFiles.one": "{count} arquivo seu",
+  "seats.ownFiles.other": "{count} arquivos seus",
+  "seats.riskTip.dev": "Só afeta desenvolvimento e build. Não chega à produção.",
+  "seats.riskTip.prod": "Código que roda em produção. Veja o raio de impacto no drawer.",
+  "seats.riskTip.human": "Veja o veredito completo no drawer.",
+  "seats.approvedTip.mine": "Sua aprovação foi registrada. O PR ainda não foi mesclado.",
+  "seats.approvedTip.team": "Já aprovado por alguém do time. Sua revisão não é necessária.",
+  "seats.approvedByYou": "Aprovado por você",
+  "seats.approvedByTeam": "Aprovado pelo Time ({login})",
+  "seats.quickTip.merge": "Mescla o PR com squash.",
+  "seats.quickTip.approve": "Registra sua aprovação sem mesclar. Depois, use Squash.",
+  "seats.quick.approve": "Aprovar",
+  "seats.ci.failing.one": "{count} CI Falhando",
+  "seats.ci.failing.other": "{count} CI Falhando",
+  "seats.ci.running.one": "{count} CI Rodando",
+  "seats.ci.running.other": "{count} CI Rodando",
+  "seats.ci.failTip": "PRs abertos deste repositório com CI falhando.",
+  "seats.ci.runTip": "PRs abertos deste repositório com CI ainda rodando.",
+  "seats.ci.okTip": "Nenhum PR aberto com CI falhando ou rodando.",
+  "seats.openPrs.one": "{count} PR Aberto",
+  "seats.openPrs.other": "{count} PRs Abertos",
+  "radar.group.alto": "🔴 Alto Risco — Requer Análise de Impacto",
+  "radar.group.baixo": "🟢 Baixo Risco — Seguros para Merge Rápido",
+  "radar.group.medio": "🟡 Médio Risco — Revisar Antes de Mesclar",
+  "radar.group.none": "⚪ Sem análise — risco ainda não avaliado",
+  "radar.metaTip.transitive": "Transitiva: chega ao projeto por meio de outro pacote. Veja o caminho na árvore do drawer.",
+  "radar.metaTip.dev": "Usada só em desenvolvimento. Não entra no build de produção.",
+  "radar.metaTip.prod": "Declarada no package.json e carregada em produção.",
+  "radar.ci.ok": "CI verde",
+  "radar.ci.run": "CI rodando",
+  "radar.ci.fail": "CI falhando",
+  "radar.batch.title": "🟢 {count} PRs de Baixo Risco prontos para mesclagem segura (devDependencies ou transitivos sem import direto e CI verde)",
+  "radar.batch.approveRest": "Aprovar os {count} Restantes",
+  "radar.batch.approveAll": "Aprovar Todos os {count}",
+  "radar.batch.mergeApproved": "Mesclar {count} Aprovado(s)",
+  "radar.batch.mergeAll": "Mesclar Todos os {count}",
+  "timeline.group.now": "Agora",
+  "timeline.group.lastHour": "Última hora",
+  "timeline.group.today": "Hoje",
+  "timeline.group.yesterday": "Ontem",
+  "timeline.group.older": "Mais antigas",
+  "drawer.banner.focus": "Você foi acionado via regra {rule}. Seus arquivos aparecem primeiro, marcados como \"Seu\".",
+  "drawer.mergeTip": "Mescla o PR com squash: todos os commits viram um só na branch padrão.",
+  "actions.approving": "Aprovando PR...",
+  "actions.canceled.nothingSent": "Cancelado. Nada foi enviado ao GitHub.",
+  "actions.merging": "Mesclando via squash...",
+  "actions.mergedSha": "Mesclado via squash em {sha}.",
+  "actions.merged": "Mesclado via squash.",
+  "actions.canceled.mergeKeepsOpen": "Cancelado. O PR continua aberto e aprovado.",
+  "silenced.commit": "🔕 Silenciado até o próximo commit",
+  "silenced.ci": "🔕 Silenciado até o CI passar",
+  "silenced.radar": "🔕 Silenciado no Radar",
+  "actions.silencing": "Silenciando...",
+  "actions.silenced": "PR silenciado.",
+  "actions.canceled.silence": "Cancelado. O PR continua na sua fila.",
+  "actions.commenting": "Enviando {command}...",
+  "actions.commented": "Comentário enviado: {command}.",
+  "actions.syncing.one": "Sincronizando {count} repositório...",
+  "actions.syncing.other": "Sincronizando {count} repositórios...",
+  "actions.synced": "Sincronizado agora.",
+  "actions.syncCanceled": "Sincronização cancelada.",
+  "actions.batch.approving": "Aprovando {current} de {total}...",
+  "actions.batch.approveCanceledNone": "Lote cancelado. Nenhum PR foi aprovado.",
+  "actions.batch.approveCanceled.one": "Lote cancelado. {count} PR aprovado, {rest} sem aprovação.",
+  "actions.batch.approveCanceled.other": "Lote cancelado. {count} PRs aprovados, {rest} sem aprovação.",
+  "actions.batch.merging": "Mesclando {current} de {total}...",
+  "actions.batch.merged.one": "{count} PR mesclado via squash.",
+  "actions.batch.merged.other": "{count} PRs mesclados via squash.",
+  "actions.batch.mergeCanceledNone": "Lote cancelado. Nenhum PR foi mesclado.",
+  "actions.batch.mergeCanceled.one": "Lote cancelado. {count} PR mesclado, {rest} continuam abertos.",
+  "actions.batch.mergeCanceled.other": "Lote cancelado. {count} PRs mesclados, {rest} continuam abertos.",
+  "timeline.local.approved": "Você aprovou #{pr}",
+  "timeline.local.merged": "Você mesclou #{pr} via squash",
+  "inbox.ci.ok": "CI Verde",
+  "inbox.ci.run": "CI Pendente",
+  "inbox.ci.fail": "CI Falhando",
+  "inbox.badge.approvedByYou": "✅ Você aprovou",
+  "inbox.badgeTip.silenced": "Silenciado por você. Volta à fila quando a condição for atendida.",
+  "impact.root.info": "Raiz do projeto, definida no package.json.",
+  "impact.target.info": "Pacote que esta atualização altera.",
+  "impact.uses.one": "{count} uso",
+  "impact.uses.other": "{count} usos",
+  "impact.rvHead": "{tier} (Score {score}/100)",
+  "impact.blast.title.one": "Raio de Impacto no Código — {count} arquivo afetado",
+  "impact.blast.title.other": "Raio de Impacto no Código — {count} arquivos afetados",
+  "impact.blast.prod.one": "{count} em produção",
+  "impact.blast.prod.other": "{count} em produção",
+  "impact.blast.test.one": "{count} em testes",
+  "impact.blast.test.other": "{count} em testes",
+  "impact.blast.breaking.one": "{count} usa API que quebra",
+  "impact.blast.breaking.other": "{count} usam API que quebra",
+  "impact.blast.more.one": "Ver mais {count} arquivo",
+  "impact.blast.more.other": "Ver mais {count} arquivos",
+  "impact.blast.moreTests": " (testes)",
+  "impact.blast.collapseAll": "Recolher todos",
+  "impact.blast.expandAll": "Expandir todos",
+  "ci.text.fail": "Checks falhando no CI",
+  "ci.text.run": "CI em execução",
+  "ci.text.ok": "Todos os checks passaram",
+  "drawer.why.voce": "Você é dono de arquivos alterados neste PR (CODEOWNERS).",
+  "drawer.why.ok": "Já aprovado por alguém do time.",
+  "drawer.why.others": "Os arquivos alterados pertencem a outros donos no CODEOWNERS.",
+  "drawer.why.none": "Este repositório não tem CODEOWNERS: nenhuma revisão é atribuída automaticamente.",
+  "drawer.why.unknown": "Ainda não verificamos o CODEOWNERS deste repositório.",
+  "owners.voce.count.one": "Você é dono de {count} arquivo",
+  "owners.voce.count.other": "Você é dono de {count} arquivos",
+  "owners.voce": "Você é dono de arquivos alterados",
+  "owners.approvedBy": "Aprovado por {login}",
+  "owners.others": "Os arquivos alterados têm outros donos",
+  "inbox.mute.teammate": "✅ Time já aprovou ({login})",
+  "inbox.mute.teammateTip": "A aprovação de um colega do seu time dispensa a sua revisão.",
+  "inbox.mute.author": "⏳ Aguardando Autor (você comentou no SHA atual)",
+  "inbox.mute.authorTip": "Volta para sua fila quando o autor enviar um novo commit.",
+  "inbox.mute.draft": "🚧 Rascunho",
+  "inbox.mute.draftTip": "Entra na fila quando o autor marcar o PR como pronto para revisão.",
+  "inbox.mute.ci": "🚧 CI em execução",
+  "inbox.mute.ciTip": "Entra na fila quando o CI terminar.",
+  "inbox.ownPill.one": "🎯 Toca {count} arquivo seu",
+  "inbox.ownPill.other": "🎯 Toca {count} arquivos seus",
+  "inbox.claim": "Assumido por {login}",
+  "radar.meta.none": "Sem análise de impacto",
+  "impact.rvDetail.none": "Análise de impacto ainda não executada.",
+  "drawer.why.depNone": "Análise de impacto ainda não executada para este PR.",
+  "impact.via.info": "Dependência intermediária que traz {pkg} para o projeto.",
+  "radar.meta.devDirect": "Dev Direta • {count} import(s) no código",
+  "radar.meta.prodDirect": "Prod Direta • {count} import(s) no código",
+  "radar.meta.prodTransitive": "Prod Transitiva • {count} import(s) no código",
+  "impact.rvDetail.devDirect": "Dev Direta ({pkg} {from} → {to}) com {count} import(s) detectado(s).",
+  "impact.rvDetail.prodDirect": "Prod Direta ({pkg} {from} → {to}) com {count} import(s) detectado(s).",
+  "impact.rvDetail.prodTransitive": "Prod Transitiva ({pkg} {from} → {to}) com {count} import(s) detectado(s).",
+  "impact.note.clean": "Nenhuma breaking change ou CVE registrada nesta versão.",
+  "drawer.why.depDone": "Análise zero-clone concluída a partir do lockfile e AST do repositório.",
+  "radar.subtitle": "{prs} PRs abertos em {repos} repositórios, agrupados por risco.",
+  "impact.blast.breaks": "Usa API que quebra",
+  "drawer.ariaLabel": "Inspeção do PR",
+  "drawer.merged": "Este PR já foi mesclado.",
+  "auth.footer": "GitHub App · CODEOWNERS & Dependabot Radar",
 };
 
 @Injectable({ providedIn: 'root' })
@@ -132,8 +277,26 @@ export class LocaleStore {
   readonly locale = signal<'pt-BR' | 'en-US'>('pt-BR');
   readonly dictionary = signal<Record<string, string>>({ ...DEFAULT_PT_BR_DICTIONARY });
 
-  translate(key: string): string {
-    return this.dictionary()[key] ?? DEFAULT_PT_BR_DICTIONARY[key] ?? key;
+  /** The message for key in the current language, with {name} placeholders filled from params. */
+  translate(key: string, params?: Readonly<Record<string, string | number>>): string {
+    const message = this.dictionary()[key] ?? DEFAULT_PT_BR_DICTIONARY[key] ?? key;
+    if (!params) {
+      return message;
+    }
+    return message.replace(/\{(\w+)\}/g, (match, name: string) => (name in params ? String(params[name]) : match));
+  }
+
+  /** `${base}.one` for a count of 1, `${base}.other` otherwise; {count} is filled in. */
+  plural(base: string, count: number, params?: Readonly<Record<string, string | number>>): string {
+    return this.translate(`${base}.${count === 1 ? 'one' : 'other'}`, { count, ...params });
+  }
+
+  /** Renders I18nText: a literal string as is, a key in the current language. */
+  text(value: I18nText | undefined): string {
+    if (value === undefined) {
+      return '';
+    }
+    return typeof value === 'string' ? value : this.translate(value.key, value.params);
   }
 
   async switchLocale(nextLocale: 'pt-BR' | 'en-US'): Promise<void> {

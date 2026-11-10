@@ -1,4 +1,4 @@
-<aside class="pf-drawer" aria-label="Inspeção do PR" [style.--pf-dw.px]="store.drawerWidth()">
+<aside class="pf-drawer" [attr.aria-label]="'drawer.ariaLabel' | t" [style.--pf-dw.px]="store.drawerWidth()">
   <div
     id="pf-drawer-resize"
     class="pf-resize"
@@ -129,7 +129,7 @@
     />
 
     @if (drawer().showMerged) {
-      <p class="pf-note pf-note-ok">Este PR já foi mesclado.</p>
+      <p class="pf-note pf-note-ok">{{ 'drawer.merged' | t }}</p>
     }
 
     @if (drawer().showSecondary) {
@@ -155,7 +155,7 @@
             type="button"
             class="pf-btn"
             [attr.aria-disabled]="drawer().busyDis"
-            (click)="store.silencePr(drawer().id, '🔕 Silenciado no Radar')"
+            (click)="store.silencePr(drawer().id, 'radar')"
           >
             {{ 'drawer.silence' | t }}
           </button>
@@ -167,7 +167,7 @@
             type="button"
             class="pf-btn"
             [attr.aria-disabled]="drawer().busyDis"
-            (click)="store.silencePr(drawer().id, '🔕 Silenciado até o próximo commit')"
+            (click)="store.silencePr(drawer().id, 'commit')"
           >
             {{ 'drawer.silenceCommit' | t }}
           </button>
@@ -175,7 +175,7 @@
             type="button"
             class="pf-btn"
             [attr.aria-disabled]="drawer().busyDis"
-            (click)="store.silencePr(drawer().id, '🔕 Silenciado até o CI passar')"
+            (click)="store.silencePr(drawer().id, 'ci')"
           >
             {{ 'drawer.silenceCi' | t }}
           </button>

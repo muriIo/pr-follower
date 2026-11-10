@@ -83,3 +83,13 @@ describe('ActionCancellationManager (Cooperative AbortSignal Manager)', () => {
     expect(manager.getView(undefined, 'batch').note).toBe('Lote cancelado no passo 0.');
   });
 });
+
+describe('ActionCancellationManager without a running action', () => {
+  it('clears the action instead of reporting invented results', () => {
+    TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+    const manager = TestBed.inject(ActionCancellationManager);
+    manager.cancel('batch');
+    expect(manager.getView(manager.actionsState(), 'batch').note).toBe('');
+    expect(manager.getView(manager.actionsState(), 'batch').idle).toBe(true);
+  });
+});

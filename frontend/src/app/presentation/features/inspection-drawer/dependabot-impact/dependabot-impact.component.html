@@ -60,7 +60,7 @@
                 <app-risk-badge badgeClass="pf-tag" [label]="b.usesLabel" />
               }
               @if (b.breaks) {
-                <app-risk-badge badgeClass="pf-badge-alto" label="Usa API que quebra" />
+                <app-risk-badge badgeClass="pf-badge-alto" [label]="'impact.blast.breaks' | t" />
               }
             </span>
           </button>

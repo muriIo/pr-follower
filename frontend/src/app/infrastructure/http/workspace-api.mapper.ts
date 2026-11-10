@@ -5,6 +5,7 @@ import {
   CodeownersState,
   DependencyViaNode,
   DiffHunkLine,
+  I18nText,
   MergeState,
   OwnersState,
   PullRequestItem,
@@ -153,7 +154,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
 
   const prs: PullRequestItem[] = [];
   const approvedMap: Record<number, boolean> = {};
-  const silencedMap: Record<number, string> = {};
+  const silencedMap: Record<number, I18nText> = {};
 
   for (const item of snapshot.inbox_waiting_on_me ?? []) {
     const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap, codeownersOf(item.pull_request.repository_name));
@@ -168,9 +169,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
     }
     if (item.user_state.turn_state === 'SNOOZED') {
       silencedMap[mapped.id] =
-        item.user_state.snoozed_until_condition === 'UNTIL_CI_GREEN'
-          ? '🔕 Silenciado até o CI passar'
-          : '🔕 Silenciado até o próximo commit';
+        item.user_state.snoozed_until_condition === 'UNTIL_CI_GREEN' ? { key: 'silenced.ci' } : { key: 'silenced.commit' };
     }
   }
 
@@ -214,15 +213,20 @@ export function mapActivityEventToTimelineItem(
   };
 }
 
-function mapCiStatus(status: ApiPullRequestDto['ci_status']): { ci: CiState; ciText: string } {
+/** An I18nText for a count-dependent message: `<base>.one` or `<base>.other`, with `{count}`. */
+function pluralText(base: string, count: number, params?: Readonly<Record<string, string | number>>): I18nText {
+  return { key: `${base}.${count === 1 ? 'one' : 'other'}`, params: { count, ...params } };
+}
+
+function mapCiStatus(status: ApiPullRequestDto['ci_status']): { ci: CiState; ciText: I18nText } {
   if (status === 'FAILURE') {
-    return { ci: 'fail', ciText: 'Checks falhando no CI' };
+    return { ci: 'fail', ciText: { key: 'ci.text.fail' } };
   }
   if (status === 'PENDING') {
-    return { ci: 'run', ciText: 'CI em execução' };
+    return { ci: 'run', ciText: { key: 'ci.text.run' } };
   }
   if (status === 'SUCCESS') {
-    return { ci: 'ok', ciText: 'Todos os checks passaram' };
+    return { ci: 'ok', ciText: { key: 'ci.text.ok' } };
   }
   // NONE, or a value this client does not know yet: never claim a result GitHub did not report.
   return { ci: 'none', ciText: '' };
@@ -288,12 +292,12 @@ function ownersForNonOwner(codeowners: CodeownersState | undefined, approvedBy?:
   return 'others';
 }
 
-const OWNERS_REASON: Record<OwnersState, string> = {
-  voce: 'Você é dono de arquivos alterados neste PR (CODEOWNERS).',
-  ok: 'Já aprovado por alguém do time.',
-  others: 'Os arquivos alterados pertencem a outros donos no CODEOWNERS.',
-  none: 'Este repositório não tem CODEOWNERS: nenhuma revisão é atribuída automaticamente.',
-  unknown: 'Ainda não verificamos o CODEOWNERS deste repositório.',
+const OWNERS_REASON: Record<OwnersState, I18nText> = {
+  voce: { key: 'drawer.why.voce' },
+  ok: { key: 'drawer.why.ok' },
+  others: { key: 'drawer.why.others' },
+  none: { key: 'drawer.why.none' },
+  unknown: { key: 'drawer.why.unknown' },
 };
 
 function mapInboxPrToModel(
@@ -313,29 +317,29 @@ function mapInboxPrToModel(
     : undefined;
 
   const owners: OwnersState = isActionable ? 'voce' : ownersForNonOwner(codeowners, approvedBy);
-  const ownersText = {
-    voce: ownedFiles.length > 0 ? `Você é dono de ${ownedFiles.length} arquivo(s)` : 'Você é dono de arquivos alterados',
-    ok: `Aprovado por ${approvedBy}`,
-    others: 'Os arquivos alterados têm outros donos',
+  const ownersText: I18nText = {
+    voce: ownedFiles.length > 0 ? pluralText('owners.voce.count', ownedFiles.length) : { key: 'owners.voce' },
+    ok: { key: 'owners.approvedBy', params: { login: approvedBy ?? '' } },
+    others: { key: 'owners.others' },
     none: '',
     unknown: '',
   }[owners];
 
-  let muteBadge: string | undefined;
-  let muteTip: string | undefined;
+  let muteBadge: I18nText | undefined;
+  let muteTip: I18nText | undefined;
   if (!isActionable) {
     if (st.turn_state === 'TEAMMATE_APPROVED' && approvedBy) {
-      muteBadge = `✅ Time já aprovou (${approvedBy})`;
-      muteTip = 'A aprovação de um colega do seu time dispensa a sua revisão.';
+      muteBadge = { key: 'inbox.mute.teammate', params: { login: approvedBy } };
+      muteTip = { key: 'inbox.mute.teammateTip' };
     } else if (st.turn_state === 'WAITING_ON_AUTHOR') {
-      muteBadge = '⏳ Aguardando Autor (você comentou no SHA atual)';
-      muteTip = 'Volta para sua fila quando o autor enviar um novo commit.';
+      muteBadge = { key: 'inbox.mute.author' };
+      muteTip = { key: 'inbox.mute.authorTip' };
     } else if (pr.is_draft) {
-      muteBadge = '🚧 Rascunho';
-      muteTip = 'Entra na fila quando o autor marcar o PR como pronto para revisão.';
+      muteBadge = { key: 'inbox.mute.draft' };
+      muteTip = { key: 'inbox.mute.draftTip' };
     } else if (st.turn_state === 'HIDDEN_GATE' && pr.ci_status === 'PENDING') {
-      muteBadge = '🚧 CI em execução';
-      muteTip = 'Entra na fila quando o CI terminar.';
+      muteBadge = { key: 'inbox.mute.ci' };
+      muteTip = { key: 'inbox.mute.ciTip' };
     }
   }
 
@@ -354,8 +358,8 @@ function mapInboxPrToModel(
     merge: mapMergeState(pr.mergeable_state),
     turn: isActionable,
     ownFiles: ownedFiles.length || undefined,
-    ownPill: ownedFiles.length > 0 ? `🎯 Toca ${ownedFiles.length} arquivo(s) seu(s)` : undefined,
-    claim: pr.claimed_by_login ? `Assumido por @${pr.claimed_by_login.replace(/^@/, '')}` : undefined,
+    ownPill: ownedFiles.length > 0 ? pluralText('inbox.ownPill', ownedFiles.length) : undefined,
+    claim: pr.claimed_by_login ? { key: 'inbox.claim', params: { login: `@${pr.claimed_by_login.replace(/^@/, '')}` } } : undefined,
     approvedBy,
     muteBadge,
     muteTip,
@@ -391,7 +395,7 @@ function mapDependabotPrToModel(
     ci,
     ciText,
     owners,
-    ownersText: owners === 'others' ? 'Os arquivos alterados têm outros donos' : '',
+    ownersText: owners === 'others' ? { key: 'owners.others' } : '',
     merge: mapMergeState(pr.mergeable_state),
     turn: false,
     dep: true,
@@ -406,16 +410,16 @@ function mapDependabotPrToModel(
       ...base,
       verdict: null,
       radarTitle: pkg ? `${pkg} (${from} -> ${to})` : pr.title,
-      radarMeta: 'Sem análise de impacto',
+      radarMeta: { key: 'radar.meta.none' },
       pkg,
       from,
       to,
-      rvDetail: 'Análise de impacto ainda não executada.',
+      rvDetail: { key: 'impact.rvDetail.none' },
       via: [],
       blasts: [],
       note: '',
       noteWarn: false,
-      why: 'Análise de impacto ainda não executada para este PR.',
+      why: { key: 'drawer.why.depNone' },
     };
   }
 
@@ -430,7 +434,7 @@ function mapDependabotPrToModel(
   const intermediateNodes = graph.length > 2 ? graph.slice(1, -1) : [];
   const via: DependencyViaNode[] = intermediateNodes.map((n) => ({
     label: `⚙️ ${n.name} v${n.version} (${n.scope === 'DEV' ? 'Dev' : 'Prod'})`,
-    info: `Dependência intermediária que traz ${pkg} para o projeto.`,
+    info: { key: 'impact.via.info', params: { pkg } },
   }));
 
   const usages = analysis.blast_radius_usages ?? [];
@@ -449,24 +453,23 @@ function mapDependabotPrToModel(
   }));
 
   const breakingNote = analysis.advisories_and_notes?.[0];
-  const scopeLabel =
-    analysis.dep_scope === 'DEV' ? 'Dev Direta' : analysis.is_direct_dep ? 'Prod Direta' : 'Prod Transitiva';
+  const scope = analysis.dep_scope === 'DEV' ? 'devDirect' : analysis.is_direct_dep ? 'prodDirect' : 'prodTransitive';
 
   return {
     ...base,
     radarTitle: `${pkg} (${from} -> ${to})`,
-    radarMeta: `${scopeLabel} • ${usages.length} import(s) no código`,
+    radarMeta: { key: `radar.meta.${scope}`, params: { count: usages.length } },
     verdict,
     pkg,
     from,
     to,
     depType,
     score: analysis.risk_score,
-    rvDetail: `${scopeLabel} (${pkg} ${from} → ${to}) com ${usages.length} import(s) detectado(s).`,
+    rvDetail: { key: `impact.rvDetail.${scope}`, params: { pkg, from, to, count: usages.length } },
     via,
     blasts,
-    note: breakingNote ? `⚠️ ${breakingNote.summary}` : 'Nenhuma breaking change ou CVE registrada nesta versão.',
+    note: breakingNote ? `⚠️ ${breakingNote.summary}` : { key: 'impact.note.clean' },
     noteWarn: Boolean(breakingNote?.is_breaking_note),
-    why: 'Análise zero-clone concluída a partir do lockfile e AST do repositório.',
+    why: { key: 'drawer.why.depDone' },
   };
 }

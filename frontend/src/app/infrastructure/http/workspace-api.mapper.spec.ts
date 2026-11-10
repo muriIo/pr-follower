@@ -176,7 +176,7 @@ describe('workspace-api.mapper', () => {
 
     const codePr = dataset!.prs.find((p) => p.id === 142)!;
     expect(codePr.turn).toBe(true);
-    expect(codePr.claim).toBe('Assumido por @murilo');
+    expect(codePr.claim).toEqual({ key: 'inbox.claim', params: { login: '@murilo' } });
     expect(codePr.files[0].additions).toBe(24);
     expect(codePr.files[0].deletions).toBe(3);
     expect(codePr.files[0].hunk.length).toBe(4);
@@ -334,8 +334,7 @@ describe('workspace-api.mapper', () => {
       expect(item.size).toBeUndefined();
       expect(item.files).toEqual([]);
       expect(item.owners).toBe('none');
-      expect(item.why).not.toContain('Gate de Turno');
-      expect(item.why).toContain('não tem CODEOWNERS');
+      expect(item.why).toEqual({ key: 'drawer.why.none' });
     });
 
     it('distinguishes an unchecked CODEOWNERS from files owned by others', () => {
@@ -349,7 +348,7 @@ describe('workspace-api.mapper', () => {
       expect(prs.find((p) => p.id === 1)!.owners).toBe('unknown');
       const owned = prs.find((p) => p.id === 2)!;
       expect(owned.owners).toBe('others');
-      expect(owned.ownersText).toBe('Os arquivos alterados têm outros donos');
+      expect(owned.ownersText).toEqual({ key: 'owners.others' });
     });
 
     it('keeps every changed file the user owns, each with its own diff', () => {
@@ -363,7 +362,7 @@ describe('workspace-api.mapper', () => {
         [{ pull_request: pr(3, 'acme/owned'), user_state: state({ turn_state: 'WAITING_ON_ME', owned_files_changed: files }) }],
       );
       expect(item.owners).toBe('voce');
-      expect(item.ownersText).toBe('Você é dono de 2 arquivo(s)');
+      expect(item.ownersText).toEqual({ key: 'owners.voce.count.other', params: { count: 2 } });
       expect(item.files.map((f) => [f.path, f.additions, f.deletions])).toEqual([
         ['src/a.ts', 3, 1],
         ['src/b.ts', 1, 0],
@@ -382,7 +381,7 @@ describe('workspace-api.mapper', () => {
       expect(parsed.size).toBeUndefined();
       expect(parsed.files).toEqual([]);
       expect(parsed.note).toBe('');
-      expect(parsed.why).toBe('Análise de impacto ainda não executada para este PR.');
+      expect(parsed.why).toEqual({ key: 'drawer.why.depNone' });
       expect(parsed.owners).toBe('none');
 
       const [unparsed] = map([repo('acme/web')], [], [], [dep('Bump the npm group across 3 directories')]);

@@ -53,7 +53,7 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     // Filter seats
     store.setSeatFilter('turn');
     expect(store.seats().length).toBe(2);
-    store.setSeatFilter('todos');
+    store.setSeatFilter('all');
 
     // Open CODEOWNERS PR #142 in drawer
     store.openPr(142);
