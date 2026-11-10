@@ -1,6 +1,6 @@
 # PR Follower
 
-A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec and validated architecture: `manifest.md`. UI direction (Hive-inspired): `design/`.
+A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec: `manifest.md`. Design, data model, analysis and turn-state behaviour, and the **open-work list**: `docs/implementation-plan.md` (read it before starting a feature; tick items off in the PR that finishes them). UI direction (Hive-inspired): `design/`.
 
 ```
 backend/    Go 1.27 · chi/net/http · pgx + sqlc · goose (embedded) · SSE hub
@@ -40,7 +40,7 @@ Run `make check` from the root (ADR gate, gofmt, vet, migration and architecture
 
 - `go.mod` pins Go 1.27.3; with `GOTOOLCHAIN=auto` the host Go downloads it on first use.
 - `sqlc` is not installed on the host. Regenerate with `cd backend && docker run --rm -v "$PWD":/src -w /src sqlc/sqlc:1.28.0 generate`, matching the version in the `sqlcgen` headers.
-- GitHub integration is still a stub: `GITHUB_APP_ID`, `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are loaded by `config` but unused, the GitHub gateway in `cmd/server/main.go` runs without a token, and `AuthLogin` fabricates the user. Only `GITHUB_WEBHOOK_SECRET` is live. Update this line when that changes.
+- GitHub auth is still a stub (no token reaches the gateway; `AuthLogin` fabricates the user). Details and the rest of the unfinished work: Status in `docs/implementation-plan.md`.
 - Secrets go in a git-ignored `.env`; keep them out of commits, compose files and logs.
 - The Angular CLI MCP server is configured in `frontend/.mcp.json`; use it for Angular API and best-practice lookups.
 
