@@ -4,6 +4,7 @@ import {
   AUTH_GATEWAY,
   LIVE_EVENT_GATEWAY,
   PULL_REQUEST_GATEWAY,
+  REPOSITORY_IMPORT_GATEWAY,
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
 import { AuthenticatedUser, buildAuthenticatedUser } from '../../../domain/models/workspace.models';
@@ -46,6 +47,16 @@ describe('WorkspaceShellComponent', () => {
               onState('conectado');
               return () => undefined;
             },
+          },
+        },
+        {
+          provide: REPOSITORY_IMPORT_GATEWAY,
+          useValue: {
+            listAccounts: async () => ({ accounts: [], installUrl: '' }),
+            listRepositories: async () => [],
+            importRepository: async () => 1,
+            unfollowRepository: async () => undefined,
+            consumeSetupRedirect: () => null,
           },
         },
         {
@@ -101,6 +112,11 @@ describe('WorkspaceShellComponent', () => {
     fixture.componentInstance.store.setPerspective('timeline');
     fixture.detectChanges();
     expect(el.querySelector('app-timeline-view')).toBeTruthy();
+
+    // Open the repository import screen
+    fixture.componentInstance.store.setPerspective('import');
+    fixture.detectChanges();
+    expect(el.querySelector('app-repository-import-view')).toBeTruthy();
 
     // Logout -> returns to login-view
     await fixture.componentInstance.authStore.logout();

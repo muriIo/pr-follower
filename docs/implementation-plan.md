@@ -95,7 +95,8 @@ Done: backend core (domain, use cases, persistence, SSE, chi router, webhook HMA
 Open:
 
 - [x] **GitHub-only sign-in** (ADR-0010): web flow with state + PKCE, server-side sessions in an HttpOnly cookie, tokens encrypted at rest and refreshed, every `/api/v1` route behind `RequireSession`, single "Entrar com GitHub" screen.
-- [ ] **Vercel-style repository import** (ADR-0010 §5): list the user's installations and repositories (`GET /user/installations`, `/user/installations/{id}/repositories`), account switcher and search, "install / adjust GitHub App" link, Setup URL back to the import screen, `installation` / `installation_repositories` webhooks. Replaces the free-form `POST /api/v1/repositories/follow`.
+- [x] **Vercel-style repository import** (ADR-0010 §5): accounts and repositories listed with the user's token, import verified against GitHub, unfollow, "adjust permissions" / "add account" links, Setup URL returns to the import screen on the installed account. The free-form `POST /api/v1/repositories/follow` is gone.
+- [ ] **Installation webhooks.** Handle `installation` (deleted / suspended) and `installation_repositories` (removed) so followed repositories that lost access are flagged in Seats instead of silently going stale.
 - [ ] **Act as the user on GitHub.** Approve / merge / comment must call GitHub with the user's token (`auth.UseCase.AccessToken`); the gateway in `cmd/server/main.go` still has no token. Background work needs an installation token (GitHub App ID + private key settings).
 - [ ] **Expired session in the SPA.** A 401 from any API call should return the user to the sign-in screen (today only `/auth/me` is checked, at start-up).
 - [ ] **Run the Dependabot analysis.** `AnalyzeUseCase` is built and injected into the handler but nothing calls it: trigger it from webhook ingest (and/or an on-demand cancellable endpoint) and store the result.

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BROWSER_WINDOW, BrowserWindow, HttpAuthGateway } from './http-auth.gateway';
+import { BROWSER_WINDOW, BrowserWindow } from '../browser/browser-window';
+import { HttpAuthGateway } from './http-auth.gateway';
 
 function fakeWindow(search = '') {
   const assign = vi.fn<(url: string | URL) => void>();

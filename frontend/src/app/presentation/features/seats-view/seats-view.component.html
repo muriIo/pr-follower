@@ -9,7 +9,7 @@
         {{ 'seats.sync' | t }}
       </button>
     </app-cancellable-action>
-    <button type="button" class="pf-btn pf-btn-primary" (click)="store.followRepo()">
+    <button type="button" id="pf-import-open" class="pf-btn pf-btn-primary" (click)="store.setPerspective('import')">
       {{ 'seats.followRepo' | t }}
     </button>
   </div>

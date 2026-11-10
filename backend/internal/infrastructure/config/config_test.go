@@ -74,3 +74,17 @@ func TestLoadFromEnv_GitHubLoginDefaults(t *testing.T) {
 		t.Error("http public URL must not use secure cookies")
 	}
 }
+
+func TestLoadFromEnv_GitHubAppInstallURL(t *testing.T) {
+	t.Setenv("GITHUB_APP_SLUG", "pr-follower")
+	cfg, _ := config.LoadFromEnv()
+	if cfg.GitHubAppInstallURL() != "https://github.com/apps/pr-follower/installations/new" {
+		t.Errorf("GitHubAppInstallURL() = %q", cfg.GitHubAppInstallURL())
+	}
+
+	t.Setenv("GITHUB_APP_SLUG", "")
+	cfg, _ = config.LoadFromEnv()
+	if cfg.GitHubAppInstallURL() != "" {
+		t.Errorf("expected no install URL without a slug, got %q", cfg.GitHubAppInstallURL())
+	}
+}

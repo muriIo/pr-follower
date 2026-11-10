@@ -11,6 +11,7 @@ type Config struct {
 	DatabaseURL         string
 	GitHubWebhookSecret string
 	GitHubAppID         string
+	GitHubAppSlug       string
 	GitHubClientID      string
 	GitHubClientSecret  string
 	AllowedOrigin       string
@@ -26,6 +27,7 @@ func LoadFromEnv() (*Config, error) {
 		DatabaseURL:         getEnvOrDefault("DATABASE_URL", "postgres://prfollower:prfollower_secret@localhost:5432/pr_follower?sslmode=disable"),
 		GitHubWebhookSecret: getEnvOrDefault("GITHUB_WEBHOOK_SECRET", "dev-webhook-secret"),
 		GitHubAppID:         getEnvOrDefault("GITHUB_APP_ID", ""),
+		GitHubAppSlug:       getEnvOrDefault("GITHUB_APP_SLUG", ""),
 		GitHubClientID:      getEnvOrDefault("GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:  getEnvOrDefault("GITHUB_CLIENT_SECRET", ""),
 		AllowedOrigin:       getEnvOrDefault("ALLOWED_ORIGIN", "*"),
@@ -45,6 +47,15 @@ func (c *Config) GitHubCallbackURL() string {
 // GitHubLoginConfigured reports whether GitHub sign-in can run.
 func (c *Config) GitHubLoginConfigured() bool {
 	return c.GitHubClientID != "" && c.GitHubClientSecret != ""
+}
+
+// GitHubAppInstallURL is where users install the app on an account (the Vercel-style
+// "add GitHub account" link). Empty when GITHUB_APP_SLUG is not set.
+func (c *Config) GitHubAppInstallURL() string {
+	if c.GitHubAppSlug == "" {
+		return ""
+	}
+	return "https://github.com/apps/" + c.GitHubAppSlug + "/installations/new"
 }
 
 // SecureCookies reports whether session cookies must carry the Secure attribute.

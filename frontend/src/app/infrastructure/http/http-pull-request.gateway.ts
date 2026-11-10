@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { ActionRequestOptions, PullRequestGateway } from '../../domain/gateways/workspace.gateways';
-import { RepoInfo, WorkspaceDataset } from '../../domain/models/workspace.models';
+import { WorkspaceDataset } from '../../domain/models/workspace.models';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
 import { ApiWorkspaceResponseDto, mapApiWorkspaceResponseToDataset } from './workspace-api.mapper';
 
@@ -12,26 +12,6 @@ export class HttpPullRequestGateway implements PullRequestGateway {
       return null;
     }
     return mapApiWorkspaceResponseToDataset(res);
-  }
-
-  async followRepository(
-    owner: string,
-    name: string,
-    defaultBranch: string = 'main',
-    options?: ActionRequestOptions,
-  ): Promise<RepoInfo | null> {
-    const res = await this.requestJson<{
-      ok?: boolean;
-      repository?: { full_name?: string; default_branch?: string };
-    }>(
-      '/api/v1/repositories/follow',
-      'POST',
-      { owner, name, default_branch: defaultBranch },
-      options,
-    );
-    const fullName = res?.repository?.full_name ?? `${owner}/${name}`;
-    const branch = res?.repository?.default_branch ?? defaultBranch;
-    return { name: fullName, branch };
   }
 
   async approvePullRequest(prId: number, options?: ActionRequestOptions): Promise<void> {

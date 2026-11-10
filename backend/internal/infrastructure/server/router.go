@@ -33,7 +33,10 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 			private.Get("/workspace", h.GetWorkspace)
 			private.Get("/events/stream", h.ServeSSE)
 			private.Post("/demo/seed", h.SeedDemoData)
-			private.Post("/repositories/follow", h.FollowRepository)
+			private.Get("/github/installations", h.ListGitHubInstallations)
+			private.Get("/github/installations/{installationID}/repositories", h.ListInstallationRepositories)
+			private.Post("/repositories/import", h.ImportRepository)
+			private.Delete("/repositories/{id}/follow", h.UnfollowRepository)
 
 			private.Post("/prs/batch-merge", h.BatchMergePRs)
 			private.Post("/prs/{id}/approve", h.ApprovePR)

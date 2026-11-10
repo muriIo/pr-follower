@@ -41,6 +41,7 @@ services:
       PUBLIC_URL: http://localhost:4200
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       # Local-only key; production must set its own secret value.
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-yfYm0n3yY3owYS1usyLqydvMge5O6ts0bF9AGsGXar8=}
     volumes:

@@ -2,11 +2,11 @@ import { InjectionToken } from '@angular/core';
 import {
   AuthErrorCode,
   AuthenticatedUser,
-  RepoInfo,
   SseConnectionState,
   TimelineEventItem,
   WorkspaceDataset,
 } from '../models/workspace.models';
+import { GitHubAccountsResult, ImportableRepository } from '../models/repository-import.models';
 
 export interface ActionRequestOptions {
   readonly signal?: AbortSignal;
@@ -26,7 +26,6 @@ export interface AuthGateway {
 
 export interface PullRequestGateway {
   fetchWorkspace?(options?: ActionRequestOptions): Promise<WorkspaceDataset | null>;
-  followRepository?(owner: string, name: string, defaultBranch?: string, options?: ActionRequestOptions): Promise<RepoInfo | null>;
   approvePullRequest(prId: number, options?: ActionRequestOptions): Promise<void>;
   mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha: string }>;
   batchMergePullRequests?(prIds: readonly number[], options?: ActionRequestOptions): Promise<{ mergedIds: readonly number[] }>;
@@ -48,7 +47,19 @@ export interface TranslationGateway {
   loadDictionary(locale: string): Promise<Record<string, string>>;
 }
 
+/** Vercel-style repository import: what the user reaches through the GitHub App (ADR-0010). */
+export interface RepositoryImportGateway {
+  listAccounts(options?: ActionRequestOptions): Promise<GitHubAccountsResult>;
+  listRepositories(installationId: number, options?: ActionRequestOptions): Promise<readonly ImportableRepository[]>;
+  /** Follows the repository and returns its PR Follower repository id. */
+  importRepository(installationId: number, githubRepoId: number, options?: ActionRequestOptions): Promise<number>;
+  unfollowRepository(repositoryId: number, options?: ActionRequestOptions): Promise<void>;
+  /** The installation GitHub sent the user back from (Setup URL), read once. */
+  consumeSetupRedirect(): number | null;
+}
+
 export const PULL_REQUEST_GATEWAY = new InjectionToken<PullRequestGateway>('PULL_REQUEST_GATEWAY');
 export const LIVE_EVENT_GATEWAY = new InjectionToken<LiveEventGateway>('LIVE_EVENT_GATEWAY');
 export const TRANSLATION_GATEWAY = new InjectionToken<TranslationGateway>('TRANSLATION_GATEWAY');
 export const AUTH_GATEWAY = new InjectionToken<AuthGateway>('AUTH_GATEWAY');
+export const REPOSITORY_IMPORT_GATEWAY = new InjectionToken<RepositoryImportGateway>('REPOSITORY_IMPORT_GATEWAY');

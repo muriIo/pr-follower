@@ -1,0 +1,90 @@
+<app-page-header [title]="'import.title' | t" [subtitle]="'import.subtitle' | t">
+  <div class="pf-actions">
+    <button type="button" id="pf-import-back" class="pf-btn" (click)="back()">
+      {{ 'import.back' | t }}
+    </button>
+  </div>
+</app-page-header>
+
+@if (importStore.status() === 'loading-accounts') {
+  <p class="pf-import-state" aria-busy="true">{{ 'import.loadingAccounts' | t }}</p>
+} @else if (importStore.accounts().length === 0) {
+  <section class="pf-import-empty">
+    @if (importStore.error(); as code) {
+      <p class="pf-import-error" role="alert">{{ 'import.error.' + code | t }}</p>
+    }
+    <h2 class="pf-import-empty-title">{{ 'import.noInstallations.title' | t }}</h2>
+    <p>{{ 'import.noInstallations.body' | t }}</p>
+    @if (importStore.installUrl()) {
+      <a id="pf-import-install" class="pf-btn pf-btn-primary" [href]="importStore.installUrl()">
+        {{ 'import.install' | t }}
+      </a>
+    }
+  </section>
+} @else {
+  <section class="pf-import">
+    <div class="pf-import-toolbar">
+      <label class="pf-sr-only" for="pf-import-account">{{ 'import.account' | t }}</label>
+      <select id="pf-import-account" class="pf-import-select" (change)="onAccountChange($event)">
+        @for (account of importStore.accounts(); track account.installationId) {
+          <option
+            [value]="account.installationId"
+            [selected]="account.installationId === importStore.selectedInstallationId()"
+          >
+            {{ account.login }}
+          </option>
+        }
+      </select>
+      <label class="pf-sr-only" for="pf-import-search">{{ 'import.search' | t }}</label>
+      <input
+        id="pf-import-search"
+        class="pf-import-search"
+        type="search"
+        autocomplete="off"
+        [placeholder]="'import.search' | t"
+        [value]="importStore.query()"
+        (input)="onSearch($event)"
+      />
+    </div>
+
+    @if (importStore.error(); as code) {
+      <p class="pf-import-error" role="alert">{{ 'import.error.' + code | t }}</p>
+    }
+
+    @if (importStore.status() === 'loading-repositories') {
+      <p class="pf-import-state" aria-busy="true">{{ 'import.loadingRepositories' | t }}</p>
+    } @else if (importStore.visibleRepositories().length === 0) {
+      <p class="pf-import-state">{{ 'import.noMatches' | t }}</p>
+    } @else {
+      <ul class="pf-import-list">
+        @for (repo of importStore.visibleRepositories(); track repo.githubRepoId) {
+          <li class="pf-import-row">
+            <span class="pf-import-name pf-mono">{{ repo.fullName }}</span>
+            @if (repo.private) {
+              <span class="pf-badge pf-tag pf-import-private">{{ 'import.private' | t }}</span>
+            }
+            <button
+              type="button"
+              class="pf-btn pf-import-action"
+              [class.pf-btn-primary]="!repo.followed"
+              [disabled]="importStore.isPending(repo.githubRepoId)"
+              (click)="importStore.toggleFollow(repo)"
+            >
+              {{ (repo.followed ? 'import.following' : 'import.follow') | t }}
+            </button>
+          </li>
+        }
+      </ul>
+    }
+
+    <footer class="pf-import-foot">
+      <span>{{ 'import.missingRepo' | t }}</span>
+      @if (importStore.selectedAccount(); as account) {
+        <a id="pf-import-adjust" [href]="account.settingsUrl">{{ 'import.adjustPermissions' | t }}</a>
+      }
+      @if (importStore.installUrl()) {
+        <a id="pf-import-add-account" [href]="importStore.installUrl()">{{ 'import.addAccount' | t }}</a>
+      }
+    </footer>
+  </section>
+}

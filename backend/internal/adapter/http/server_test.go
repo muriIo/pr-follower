@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/server"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
+	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -72,9 +74,31 @@ func (fakeGitHubOAuth) FetchProfile(context.Context, string) (entity.GitHubProfi
 	return entity.GitHubProfile{ID: 583231, Login: "octocat", Name: "The Octocat", Teams: []string{"@acme/web"}}, nil
 }
 
+// fakeGitHubUserAPI: octocat reaches installation 20 (acme) with two repositories.
+type fakeGitHubUserAPI struct{}
+
+func (fakeGitHubUserAPI) ListInstallations(_ context.Context, token string) ([]entity.Installation, error) {
+	if token != "ghu_test" {
+		return nil, entity.ErrUnauthorized
+	}
+	return []entity.Installation{{ID: 20, AccountLogin: "acme", AccountType: "Organization", RepositorySelection: "selected",
+		SettingsURL: "https://github.com/organizations/acme/settings/installations/20"}}, nil
+}
+
+func (fakeGitHubUserAPI) ListInstallationRepositories(_ context.Context, _ string, id int64) ([]entity.InstallationRepository, error) {
+	if id != 20 {
+		return nil, entity.ErrNotFound
+	}
+	return []entity.InstallationRepository{
+		{GitHubRepoID: 900, InstallationID: 20, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main", Private: true},
+		{GitHubRepoID: 901, InstallationID: 20, Owner: "acme", Name: "api", FullName: "acme/api", DefaultBranch: "main"},
+	}, nil
+}
+
 type testServer struct {
 	router http.Handler
 	opReg  *operation.Registry
+	authUC *auth.UseCase
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -163,6 +187,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	actionUC := action.NewUseCase(prRepo, repoRepo, ghGw, sseHub)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
+	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, sseHub)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:      userRepo,
@@ -175,9 +200,11 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		OpRegistry:    opReg,
 		WebhookSecret: "test-secret",
 		AuthUC:        authUC,
+		ImportUC:      importUC,
+		InstallURL:    "https://github.com/apps/pr-follower/installations/new",
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -206,9 +233,9 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 		t.Fatalf("expected 200 on /api/v1/demo/seed, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 2.5 Follow Repository
-	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/follow", `{"owner":"arvore","name":"design-system","default_branch":"main"}`, session); rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on /api/v1/repositories/follow, got %d: %s", rec.Code, rec.Body.String())
+	// 2.5 Import a repository reachable through the GitHub App
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":901}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/v1/repositories/import, got %d: %s", rec.Code, rec.Body.String())
 	}
 
 	// 3. Get Workspace Snapshot
@@ -321,7 +348,7 @@ func TestAuth_ProtectedRoutesRequireSession(t *testing.T) {
 		{http.MethodGet, "/api/v1/workspace"},
 		{http.MethodGet, "/api/v1/events/stream"},
 		{http.MethodPost, "/api/v1/demo/seed"},
-		{http.MethodPost, "/api/v1/repositories/follow"},
+		{http.MethodPost, "/api/v1/repositories/import"},
 		{http.MethodPost, "/api/v1/prs/1/approve"},
 		{http.MethodDelete, "/api/v1/operations/x"},
 	} {
@@ -413,5 +440,123 @@ func TestAuth_LoginWithoutGitHubConfiguration(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without auth configured, got %d", rec.Code)
+	}
+}
+
+func TestRepositoryImport_ListImportAndUnfollow(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+
+	rec := ts.do(t, http.MethodGet, "/api/v1/github/installations", "", session)
+	var accounts struct {
+		Accounts   []entity.Installation `json:"accounts"`
+		InstallURL string                `json:"install_url"`
+	}
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&accounts) != nil {
+		t.Fatalf("installations: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(accounts.Accounts) != 1 || accounts.Accounts[0].AccountLogin != "acme" ||
+		accounts.InstallURL != "https://github.com/apps/pr-follower/installations/new" {
+		t.Fatalf("unexpected accounts payload: %+v", accounts)
+	}
+
+	listRepos := func() []repoimport.ImportableRepository {
+		t.Helper()
+		rec := ts.do(t, http.MethodGet, "/api/v1/github/installations/20/repositories", "", session)
+		var body struct {
+			Repositories []repoimport.ImportableRepository `json:"repositories"`
+		}
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("repositories: %d %s", rec.Code, rec.Body.String())
+		}
+		return body.Repositories
+	}
+	if repos := listRepos(); len(repos) != 2 || repos[0].Followed || repos[1].Followed {
+		t.Fatalf("expected two unfollowed repositories, got %+v", repos)
+	}
+
+	rec = ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session)
+	var imported struct {
+		Repository entity.Repository `json:"repository"`
+	}
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&imported) != nil || imported.Repository.FullName != "acme/web" {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	repos := listRepos()
+	if !repos[0].Followed || repos[0].RepositoryID != imported.Repository.ID {
+		t.Fatalf("expected acme/web followed, got %+v", repos[0])
+	}
+
+	ws := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	if !strings.Contains(ws.Body.String(), "acme/web") {
+		t.Fatalf("expected imported repository among workspace seats: %s", ws.Body.String())
+	}
+
+	target := "/api/v1/repositories/" + strconv.FormatUint(imported.Repository.ID, 10) + "/follow"
+	if rec := ts.do(t, http.MethodDelete, target, "", session); rec.Code != http.StatusOK {
+		t.Fatalf("unfollow: %d %s", rec.Code, rec.Body.String())
+	}
+	if repos := listRepos(); repos[0].Followed {
+		t.Fatalf("expected acme/web unfollowed, got %+v", repos[0])
+	}
+}
+
+func TestRepositoryImport_RejectsUnreachableAndInvalidInput(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+
+	cases := []struct {
+		name, method, path, body string
+		want                     int
+	}{
+		{"repository outside the installation", http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":12345}`, http.StatusNotFound},
+		{"installation the user cannot reach", http.MethodPost, "/api/v1/repositories/import", `{"installation_id":99,"github_repo_id":900}`, http.StatusNotFound},
+		{"malformed body", http.MethodPost, "/api/v1/repositories/import", `{`, http.StatusBadRequest},
+		{"unknown installation listing", http.MethodGet, "/api/v1/github/installations/99/repositories", "", http.StatusNotFound},
+		{"non-numeric installation", http.MethodGet, "/api/v1/github/installations/abc/repositories", "", http.StatusBadRequest},
+		{"non-numeric repository", http.MethodDelete, "/api/v1/repositories/abc/follow", "", http.StatusBadRequest},
+		{"free-form follow is gone", http.MethodPost, "/api/v1/repositories/follow", `{"owner":"x","name":"y"}`, http.StatusMethodNotAllowed},
+	}
+	for _, tc := range cases {
+		rec := ts.do(t, tc.method, tc.path, tc.body, session)
+		if tc.name == "free-form follow is gone" {
+			if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s: expected 404/405, got %d", tc.name, rec.Code)
+			}
+			continue
+		}
+		if rec.Code != tc.want {
+			t.Errorf("%s: expected %d, got %d: %s", tc.name, tc.want, rec.Code, rec.Body.String())
+		}
+	}
+
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/github/installations"},
+		{http.MethodGet, "/api/v1/github/installations/20/repositories"},
+		{http.MethodPost, "/api/v1/repositories/import"},
+		{http.MethodDelete, "/api/v1/repositories/1/follow"},
+	} {
+		if rec := ts.do(t, route.method, route.path, "", nil); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without session: expected 401, got %d", route.method, route.path, rec.Code)
+		}
+	}
+}
+
+func TestRepositoryImport_NotConfigured(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+
+	// Same signed-in user, but a handler built without the import use case.
+	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{AuthUC: ts.authUC})
+	router := server.NewChiRouter(handler, "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/installations", nil)
+	req.AddCookie(session)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when GitHub import is not configured, got %d", rec.Code)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -83,6 +84,7 @@ func main() {
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
 	// login endpoint redirects with auth_error=not_configured and every API route is 401.
 	var authUC *auth.UseCase
+	var importUC *repoimport.UseCase
 	if cfg.GitHubLoginConfigured() {
 		authUC = auth.NewUseCase(auth.Deps{
 			OAuth: github.NewOAuthClient(github.OAuthConfig{
@@ -94,6 +96,12 @@ func main() {
 			Users:    userRepo,
 			Sessions: sessionRepo,
 		})
+		importUC = repoimport.NewUseCase(
+			authUC,
+			github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()}),
+			repoRepo,
+			sseHub,
+		)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
@@ -111,6 +119,8 @@ func main() {
 		WebhookSecret: cfg.GitHubWebhookSecret,
 		AuthUC:        authUC,
 		SecureCookies: cfg.SecureCookies(),
+		ImportUC:      importUC,
+		InstallURL:    cfg.GitHubAppInstallURL(),
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)
