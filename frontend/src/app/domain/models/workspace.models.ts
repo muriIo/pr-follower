@@ -3,8 +3,13 @@ export type SeatFilterType = 'todos' | 'turn' | 'deps';
 export type RiskVerdictTier = 'baixo' | 'medio' | 'alto';
 /** CI of the PR head as GitHub reported it; `none` means no check was ever reported (e.g. no CI). */
 export type CiState = 'ok' | 'run' | 'fail' | 'none';
-/** CODEOWNERS review state; `none` means the repository has no CODEOWNERS file. */
-export type OwnersState = 'ok' | 'voce' | 'pend' | 'none';
+/**
+ * CODEOWNERS state of a PR for the signed-in user: `voce` you own changed files, `ok` approved,
+ * `others` the changed files have other owners, `none` the repository has no CODEOWNERS file,
+ * `unknown` the repository was not checked yet. Review progress is not tracked, so nothing here
+ * claims a review is "pending".
+ */
+export type OwnersState = 'ok' | 'voce' | 'others' | 'none' | 'unknown';
 /** GitHub's mergeable_state; `unknown` until GitHub computes it. */
 export type MergeState = 'clean' | 'conflict' | 'behind' | 'blocked' | 'unstable' | 'draft' | 'unknown';
 /** Whether a repository has a CODEOWNERS file, once checked. */
@@ -35,6 +40,14 @@ export interface BlastFileItem {
   readonly snippets: readonly BlastSnippet[];
 }
 
+/** A file changed by a PR, with its diff when GitHub provided one. */
+export interface ChangedFileItem {
+  readonly path: string;
+  readonly additions: number;
+  readonly deletions: number;
+  readonly hunk: readonly DiffHunkLine[];
+}
+
 export interface PullRequestItem {
   readonly id: number;
   readonly rank: number;
@@ -45,13 +58,15 @@ export interface PullRequestItem {
   readonly radarMeta?: string;
   readonly author: string;
   readonly branch: string;
-  readonly verdict: RiskVerdictTier;
+  /** Dependabot risk verdict; null for human PRs and for bumps not analysed yet. */
+  readonly verdict: RiskVerdictTier | null;
   readonly ci: CiState;
   readonly ciText: string;
   readonly owners: OwnersState;
   readonly ownersText: string;
   readonly merge?: MergeState;
-  readonly size: string;
+  /** Only when known. */
+  readonly size?: string;
   readonly turn: boolean;
   readonly ownFiles?: number;
   readonly ownPill?: string;
@@ -60,11 +75,8 @@ export interface PullRequestItem {
   readonly muteBadge?: string;
   readonly muteTip?: string;
   readonly why: string;
-  readonly file: string;
-  readonly deltaAdd?: string;
-  readonly deltaDel?: string;
+  readonly files: readonly ChangedFileItem[];
   readonly focusRule?: string;
-  readonly hunk: readonly DiffHunkLine[];
   readonly dep?: boolean;
   readonly pkg?: string;
   readonly from?: string;
@@ -174,5 +186,6 @@ export function isActionableTurn(
 
 export function isSafeBatchCandidate(pr: PullRequestItem, ciOverride?: CiState): boolean {
   const effectiveCi = ciOverride ?? pr.ci;
+  // Only an analysed, low-risk bump with green CI qualifies; unanalysed bumps never do.
   return Boolean(pr.dep && pr.verdict === 'baixo' && effectiveCi === 'ok');
 }

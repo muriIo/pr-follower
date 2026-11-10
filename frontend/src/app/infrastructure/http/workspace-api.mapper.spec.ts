@@ -177,9 +177,9 @@ describe('workspace-api.mapper', () => {
     const codePr = dataset!.prs.find((p) => p.id === 142)!;
     expect(codePr.turn).toBe(true);
     expect(codePr.claim).toBe('Assumido por @murilo');
-    expect(codePr.deltaAdd).toBe('+24');
-    expect(codePr.deltaDel).toBe('-3');
-    expect(codePr.hunk.length).toBe(4);
+    expect(codePr.files[0].additions).toBe(24);
+    expect(codePr.files[0].deletions).toBe(3);
+    expect(codePr.files[0].hunk.length).toBe(4);
 
     const mutedPr = dataset!.prs.find((p) => p.id === 136)!;
     expect(mutedPr.turn).toBe(false);
@@ -292,7 +292,7 @@ describe('workspace-api.mapper', () => {
 
     const owned = dataset.prs.find((p) => p.id === 12)!;
     expect(owned.ci).toBe('run');
-    expect(owned.owners).toBe('pend');
+    expect(owned.owners).toBe('others');
     expect(owned.merge).toBe('unknown');
   });
 
@@ -306,5 +306,89 @@ describe('workspace-api.mapper', () => {
     // A new PR or commit from GitHub must show up in Seats without a manual refresh.
     expect(event('pr.opened').refreshWorkspace).toBe(true);
     expect(event('pr.synchronize').refreshWorkspace).toBe(true);
+  });
+
+  describe('never invents PR state (ADR: the view shows what GitHub reported)', () => {
+    const repo = (full: string, codeowners?: 'present' | 'absent') => ({
+      repository: { id: 1, owner: full.split('/')[0], name: full.split('/')[1], full_name: full, default_branch: 'main', ...(codeowners ? { codeowners_status: codeowners } : {}) },
+      open_pr_count: 1,
+      waiting_on_me_count: 0,
+      dependabot_pr_count: 0,
+      failing_ci_count: 0,
+      pull_requests: [],
+    });
+    const pr = (number: number, full: string, extra: Record<string, unknown> = {}) => ({
+      id: number, repository_id: 1, repository_name: full, number, title: `PR ${number}`, author_login: 'murilo', html_url: '',
+      is_dependabot: false, is_draft: false, state: 'OPEN', mergeable_state: 'UNKNOWN', ci_status: 'NONE', head_sha: 'h', base_ref: 'main', ...extra,
+    });
+    const state = (extra: Record<string, unknown> = {}) => ({ pull_request_id: 1, user_id: 1, turn_state: 'HIDDEN_GATE', team_already_approved: false, ...extra });
+    const map = (seats: unknown[], dimmed: unknown[], waiting: unknown[] = [], deps: unknown[] = []) =>
+      mapApiWorkspaceResponseToDataset({
+        snapshot: { seats, inbox_dimmed: dimmed, inbox_waiting_on_me: waiting, dependabot_prs: deps } as never,
+        timeline: [],
+      })!.prs;
+
+    it('gives human PRs no risk verdict, no size, no invented file and an honest reason', () => {
+      const [item] = map([repo('acme/web', 'absent')], [{ pull_request: pr(11, 'acme/web'), user_state: state() }]);
+      expect(item.verdict).toBeNull();
+      expect(item.size).toBeUndefined();
+      expect(item.files).toEqual([]);
+      expect(item.owners).toBe('none');
+      expect(item.why).not.toContain('Gate de Turno');
+      expect(item.why).toContain('não tem CODEOWNERS');
+    });
+
+    it('distinguishes an unchecked CODEOWNERS from files owned by others', () => {
+      const prs = map(
+        [repo('acme/unchecked'), repo('acme/owned', 'present')],
+        [
+          { pull_request: pr(1, 'acme/unchecked'), user_state: state() },
+          { pull_request: pr(2, 'acme/owned'), user_state: state() },
+        ],
+      );
+      expect(prs.find((p) => p.id === 1)!.owners).toBe('unknown');
+      const owned = prs.find((p) => p.id === 2)!;
+      expect(owned.owners).toBe('others');
+      expect(owned.ownersText).toBe('Os arquivos alterados têm outros donos');
+    });
+
+    it('keeps every changed file the user owns, each with its own diff', () => {
+      const files = [
+        { path: 'src/a.ts', additions: 3, deletions: 1, patch: '@@ -1 +1 @@\n-old\n+new' },
+        { path: 'src/b.ts', additions: 1, deletions: 0 },
+      ];
+      const [item] = map(
+        [repo('acme/owned', 'present')],
+        [],
+        [{ pull_request: pr(3, 'acme/owned'), user_state: state({ turn_state: 'WAITING_ON_ME', owned_files_changed: files }) }],
+      );
+      expect(item.owners).toBe('voce');
+      expect(item.ownersText).toBe('Você é dono de 2 arquivo(s)');
+      expect(item.files.map((f) => [f.path, f.additions, f.deletions])).toEqual([
+        ['src/a.ts', 3, 1],
+        ['src/b.ts', 1, 0],
+      ]);
+      expect(item.files[0].hunk.length).toBe(3);
+      expect(item.files[1].hunk).toEqual([]); // no patch: no fake hunk header
+    });
+
+    it('reads a Dependabot PR without analysis from its title, with no verdict or invented findings', () => {
+      const dep = (title: string) => ({ pull_request: pr(40, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title }) });
+      const [parsed] = map([repo('acme/web', 'absent')], [], [], [dep('chore(deps): bump axios from 1.7.7 to 2.0.0')]);
+      expect(parsed.verdict).toBeNull();
+      expect([parsed.pkg, parsed.from, parsed.to]).toEqual(['axios', '1.7.7', '2.0.0']);
+      expect(parsed.depType).toBeUndefined();
+      expect(parsed.score).toBeUndefined();
+      expect(parsed.size).toBeUndefined();
+      expect(parsed.files).toEqual([]);
+      expect(parsed.note).toBe('');
+      expect(parsed.why).toBe('Análise de impacto ainda não executada para este PR.');
+      expect(parsed.owners).toBe('none');
+
+      const [unparsed] = map([repo('acme/web')], [], [], [dep('Bump the npm group across 3 directories')]);
+      expect([unparsed.pkg, unparsed.from, unparsed.to]).toEqual([undefined, undefined, undefined]);
+      expect(unparsed.radarTitle).toBe('Bump the npm group across 3 directories');
+      expect(unparsed.owners).toBe('unknown');
+    });
   });
 });

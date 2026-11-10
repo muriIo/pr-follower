@@ -57,7 +57,9 @@
 
     @if (drawer().general) {
       <section class="pf-verdict">
-        <app-risk-badge [badgeClass]="drawer().vCls" [label]="drawer().vLabel" />
+        @if (drawer().hasVerdict) {
+          <app-risk-badge [badgeClass]="drawer().vCls" [label]="drawer().vLabel" />
+        }
         <p>{{ drawer().why }}</p>
       </section>
 
@@ -86,12 +88,7 @@
     }
 
     @if (drawer().showDiff) {
-      <app-diff-viewer
-        [file]="drawer().diffFile"
-        [deltaAdd]="drawer().deltaAdd"
-        [deltaDel]="drawer().deltaDel"
-        [lines]="drawer().lines"
-      />
+      <app-changed-files [files]="drawer().files" (toggleFile)="store.toggleChangedFile($event)" />
     }
   </div>
 

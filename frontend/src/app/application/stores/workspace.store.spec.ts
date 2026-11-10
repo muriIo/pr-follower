@@ -61,7 +61,7 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     const d142 = store.drawer()!;
     expect(d142.focused).toBe(true);
     expect(d142.banner).toContain('/src/app/');
-    expect(d142.lines.length).toBeGreaterThan(10);
+    expect(d142.files[0].lines.length).toBeGreaterThan(10);
 
     // Open Dependabot PR #233 (7 blast files) in drawer
     store.openPr(233);
@@ -350,6 +350,7 @@ describe('WorkspaceStore truthful PR state', () => {
     turn: false,
     approvedBy: undefined,
     muteBadge: undefined,
+    size: undefined,
     ...overrides,
   });
 
@@ -368,17 +369,20 @@ describe('WorkspaceStore truthful PR state', () => {
     const drawer = store.drawer()!;
     expect(drawer.signals[0]).toEqual({ k: 'CI', v: 'Nenhum CI reportado para este commit', dot: 'pf-dot' });
     expect(drawer.signals[1]).toEqual({ k: 'CODEOWNERS', v: 'Repositório sem CODEOWNERS', dot: 'pf-dot' });
-    // Neither missing CI nor missing CODEOWNERS blocks the merge; only the user's own approval is asked.
-    expect(drawer.blockedText).toBe('Aprove antes de mesclar.');
-    expect(drawer.blockedCls).toBe('pf-note');
+    // Neither missing CI nor missing CODEOWNERS blocks the merge, and we do not invent an approval rule.
+    expect(drawer.blocked).toBe(false);
+    expect(drawer.blockedText).toBe('');
+    expect(drawer.mergeDis).toBe('false');
+    // Unknown size is not shown as a signal.
+    expect(drawer.signals.map((sig) => sig.k)).toEqual(['CI', 'CODEOWNERS']);
   });
 
-  it('keeps reporting real blockers: running CI, pending owners and the merge state GitHub reported', () => {
+  it('blocks a merge only for what GitHub reported: conflicts, out of date, branch protection, draft', () => {
     const store = setup(
       [{ name: 'acme/owned', branch: 'main', codeowners: 'present' }],
       [
-        pr(21, 'acme/owned', { ci: 'run', owners: 'pend' }),
-        pr(22, 'acme/owned', { ci: 'none', owners: 'pend' }),
+        pr(21, 'acme/owned', { ci: 'run', owners: 'others', merge: 'clean' }),
+        pr(22, 'acme/owned', { ci: 'fail', owners: 'others', merge: 'unstable' }),
         pr(23, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'conflict' }),
         pr(24, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'behind' }),
         pr(25, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'blocked' }),
@@ -388,20 +392,75 @@ describe('WorkspaceStore truthful PR state', () => {
     );
 
     const seat = store.allSeats()[0];
-    expect(seat.ciLabel).toBe('1 CI Rodando'); // only the PR whose CI actually runs
+    expect(seat.ciLabel).toBe('1 CI Falhando'); // failing CI is reported first
     expect(seat.noCodeowners).toBe(false);
 
     const blocked = (id: number) => {
       store.openPr(id);
       return store.drawer()!.blockedText;
     };
-    expect(blocked(21)).toBe('Mesclagem bloqueada: o CI ainda está rodando.');
-    expect(blocked(22)).toBe('Mesclagem bloqueada: falta aprovação de CODEOWNERS.');
+    // GitHub lets these merge (checks not required): CI is a signal, not a blocker we invent.
+    expect(blocked(21)).toBe('');
+    expect(blocked(22)).toBe('');
     expect(blocked(23)).toBe('Mesclagem bloqueada: há conflitos com a branch base.');
     expect(blocked(24)).toBe('Mesclagem bloqueada: a branch está desatualizada em relação à base.');
     expect(blocked(25)).toBe('Mesclagem bloqueada pela proteção da branch no GitHub (revisões ou checks obrigatórios).');
     expect(blocked(26)).toBe('Mesclagem bloqueada: o PR ainda é rascunho.');
     expect(blocked(27)).toBe('');
+  });
+
+  it('shows an unchecked CODEOWNERS as unknown, never as a pending review', () => {
+    const store = setup([{ name: 'acme/unchecked', branch: 'main' }], [pr(41, 'acme/unchecked', { owners: 'unknown', ownersText: '' })]);
+    store.openPr(41);
+    const drawer = store.drawer()!;
+    expect(drawer.signals[1]).toEqual({ k: 'CODEOWNERS', v: 'CODEOWNERS ainda não verificado', dot: 'pf-dot' });
+    expect(drawer.blocked).toBe(false);
+  });
+
+  it('hides the risk badge on PRs that have no risk verdict', () => {
+    const store = setup([{ name: 'acme/web', branch: 'main' }], [pr(51, 'acme/web', { verdict: null })]);
+    store.openPr(51);
+    expect(store.drawer()!.hasVerdict).toBe(false);
+    const row = store.allSeats()[0].stream[0];
+    expect(row.showRisk).toBe(false);
+  });
+
+  it('previews every changed file as its own collapsible card, or says the preview is not available', () => {
+    const files = [
+      { path: 'src/a.ts', additions: 3, deletions: 1, hunk: [{ t: 'hdr' as const, s: '@@ -1 +1 @@' }, { t: 'add' as const, s: '+ new' }] },
+      { path: 'src/b.ts', additions: 1, deletions: 0, hunk: [] },
+    ];
+    const store = setup([{ name: 'acme/web', branch: 'main' }], [pr(61, 'acme/web', { files }), pr(62, 'acme/web', { files: [] })]);
+
+    store.openPr(61);
+    let drawer = store.drawer()!;
+    expect(drawer.hasFiles).toBe(true);
+    expect(drawer.files.map((f) => [f.path, f.deltaAdd, f.deltaDel, f.expanded])).toEqual([
+      ['src/a.ts', '+3', '-1', true],
+      ['src/b.ts', '+1', '-0', false],
+    ]);
+    expect(drawer.files[0].lines.length).toBe(2);
+    expect(drawer.files[1].hasDiff).toBe(false);
+
+    store.toggleChangedFile(1);
+    drawer = store.drawer()!;
+    expect(drawer.files[1].expanded).toBe(true);
+
+    store.openPr(62);
+    drawer = store.drawer()!;
+    expect(drawer.hasFiles).toBe(false);
+    expect(drawer.files).toEqual([]);
+  });
+
+  it('groups Dependabot PRs without analysis apart and never batch-merges them', () => {
+    const dep = createInitialPrDataset().find((p) => p.dep)!;
+    const store = setup(
+      [{ name: 'acme/web', branch: 'main' }],
+      [{ ...dep, id: 71, repo: 'acme/web', ci: 'ok', verdict: null, depType: 'devDependencies' }],
+    );
+    const groups = store.radarGroups();
+    expect(groups.map((g) => g.label)).toEqual(['⚪ Sem análise — risco ainda não avaliado (1)']);
+    expect(store.safeBatchSummary().has).toBe(false);
   });
 
   it('labels cards without CI as "Sem CI" in the inbox and the radar', () => {

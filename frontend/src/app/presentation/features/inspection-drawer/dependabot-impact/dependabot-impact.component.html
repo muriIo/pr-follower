@@ -1,4 +1,4 @@
-<section [class]="'pf-rv pf-rv-' + drawer().verdict">
+<section [class]="'pf-rv pf-rv-' + (drawer().verdict ?? 'none')">
   <div class="pf-rv-head">{{ drawer().rvHead }}</div>
   <p>{{ drawer().rvDetail }}</p>
 </section>

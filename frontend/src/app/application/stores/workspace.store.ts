@@ -31,6 +31,24 @@ const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   draft: 'drawer.blocked.draft',
 };
 
+/** One changed file in the drawer preview, collapsible like the Dependabot affected-code cards. */
+export interface ChangedFileCardViewModel {
+  readonly index: number;
+  readonly path: string;
+  readonly deltaAdd: string;
+  readonly deltaDel: string;
+  readonly expanded: boolean;
+  readonly hasDiff: boolean;
+  readonly lines: readonly RenderedDiffLine[];
+}
+
+const RISK_LABELS: Readonly<Record<RiskVerdictTier, string>> = { baixo: 'Baixo Risco', medio: 'Médio Risco', alto: 'Alto Risco' };
+const RISK_TIER_LABELS: Readonly<Record<RiskVerdictTier, string>> = {
+  baixo: '🟢 Baixo Risco',
+  medio: '🟡 Médio Risco',
+  alto: '🔴 Alto Risco',
+};
+
 export interface SyntaxToken {
   readonly s: string;
   readonly cls: string;
@@ -141,7 +159,7 @@ export interface DrawerViewModel {
   readonly signals: readonly { k: string; v: string; dot: string }[];
   readonly isDep: boolean;
   readonly notDep: boolean;
-  readonly verdict: RiskVerdictTier;
+  readonly verdict: RiskVerdictTier | null;
   readonly rvHead: string;
   readonly rvDetail: string;
   readonly tree: readonly {
@@ -165,11 +183,9 @@ export interface DrawerViewModel {
   readonly note: string;
   readonly noteCls: string;
   readonly showDiff: boolean;
-  readonly diffFile: string;
-  readonly hasDelta: boolean;
-  readonly deltaAdd?: string;
-  readonly deltaDel?: string;
-  readonly lines: readonly RenderedDiffLine[];
+  readonly hasFiles: boolean;
+  readonly files: readonly ChangedFileCardViewModel[];
+  readonly hasVerdict: boolean;
   readonly showIdle: boolean;
   readonly showMerged: boolean;
   readonly showSecondary: boolean;
@@ -216,6 +232,7 @@ export class WorkspaceStore {
   readonly selectedTreeNode = signal<number | null>(null);
   readonly blastOpenMap = signal<Record<number, boolean>>({ 0: true });
   readonly blastShowAll = signal(false);
+  readonly changedFileOpenMap = signal<Record<number, boolean>>({ 0: true });
   private lastBatchTotal = 0;
   private disconnectLive: (() => void) | null = null;
 
@@ -360,9 +377,9 @@ export class WorkspaceStore {
           const showTurn = isTurn && !p.dep;
           const mine = Boolean(approved[p.id]);
           const isApproved = Boolean(p.approvedBy || (mine && !p.dep));
-          const tier = { baixo: '🟢 Baixo Risco', medio: '🟡 Médio Risco', alto: '🔴 Alto Risco' }[p.verdict];
+          const tier = p.verdict ? RISK_TIER_LABELS[p.verdict] : '⚪ Sem análise';
           const dev = p.depType === 'devDependencies';
-          const vLabel = { baixo: 'Baixo Risco', medio: 'Médio Risco', alto: 'Alto Risco' }[p.verdict];
+          const vLabel = p.verdict ? RISK_LABELS[p.verdict] : '';
           const safe = isSafeBatchCandidate(p, this.effectiveCi(p).ci);
 
           return {
@@ -373,7 +390,7 @@ export class WorkspaceStore {
             showTurn,
             hasOwn: Boolean(p.ownFiles),
             ownLabel: this.plural(p.ownFiles ?? 0, 'arquivo seu', 'arquivos seus'),
-            showRisk: !showTurn && !isApproved && (!mine || Boolean(p.dep)),
+            showRisk: p.verdict !== null && !showTurn && !isApproved && (!mine || Boolean(p.dep)),
             vCls: `pf-badge-${p.verdict}`,
             riskTip: p.dep
               ? dev
@@ -482,10 +499,11 @@ export class WorkspaceStore {
     const deps = this.openDependabotPrs();
     const approved = this.approvedMap();
     const selected = this.selectedPrId();
-    const tiers: readonly [RiskVerdictTier, string][] = [
+    const tiers: readonly [RiskVerdictTier | null, string][] = [
       ['alto', '🔴 Alto Risco — Requer Análise de Impacto'],
       ['baixo', '🟢 Baixo Risco — Seguros para Merge Rápido'],
       ['medio', '🟡 Médio Risco — Revisar Antes de Mesclar'],
+      [null, '⚪ Sem análise — risco ainda não avaliado'],
     ];
 
     return tiers
@@ -593,29 +611,38 @@ export class WorkspaceStore {
     const dotOwners = {
       ok: 'pf-dot pf-dot-ok',
       voce: 'pf-dot pf-dot-turn',
-      pend: 'pf-dot pf-dot-warn',
+      others: 'pf-dot',
       none: 'pf-dot',
+      unknown: 'pf-dot',
     }[pr.owners];
     const ciText = ci.ci === 'none' ? this.locale.translate('drawer.ci.none') : ci.ciText;
-    const ownersText = pr.owners === 'none' ? this.locale.translate('drawer.codeowners.none') : pr.ownersText;
+    const ownersText =
+      pr.owners === 'none'
+        ? this.locale.translate('drawer.codeowners.none')
+        : pr.owners === 'unknown'
+          ? this.locale.translate('drawer.codeowners.unknown')
+          : pr.ownersText;
 
-    // Only what GitHub reported blocks a merge: missing CI or a missing CODEOWNERS file never does.
-    let blockedText = '';
-    if (ci.ci === 'fail') {
-      blockedText = 'Mesclagem bloqueada: o CI está falhando.';
-    } else if (ci.ci === 'run') {
-      blockedText = 'Mesclagem bloqueada: o CI ainda está rodando.';
-    } else if (pr.owners === 'pend') {
-      blockedText = 'Mesclagem bloqueada: falta aprovação de CODEOWNERS.';
-    } else if (pr.merge && MERGE_BLOCKER_KEYS[pr.merge]) {
-      blockedText = this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!);
-    }
-    const needsApproval = !blockedText && !mine && !pr.approvedBy;
-    if (needsApproval) {
-      blockedText = 'Aprove antes de mesclar.';
-    }
+    // Only GitHub decides what blocks a merge (mergeable_state: conflicts, out of date, branch
+    // protection with its required reviews and checks, draft). CI and CODEOWNERS are signals.
+    const blockedText = pr.merge && MERGE_BLOCKER_KEYS[pr.merge] ? this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!) : '';
 
-    const vLabel = { baixo: 'Baixo Risco', medio: 'Médio Risco', alto: 'Alto Risco' }[pr.verdict];
+    const vLabel = pr.verdict ? RISK_LABELS[pr.verdict] : '';
+    const openFiles = this.changedFileOpenMap();
+    const files: ChangedFileCardViewModel[] = pr.files.map((f, index) => ({
+      index,
+      path: f.path,
+      deltaAdd: `+${f.additions}`,
+      deltaDel: `-${f.deletions}`,
+      expanded: Boolean(openFiles[index]),
+      hasDiff: f.hunk.length > 0,
+      lines: this.renderDiffLines(f.hunk),
+    }));
+    const signals = [
+      { k: 'CI', v: ciText, dot: dotCi },
+      { k: 'CODEOWNERS', v: ownersText, dot: dotOwners },
+      ...(pr.size ? [{ k: 'Tamanho', v: pr.size, dot: 'pf-dot' }] : []),
+    ];
     const depVm = pr.dep ? this.buildDependabotDetail(pr) : null;
 
     return {
@@ -628,14 +655,11 @@ export class WorkspaceStore {
         ? `Você foi acionado via regra ${pr.focusRule}. Exibindo apenas o diff dos arquivos sob sua responsabilidade.`
         : '',
       general: Boolean(!pr.focusRule && !pr.dep),
-      vCls: `pf-badge-${pr.verdict}`,
+      vCls: pr.verdict ? `pf-badge-${pr.verdict}` : '',
+      hasVerdict: pr.verdict !== null,
       vLabel,
       why: pr.why,
-      signals: [
-        { k: 'CI', v: ciText, dot: dotCi },
-        { k: 'CODEOWNERS', v: ownersText, dot: dotOwners },
-        { k: 'Tamanho', v: pr.size, dot: 'pf-dot' },
-      ],
+      signals,
       isDep: Boolean(pr.dep),
       notDep: !pr.dep,
       verdict: pr.verdict,
@@ -656,20 +680,17 @@ export class WorkspaceStore {
       note: depVm?.note ?? '',
       noteCls: depVm?.noteCls ?? '',
       showDiff: !pr.dep,
-      diffFile: pr.file,
-      hasDelta: Boolean(pr.deltaAdd),
-      deltaAdd: pr.deltaAdd,
-      deltaDel: pr.deltaDel,
-      lines: this.renderDiffLines(pr.hunk),
+      hasFiles: files.length > 0,
+      files,
       showIdle: act.idle && !merged,
       showMerged: act.idle && merged,
       showSecondary: !merged && !act.hasNote,
       blocked: Boolean(blockedText),
-      blockedCls: needsApproval ? 'pf-note' : 'pf-blocked',
+      blockedCls: 'pf-blocked',
       blockedText,
       showApprove: !mine,
       approvedMine: mine,
-      mergeCls: mine && !blockedText ? 'pf-btn-primary' : '',
+      mergeCls: (mine || pr.approvedBy) && !blockedText ? 'pf-btn-primary' : '',
       mergeDis: blockedText ? 'true' : 'false',
       mergeTip: blockedText || 'Mescla o PR com squash: todos os commits viram um só na branch padrão.',
       busyDis: act.running ? 'true' : 'false',
@@ -705,6 +726,7 @@ export class WorkspaceStore {
     this.selectedTreeNode.set(null);
     this.blastOpenMap.set({ 0: true });
     this.blastShowAll.set(false);
+    this.changedFileOpenMap.set({ 0: true });
   }
 
   closeDrawer(): void {
@@ -759,6 +781,10 @@ export class WorkspaceStore {
 
   selectTreeNode(idx: number): void {
     this.selectedTreeNode.set(idx);
+  }
+
+  toggleChangedFile(idx: number): void {
+    this.changedFileOpenMap.update((curr) => ({ ...curr, [idx]: !curr[idx] }));
   }
 
   toggleBlastFile(idx: number): void {
@@ -1019,14 +1045,14 @@ export class WorkspaceStore {
   }
 
   private buildDependabotDetail(pr: PullRequestItem) {
-    const tier = { baixo: '🟢 Baixo Risco', medio: '🟡 Médio Risco', alto: '🔴 Alto Risco' }[pr.verdict];
-    const bump = computeSemverBumpLabel(pr.from ?? '0.0.0', pr.to ?? '0.0.0');
+    const tier = pr.verdict ? RISK_TIER_LABELS[pr.verdict] : '⚪ Sem análise';
+    const bump = pr.from && pr.to ? computeSemverBumpLabel(pr.from, pr.to) : null;
     const repoShort = pr.repo.split('/')[1] ?? pr.repo;
     const nodes: { label: string; info: string; target?: boolean }[] = [
       { label: `📦 ${repoShort} (root)`, info: 'Raiz do projeto, definida no package.json.' },
       ...(pr.via ?? []),
       {
-        label: `🎯 ${pr.pkg} ${pr.from} → ${pr.to} (${bump} Bump)`,
+        label: pr.pkg ? `🎯 ${pr.pkg} ${pr.from} → ${pr.to}${bump ? ` (${bump} Bump)` : ''}` : `🎯 ${pr.title}`,
         info: 'Pacote que esta atualização altera.',
         target: true,
       },

@@ -52,7 +52,6 @@
   "drawer.blastRadius": "Code Blast Radius",
   "drawer.noBlast": "No direct imports of this package in production code.",
   "drawer.breakingNotes": "Breaking Notes & CVEs",
-  "drawer.approveBeforeMerge": "Approve before merging.",
   "drawer.ci.none": "No CI reported for this commit",
   "drawer.codeowners.none": "Repository has no CODEOWNERS",
   "drawer.blocked.conflict": "Merge blocked: there are conflicts with the base branch.",
@@ -107,5 +106,9 @@
   "import.error.failed": "Could not reach GitHub. Please try again.",
   "seats.access.removed": "No access: the GitHub App was uninstalled or the repository was removed from it.",
   "seats.access.suspended": "Access suspended: the GitHub App installation was suspended.",
-  "seats.access.fix": "Fix access"
+  "seats.access.fix": "Fix access",
+  "drawer.codeowners.unknown": "CODEOWNERS not checked yet",
+  "drawer.files.title": "Changed files",
+  "drawer.files.unavailable": "The changed-files preview is not available yet.",
+  "drawer.files.noDiff": "No diff available for this file."
 }
