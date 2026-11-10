@@ -165,7 +165,7 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     "dependabot[bot]",
-		Summary:        fmt.Sprintf("Analyzed %s (%s -> %s): %s", pkgName, fromVer, toVer, analysis.RiskVerdict),
+		Params:         map[string]string{"package": pkgName, "from": fromVer, "to": toVer, "verdict": string(analysis.RiskVerdict)},
 		OccurredAt:     time.Now().UTC(),
 	})
 

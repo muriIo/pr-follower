@@ -15,6 +15,7 @@ import {
   TimelineEventItem,
   WorkspaceDataset,
 } from '../../domain/models/workspace.models';
+import { isKnownActivityType } from '../../domain/models/activity.models';
 
 export interface ApiRepositoryDto {
   readonly id: number;
@@ -104,7 +105,8 @@ export interface ApiActivityEventDto {
   readonly pull_request_id?: number;
   readonly pr_number?: number;
   readonly actor_login?: string;
-  readonly summary: string;
+  /** Facts the client phrases in the user's language (title, method, package...). */
+  readonly params?: Readonly<Record<string, string>>;
   readonly occurred_at: string;
 }
 
@@ -204,7 +206,7 @@ export function mapActivityEventToTimelineItem(
     id: ev.id,
     type: ev.type,
     actor: ev.actor_login || undefined,
-    text: ev.summary,
+    text: activityText(ev),
     repo: ev.repository_name,
     pr: ev.pr_number || ev.pull_request_id,
     fresh: true,
@@ -216,6 +218,18 @@ export function mapActivityEventToTimelineItem(
 /** An I18nText for a count-dependent message: `<base>.one` or `<base>.other`, with `{count}`. */
 function pluralText(base: string, count: number, params?: Readonly<Record<string, string | number>>): I18nText {
   return { key: `${base}.${count === 1 ? 'one' : 'other'}`, params: { count, ...params } };
+}
+
+/** The activity sentence, phrased by the client from the type and the facts the server sent. */
+function activityText(ev: ApiActivityEventDto): I18nText {
+  const base = { repo: ev.repository_name, pr: ev.pr_number || ev.pull_request_id || '', actor: ev.actor_login ? `@${ev.actor_login.replace(/^@/, '')}` : '' };
+  if (!isKnownActivityType(ev.type)) {
+    return { key: 'timeline.event.other', params: { ...base, type: ev.type } };
+  }
+  // The risk verdict is a word too: one sentence per verdict keeps it translated.
+  const verdict = ev.type === 'dependabot.analyzed' ? ev.params?.['verdict']?.toLowerCase() : undefined;
+  const key = verdict && ['low', 'medium', 'high'].includes(verdict) ? `timeline.event.${ev.type}.${verdict}` : `timeline.event.${ev.type}`;
+  return { key, params: { ...base, ...ev.params } };
 }
 
 function mapCiStatus(status: ApiPullRequestDto['ci_status']): { ci: CiState; ciText: I18nText } {

@@ -121,7 +121,7 @@ export interface TimelineEventItem {
   readonly key: number;
   readonly t: number;
   readonly kind: 'ok' | 'fail' | 'turn' | 'info';
-  readonly text: string;
+  readonly text: I18nText;
   readonly repo: string;
   readonly pr?: number;
   readonly fresh?: boolean;

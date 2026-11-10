@@ -182,7 +182,7 @@ func (uc *UseCase) SnoozePR(ctx context.Context, userID, prID uint64, condition 
 		RepositoryName: pr.RepositoryName,
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
-		Summary:        fmt.Sprintf("PR #%d snoozed (%s)", pr.Number, condition),
+		Params:         map[string]string{"condition": string(condition)},
 		OccurredAt:     time.Now().UTC(),
 	})
 }
@@ -217,7 +217,6 @@ func (uc *UseCase) ClaimPR(ctx context.Context, userID, prID uint64) error {
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     user.Login,
-		Summary:        fmt.Sprintf("@%s claimed PR #%d", user.Login, pr.Number),
 		OccurredAt:     time.Now().UTC(),
 	})
 }

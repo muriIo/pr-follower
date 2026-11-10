@@ -115,7 +115,7 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     actorOf(p),
-		Summary:        fmt.Sprintf("%s #%d (%s): %s", repo.FullName, pr.Number, actionOf(p), pr.Title),
+		Params:         map[string]string{"title": pr.Title},
 		OccurredAt:     time.Now().UTC(),
 	})
 }

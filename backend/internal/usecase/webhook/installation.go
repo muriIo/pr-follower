@@ -127,14 +127,14 @@ func (uc *InstallationUseCase) apply(ctx context.Context, repo *entity.Repositor
 		return err
 	}
 
-	var eventType, summary string
+	var eventType string
 	switch {
 	case access == entity.RepositoryAccessRemoved && hadAccess:
-		eventType, summary = eventAccessLost, "Lost access to "+repo.FullName+": the GitHub App was uninstalled or the repository was removed from it"
+		eventType = eventAccessLost
 	case access == entity.RepositoryAccessSuspended && hadAccess:
-		eventType, summary = eventAccessSuspended, "Access to "+repo.FullName+" is suspended: the GitHub App installation was suspended"
+		eventType = eventAccessSuspended
 	case access == entity.RepositoryAccessActive && !hadAccess:
-		eventType, summary = eventAccessRestored, "Access to "+repo.FullName+" restored"
+		eventType = eventAccessRestored
 	default:
 		return nil // installation moved without an access change
 	}
@@ -143,7 +143,6 @@ func (uc *InstallationUseCase) apply(ctx context.Context, repo *entity.Repositor
 		Type:           eventType,
 		RepositoryID:   repo.ID,
 		RepositoryName: repo.FullName,
-		Summary:        summary,
 		OccurredAt:     uc.now().UTC(),
 	})
 }

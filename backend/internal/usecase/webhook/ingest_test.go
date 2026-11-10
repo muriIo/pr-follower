@@ -231,3 +231,16 @@ func TestIngestPullRequestEvent_MergedIsNotJustClosed(t *testing.T) {
 		t.Fatalf("a merge is announced as pr.merged, got %+v", pub.events)
 	}
 }
+
+func TestIngestPullRequestEvent_PublishesTheTitleAsAParam(t *testing.T) {
+	t.Parallel()
+	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
+	pub := &fakePub{}
+	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub)
+
+	_ = uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{Action: "opened",
+		GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "feat: x", State: entity.PRStateOpen, HeadSHA: "h"})
+	if len(pub.events) != 1 || pub.events[0].Params["title"] != "feat: x" {
+		t.Fatalf("the PR title travels as a param for the client to phrase, got %+v", pub.events)
+	}
+}

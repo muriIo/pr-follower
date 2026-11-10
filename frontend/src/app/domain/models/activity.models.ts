@@ -50,6 +50,11 @@ const BY_TYPE: Readonly<Record<string, ActivityIcon>> = {
   'repository.access_restored': { icon: 'unlock', tone: 'ok' },
 };
 
+/** Whether the client knows how to phrase and draw this activity type. */
+export function isKnownActivityType(type: string): boolean {
+  return Object.hasOwn(BY_TYPE, type);
+}
+
 /** The icon for an activity type; unknown activity falls back to a dot coloured by its kind. */
 export function activityIconFor(type: string | undefined, kind: TimelineEventItem['kind']): ActivityIcon {
   return (type && BY_TYPE[type]) || { icon: 'dot', tone: kind };

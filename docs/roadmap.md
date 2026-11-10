@@ -86,7 +86,7 @@ In order:
 - [x] Angular 22 standalone, Signals, modular `common` / `features` / `layout` (ADR-0009).
 - [x] pt-BR / en-US i18n, with a gate on keys used in templates (ADR-0008).
 - [x] No hardcoded display text: store, mapper and templates render keys (with params and plurals); the ADR-0008 gate fails on literal text.
-- [ ] **P2** Activity summaries come from the backend as English sentences; send the event type and its params so the timeline follows the locale.
+- [x] Timeline follows the locale: activity carries its type and params (title, method, package...), never a sentence; the client phrases it.
 - [x] No demo data in production; sample data only in test fixtures (#10).
 - [ ] **P2** Browser end-to-end tests of the main flows (sign-in, import, drawer, merge).
 

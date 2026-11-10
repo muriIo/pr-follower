@@ -55,12 +55,12 @@ class FakeEventSource {
   }
 }
 
-const activity = (type: string, summary: string) => ({
+const activity = (type: string, title: string) => ({
   id: `ev-${type}`,
   type,
   repository_name: 'acme/web',
   pr_number: 7,
-  summary,
+  params: { title },
   occurred_at: '2026-11-10T12:00:00Z',
 });
 
@@ -71,7 +71,7 @@ function connect() {
   const states: SseConnectionState[] = [];
   const texts: string[] = [];
   const disconnect = gateway.connect(
-    (ev) => texts.push(ev.text),
+    (ev) => texts.push(typeof ev.text === 'string' ? ev.text : String(ev.text.params?.['title'])),
     (state) => states.push(state),
   );
   return { states, texts, disconnect };
@@ -162,7 +162,7 @@ describe('SseLiveEventGateway', () => {
     (globalThis as { EventSource?: unknown }).EventSource = undefined;
     TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
     const states: SseConnectionState[] = [];
-    const texts: string[] = [];
+    const texts: unknown[] = [];
     const disconnect = TestBed.inject(SseLiveEventGateway).connect(
       (ev) => texts.push(ev.text),
       (state) => states.push(state),

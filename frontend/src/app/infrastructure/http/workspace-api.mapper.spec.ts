@@ -163,7 +163,6 @@ describe('workspace-api.mapper', () => {
           repository_name: 'arvore/hive-web',
           pr_number: 142,
           actor_login: 'murilo',
-          summary: 'Approved PR #142',
           occurred_at: '2026-11-09T18:00:00Z',
         },
       ],
@@ -204,13 +203,37 @@ describe('workspace-api.mapper', () => {
       type: 'pr.claimed',
       repository_name: 'arvore/checkout-api',
       pr_number: 412,
-      summary: '@murilo claimed PR #412',
+      actor_login: 'murilo',
       occurred_at: '2026-11-09T19:00:00Z',
     });
     expect(item.kind).toBe('turn');
     expect(item.repo).toBe('arvore/checkout-api');
     expect(item.pr).toBe(412);
-    expect(item.text).toBe('@murilo claimed PR #412');
+    expect(item.text).toEqual({ key: 'timeline.event.pr.claimed', params: { repo: 'arvore/checkout-api', pr: 412, actor: '@murilo' } });
+  });
+
+  it('phrases activity from its type and params, so the timeline follows the locale', () => {
+    const opened = mapActivityEventToTimelineItem({
+      id: 'e1',
+      type: 'pr.opened',
+      repository_name: 'acme/web',
+      pr_number: 7,
+      params: { title: 'feat: x' },
+      occurred_at: '2026-11-10T12:00:00Z',
+    });
+    expect(opened.text).toEqual({ key: 'timeline.event.pr.opened', params: { repo: 'acme/web', pr: 7, actor: '', title: 'feat: x' } });
+
+    const unknown = mapActivityEventToTimelineItem({ id: 'e2', type: 'pr.labeled', repository_name: 'acme/web', occurred_at: '2026-11-10T12:00:00Z' });
+    const analysed = mapActivityEventToTimelineItem({
+      id: 'e3',
+      type: 'dependabot.analyzed',
+      repository_name: 'acme/web',
+      params: { package: 'axios', from: '1.0.0', to: '2.0.0', verdict: 'HIGH' },
+      occurred_at: '2026-11-10T12:00:00Z',
+    });
+    expect(analysed.text).toMatchObject({ key: 'timeline.event.dependabot.analyzed.high' });
+
+    expect(unknown.text).toEqual({ key: 'timeline.event.other', params: { repo: 'acme/web', pr: '', actor: '', type: 'pr.labeled' } });
   });
 
   it('maps repository access from installation webhooks onto seats', () => {
@@ -298,7 +321,7 @@ describe('workspace-api.mapper', () => {
 
   it('marks every server activity as a workspace change, with access losses as failures', () => {
     const event = (type: string) =>
-      mapActivityEventToTimelineItem({ id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
+      mapActivityEventToTimelineItem({ id: type, type, repository_name: 'acme/web', occurred_at: '2026-11-10T12:00:00Z' });
 
     expect(event('repository.access_lost')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
     expect(event('repository.access_suspended')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
@@ -392,7 +415,7 @@ describe('workspace-api.mapper', () => {
   });
 
   it('keeps the activity type, actor and id, and marks only live activity as new', () => {
-    const ev = { id: 'ev-1', type: 'pr.merged', repository_name: 'acme/web', pr_number: 7, actor_login: 'octocat', summary: 'merged', occurred_at: '2026-11-10T12:00:00Z' };
+    const ev = { id: 'ev-1', type: 'pr.merged', repository_name: 'acme/web', pr_number: 7, actor_login: 'octocat', occurred_at: '2026-11-10T12:00:00Z' };
     expect(mapActivityEventToTimelineItem(ev)).toMatchObject({ id: 'ev-1', type: 'pr.merged', actor: 'octocat', fresh: true });
 
     const loaded = mapApiWorkspaceResponseToDataset({ snapshot: { seats: [] }, timeline: [ev] })!.events[0];

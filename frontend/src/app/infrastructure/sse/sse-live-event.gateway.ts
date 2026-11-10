@@ -46,7 +46,7 @@ export class SseLiveEventGateway implements LiveEventGateway {
     const handleMessage = (msg: MessageEvent) => {
       try {
         const parsed = JSON.parse(String(msg.data)) as ApiActivityEventDto;
-        if (parsed && parsed.summary) {
+        if (parsed && parsed.type) {
           onEvent(mapActivityEventToTimelineItem(parsed));
         }
       } catch {

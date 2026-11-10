@@ -588,6 +588,11 @@ describe('WorkspaceStore timeline views', () => {
 
   const flat = (store: WorkspaceStore) => store.timelineGroups().flatMap((g) => g.items.map((i) => i.text));
 
+  it('phrases server activity in the current language', () => {
+    const store = setup([{ ...ev('x', 1, 'acme/web', 'bia'), text: { key: 'timeline.event.pr.opened', params: { pr: 7, title: 'feat: x' } } }]);
+    expect(flat(store)).toEqual(['Abriu #7: feat: x']);
+  });
+
   it('lists the newest activity first, grouped from now to older', () => {
     const store = setup([
       ev('two-days', 60 * 50, 'acme/web', 'bia'),

@@ -274,3 +274,23 @@ func TestEntities_JSONSerializationSnakeCase(t *testing.T) {
 		}
 	}
 }
+
+// The client builds the sentence in the user's language, so activity carries data, never prose.
+func TestActivityEvent_JSONCarriesParamsNotASentence(t *testing.T) {
+	t.Parallel()
+	raw, err := json.Marshal(entity.ActivityEvent{ID: "e", Type: "pr.opened", Params: map[string]string{"title": "feat: x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["summary"]; ok {
+		t.Fatalf("activity must not carry a prebuilt summary: %s", raw)
+	}
+	params, _ := got["params"].(map[string]any)
+	if params["title"] != "feat: x" {
+		t.Fatalf("params.title: %s", raw)
+	}
+}

@@ -34,7 +34,8 @@ const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   draft: 'drawer.blocked.draft',
 };
 
-export interface TimelineItemViewModel extends TimelineEventItem {
+export interface TimelineItemViewModel extends Omit<TimelineEventItem, 'text'> {
+  readonly text: string;
   readonly time: string;
   readonly icon: ActivityIconName;
   readonly tone: ActivityTone;
@@ -652,6 +653,7 @@ export class WorkspaceStore {
       const { icon, tone } = activityIconFor(ev.type, ev.kind);
       group.items.push({
         ...ev,
+        text: this.locale.text(ev.text),
         time,
         icon,
         tone,
@@ -1101,12 +1103,12 @@ export class WorkspaceStore {
 
   private markApproved(pr: PullRequestItem): void {
     this.approvedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: this.t('timeline.local.approved', { pr: pr.id }), repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: { key: 'timeline.local.approved', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private markMerged(pr: PullRequestItem): void {
     this.mergedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: this.t('timeline.local.merged', { pr: pr.id }), repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: { key: 'timeline.local.merged', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private appendTimelineEvent(item: Omit<TimelineEventItem, 'key' | 't'>): void {

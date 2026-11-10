@@ -236,13 +236,14 @@ func (s UserPRState) IsSnoozedFor(headSHA string, ciStatus CIStatus) bool {
 }
 
 type ActivityEvent struct {
-	ID             string    `json:"id"`
-	Type           string    `json:"type"`
-	RepositoryID   uint64    `json:"repository_id"`
-	RepositoryName string    `json:"repository_name"`
-	PullRequestID  uint64    `json:"pull_request_id,omitempty"`
-	PRNumber       int       `json:"pr_number,omitempty"`
-	ActorLogin     string    `json:"actor_login"`
-	Summary        string    `json:"summary"`
-	OccurredAt     time.Time `json:"occurred_at"`
+	ID             string `json:"id"`
+	Type           string `json:"type"`
+	RepositoryID   uint64 `json:"repository_id"`
+	RepositoryName string `json:"repository_name"`
+	PullRequestID  uint64 `json:"pull_request_id,omitempty"`
+	PRNumber       int    `json:"pr_number,omitempty"`
+	ActorLogin     string `json:"actor_login"`
+	// Params are the facts the client phrases in the user's language (title, method, package...).
+	Params     map[string]string `json:"params,omitempty"`
+	OccurredAt time.Time         `json:"occurred_at"`
 }
