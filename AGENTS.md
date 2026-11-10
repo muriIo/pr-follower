@@ -1,6 +1,6 @@
 # PR Follower
 
-A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec: `manifest.md`. Design, data model, analysis and turn-state behaviour, and the **open-work list**: `docs/implementation-plan.md` (read it before starting a feature; tick items off in the PR that finishes them). UI direction (Hive-inspired): `design/`.
+A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec: `manifest.md`. Design, data model, analysis and turn-state behaviour: `docs/implementation-plan.md`. What is done and open, by module, with priorities: `docs/roadmap.md` (read it before starting a feature; tick items off in the PR that finishes them). UI direction (Hive-inspired): `design/`.
 
 ```
 backend/    Go 1.27 · chi/net/http · pgx + sqlc · goose (embedded) · SSE hub

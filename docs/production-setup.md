@@ -6,8 +6,9 @@ Throughout, `app.example.com` stands for your production domain.
 
 ## 0. Before you start
 
-Production readiness depends on open items in the Status list of [`implementation-plan.md`](implementation-plan.md). Check these first:
+Production readiness depends on open items in [`roadmap.md`](roadmap.md) (P0 and P1 first). Check these before going public:
 
+- [ ] **Timeline leak (P0).** `GET /api/v1/workspace` returns recent activity of every user's repositories; with open sign-in this exposes other accounts' repository names and PR titles.
 - [ ] **Acting on GitHub.** Approve / merge / comment do not yet use the user's token, and installation tokens (App ID + private key) are not wired. Until then those actions do not reach GitHub.
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
