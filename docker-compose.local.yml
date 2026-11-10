@@ -76,6 +76,9 @@ services:
     volumes:
       - ./frontend:/app
       - panel-node-modules:/app/node_modules
+      # The container runs as root: keep its Angular cache off the host bind mount, or it
+      # leaves root-owned files in frontend/.angular that break `ng serve` on the host.
+      - panel-angular-cache:/app/.angular
     depends_on:
       api:
         condition: service_healthy
@@ -85,3 +88,4 @@ volumes:
   go-mod-cache:
   go-build-cache:
   panel-node-modules:
+  panel-angular-cache:
