@@ -23,22 +23,27 @@ type PullRequestEventPayload struct {
 	State        entity.PRState
 	HeadSHA      string
 	BaseRef      string
+	// MergeableState is GitHub's mergeable_state from the payload (clean, dirty, blocked, ...).
+	MergeableState string
 }
 
 type IngestUseCase struct {
 	repoRepo port.RepositoryRepository
 	prRepo   port.PullRequestRepository
+	checks   port.CheckRunStore
 	pub      port.EventPublisher
 }
 
 func NewIngestUseCase(
 	repoRepo port.RepositoryRepository,
 	prRepo port.PullRequestRepository,
+	checks port.CheckRunStore,
 	pub port.EventPublisher,
 ) *IngestUseCase {
 	return &IngestUseCase{
 		repoRepo: repoRepo,
 		prRepo:   prRepo,
+		checks:   checks,
 		pub:      pub,
 	}
 }
@@ -66,8 +71,8 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		IsDependabot:   isDependabot,
 		IsDraft:        p.IsDraft,
 		State:          p.State,
-		MergeableState: entity.MergeableStateClean,
-		CIStatus:       entity.CIStatusPending,
+		MergeableState: entity.MergeableStateFromGitHub(p.MergeableState),
+		CIStatus:       entity.CIStatusNone,
 		HeadSHA:        p.HeadSHA,
 		BaseRef:        p.BaseRef,
 		UpdatedAt:      time.Now().UTC(),
@@ -75,18 +80,23 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 
 	// ADR-0011: a redelivered webhook converges to the same state and publishes nothing.
 	existing, err := uc.prRepo.GetByRepoAndNumber(ctx, repo.ID, p.Number)
-	switch {
-	case err == nil:
+	if err != nil && !errors.Is(err, entity.ErrNotFound) {
+		return err
+	}
+	sameCommit := err == nil && existing.HeadSHA == pr.HeadSHA
+	if err == nil {
+		pr.CIStatus = existing.CIStatus
 		if sameWebhookState(existing, pr) {
 			return nil
 		}
-		if existing.HeadSHA == pr.HeadSHA {
-			// Same commit: CI and mergeability are still the stored ones.
-			pr.CIStatus = existing.CIStatus
-			pr.MergeableState = existing.MergeableState
+	}
+	if !sameCommit {
+		// New PR or new commit: CI comes from the check runs already reported for it, if any.
+		runs, runErr := uc.checks.ListCheckRuns(ctx, repo.ID, pr.HeadSHA)
+		if runErr != nil {
+			return runErr
 		}
-	case !errors.Is(err, entity.ErrNotFound):
-		return err
+		pr.CIStatus = entity.DeriveCIStatus(runs)
 	}
 
 	if err := uc.prRepo.Upsert(ctx, pr); err != nil {
@@ -115,5 +125,6 @@ func sameWebhookState(stored, incoming *entity.PullRequest) bool {
 		stored.HeadSHA == incoming.HeadSHA &&
 		stored.BaseRef == incoming.BaseRef &&
 		stored.AuthorLogin == incoming.AuthorLogin &&
-		stored.HTMLURL == incoming.HTMLURL
+		stored.HTMLURL == incoming.HTMLURL &&
+		stored.MergeableState == incoming.MergeableState
 }

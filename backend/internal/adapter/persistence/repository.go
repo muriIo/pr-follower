@@ -199,14 +199,15 @@ func (r *RepositoryRepository) Upsert(ctx context.Context, repo *entity.Reposito
 	}
 
 	row, err := r.q.UpsertRepository(ctx, sqlcgen.UpsertRepositoryParams{
-		GithubRepoID:   repo.GitHubRepoID,
-		InstallationID: repo.InstallationID,
-		Owner:          repo.Owner,
-		Name:           repo.Name,
-		FullName:       repo.FullName,
-		DefaultBranch:  repo.DefaultBranch,
-		CodeownersJson: string(rulesBytes),
-		Access:         string(accessOrActive(repo.Access)),
+		GithubRepoID:     repo.GitHubRepoID,
+		InstallationID:   repo.InstallationID,
+		Owner:            repo.Owner,
+		Name:             repo.Name,
+		FullName:         repo.FullName,
+		DefaultBranch:    repo.DefaultBranch,
+		CodeownersJson:   string(rulesBytes),
+		Access:           string(accessOrActive(repo.Access)),
+		CodeownersStatus: string(repo.CodeownersStatus),
 	})
 	if err != nil {
 		return err
@@ -342,6 +343,7 @@ func toDomainRepo(m sqlcgen.Repository) *entity.Repository {
 		DefaultBranch:         m.DefaultBranch,
 		CachedCodeownersRules: rules,
 		Access:                entity.RepositoryAccess(m.Access),
+		CodeownersStatus:      entity.CodeownersStatus(m.CodeownersStatus),
 		CreatedAt:             m.CreatedAt,
 		UpdatedAt:             m.UpdatedAt,
 	}
@@ -423,6 +425,70 @@ func (r *PullRequestRepository) GetByRepoAndNumber(ctx context.Context, repoID u
 		return nil, err
 	}
 	return toDomainPR(row), nil
+}
+
+// ListOpenByHeadSHA returns the open PRs of a repository whose head is the given commit.
+func (r *PullRequestRepository) ListOpenByHeadSHA(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.PullRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	rows, err := r.q.ListOpenPullRequestsByHead(ctx, sqlcgen.ListOpenPullRequestsByHeadParams{
+		RepositoryID: int64(repositoryID),
+		HeadSha:      headSHA,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.PullRequest, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, *toDomainPR(row))
+	}
+	return out, nil
+}
+
+// UpsertCheckRun stores a check run by its GitHub id (idempotent, ADR-0011).
+func (r *PullRequestRepository) UpsertCheckRun(ctx context.Context, run entity.CheckRun) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.UpsertCheckRun(ctx, sqlcgen.UpsertCheckRunParams{
+		CheckRunID:   run.ID,
+		RepositoryID: int64(run.RepositoryID),
+		HeadSha:      run.HeadSHA,
+		Name:         run.Name,
+		Status:       run.Status,
+		Conclusion:   run.Conclusion,
+	})
+}
+
+func (r *PullRequestRepository) GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetCheckRun(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return &entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion}, nil
+}
+
+// ListCheckRuns returns the check runs reported for one commit of a repository.
+func (r *PullRequestRepository) ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	rows, err := r.q.ListCheckRunsByHead(ctx, sqlcgen.ListCheckRunsByHeadParams{RepositoryID: int64(repositoryID), HeadSha: headSHA})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.CheckRun, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion})
+	}
+	return out, nil
 }
 
 func (r *PullRequestRepository) ListOpenByRepoIDs(ctx context.Context, repoIDs []uint64) ([]entity.PullRequest, error) {

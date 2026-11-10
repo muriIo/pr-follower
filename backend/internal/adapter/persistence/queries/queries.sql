@@ -24,31 +24,32 @@ FROM users
 WHERE github_id = $1;
 
 -- name: UpsertRepository :one
-INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, codeowners_status, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
 ON CONFLICT (github_repo_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     access = EXCLUDED.access,
+    codeowners_status = EXCLUDED.codeowners_status,
     owner = EXCLUDED.owner,
     name = EXCLUDED.name,
     full_name = EXCLUDED.full_name,
     default_branch = EXCLUDED.default_branch,
     codeowners_json = EXCLUDED.codeowners_json,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access;
+RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status;
 
 -- name: GetRepositoryByID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE id = $1;
 
 -- name: GetRepositoryByGitHubRepoID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE github_repo_id = $1;
 
 -- name: ListFollowedRepositoriesByUser :many
-SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access
+SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access, r.codeowners_status
 FROM repositories r
 JOIN user_repo_follows urf ON urf.repository_id = r.id
 WHERE urf.user_id = $1
@@ -170,7 +171,7 @@ DELETE FROM sessions
 WHERE token_hash = $1;
 
 -- name: ListRepositoriesByInstallation :many
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE installation_id = $1
 ORDER BY full_name ASC;
@@ -183,3 +184,32 @@ WHERE id = $1;
 -- name: CountUserRepositoryFollow :one
 SELECT COUNT(*) FROM user_repo_follows
 WHERE user_id = $1 AND repository_id = $2;
+
+-- name: UpsertCheckRun :exec
+INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+ON CONFLICT (check_run_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    name = EXCLUDED.name,
+    status = EXCLUDED.status,
+    conclusion = EXCLUDED.conclusion,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- name: GetCheckRun :one
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+FROM pr_check_runs
+WHERE check_run_id = $1;
+
+-- name: ListCheckRunsByHead :many
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+FROM pr_check_runs
+WHERE repository_id = $1 AND head_sha = $2
+ORDER BY check_run_id ASC;
+
+-- name: ListOpenPullRequestsByHead :many
+SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+       is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+       claimed_by_user_id, claimed_by_login, updated_at
+FROM pull_requests
+WHERE repository_id = $1 AND head_sha = $2 AND state = 'OPEN'
+ORDER BY number ASC;

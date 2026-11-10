@@ -22,8 +22,21 @@ func (f fakeTokens) AccessToken(_ context.Context, userID uint64) (string, error
 type fakeUserAPI struct {
 	installations []entity.Installation
 	repos         map[int64][]entity.InstallationRepository
+	files         map[string]string // "owner/name:path" -> content
+	fileErr       error
 	err           error
 	gotToken      string
+}
+
+func (f *fakeUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
+	if f.fileErr != nil {
+		return nil, f.fileErr
+	}
+	content, ok := f.files[owner+"/"+name+":"+path]
+	if !ok {
+		return nil, entity.ErrNotFound
+	}
+	return []byte(content), nil
 }
 
 func (f *fakeUserAPI) ListInstallations(_ context.Context, token string) ([]entity.Installation, error) {
@@ -229,19 +242,20 @@ func TestImport_PersistsFollowsAndAnnounces(t *testing.T) {
 	}
 }
 
-func TestImport_KeepsCachedCodeowners(t *testing.T) {
+func TestImport_RefreshesCachedCodeownersFromGitHub(t *testing.T) {
 	t.Parallel()
 	uc, _, repos, _ := setup()
 	ctx := context.Background()
 	rules := []entity.CodeownerRule{{Pattern: "*", Owners: []string{"@acme/web"}}}
-	_ = repos.Upsert(ctx, &entity.Repository{GitHubRepoID: 200, FullName: "acme/web", CachedCodeownersRules: rules})
+	_ = repos.Upsert(ctx, &entity.Repository{GitHubRepoID: 200, FullName: "acme/web", CachedCodeownersRules: rules, CodeownersStatus: entity.CodeownersPresent})
 
+	// GitHub now has no CODEOWNERS file: the stale cache must not survive the re-import.
 	repo, err := uc.Import(ctx, userID, 20, 200)
 	if err != nil {
 		t.Fatalf("Import() error: %v", err)
 	}
-	if len(repo.CachedCodeownersRules) != 1 || repo.InstallationID != 20 {
-		t.Fatalf("expected cached CODEOWNERS kept and installation set, got %+v", repo)
+	if repo.CodeownersStatus != entity.CodeownersAbsent || len(repo.CachedCodeownersRules) != 0 || repo.InstallationID != 20 {
+		t.Fatalf("expected CODEOWNERS refreshed to absent, got %+v", repo)
 	}
 }
 
@@ -345,5 +359,53 @@ func TestUseCase_HonorsCanceledContext(t *testing.T) {
 	}
 	if err := uc.Unfollow(ctx, userID, 1); !errors.Is(err, context.Canceled) {
 		t.Errorf("Unfollow: got %v", err)
+	}
+}
+
+func TestImport_RecordsWhetherTheRepositoryHasCodeowners(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	uc, api, _, _ := setup()
+	api.files = map[string]string{
+		"acme/web:.github/CODEOWNERS": "# owners\n/src/ @acme/web @octocat\n",
+		"acme/api:CODEOWNERS":         "* @acme/platform\n",
+	}
+
+	web, err := uc.Import(ctx, userID, 20, 200)
+	if err != nil {
+		t.Fatalf("Import(web) error: %v", err)
+	}
+	if web.CodeownersStatus != entity.CodeownersPresent || len(web.CachedCodeownersRules) != 1 || web.CachedCodeownersRules[0].Pattern != "/src/" {
+		t.Fatalf("acme/web has .github/CODEOWNERS: %+v", web)
+	}
+	api2, _ := uc.Import(ctx, userID, 20, 201)
+	if api2.CodeownersStatus != entity.CodeownersPresent || len(api2.CachedCodeownersRules) != 1 {
+		t.Fatalf("acme/api has a root CODEOWNERS: %+v", api2)
+	}
+	dotfiles, _ := uc.Import(ctx, userID, 10, 100)
+	if dotfiles.CodeownersStatus != entity.CodeownersAbsent || len(dotfiles.CachedCodeownersRules) != 0 {
+		t.Fatalf("octocat/dotfiles has no CODEOWNERS: %+v", dotfiles)
+	}
+}
+
+func TestImport_KeepsCodeownersUnknownWhenGitHubCannotSay(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	uc, api, repos, _ := setup()
+	rules := []entity.CodeownerRule{{Pattern: "*", Owners: []string{"@acme/web"}}}
+	_ = repos.Upsert(ctx, &entity.Repository{GitHubRepoID: 200, FullName: "acme/web", CachedCodeownersRules: rules, CodeownersStatus: entity.CodeownersPresent})
+
+	api.fileErr = errors.New("github 502")
+	web, err := uc.Import(ctx, userID, 20, 200)
+	if err != nil {
+		t.Fatalf("a CODEOWNERS lookup failure must not fail the import: %v", err)
+	}
+	if web.CodeownersStatus != entity.CodeownersPresent || len(web.CachedCodeownersRules) != 1 {
+		t.Fatalf("expected the previously known CODEOWNERS kept, got %+v", web)
+	}
+	fresh, _ := uc.Import(ctx, userID, 20, 201)
+	if fresh.CodeownersStatus != entity.CodeownersUnknown {
+		t.Fatalf("never checked successfully: expected unknown, got %q", fresh.CodeownersStatus)
 	}
 }

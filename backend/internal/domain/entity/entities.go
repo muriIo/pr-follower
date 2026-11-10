@@ -26,6 +26,7 @@ const (
 type CIStatus string
 
 const (
+	CIStatusNone    CIStatus = "NONE" // no check reported for the head commit (e.g. no CI)
 	CIStatusPending CIStatus = "PENDING"
 	CIStatusSuccess CIStatus = "SUCCESS"
 	CIStatusFailure CIStatus = "FAILURE"
@@ -35,8 +36,12 @@ type MergeableState string
 
 const (
 	MergeableStateClean       MergeableState = "CLEAN"
-	MergeableStateConflicting MergeableState = "CONFLICTING"
-	MergeableStateUnknown     MergeableState = "UNKNOWN"
+	MergeableStateConflicting MergeableState = "CONFLICTING" // GitHub "dirty"
+	MergeableStateBlocked     MergeableState = "BLOCKED"     // branch protection: required reviews or checks
+	MergeableStateBehind      MergeableState = "BEHIND"      // head must be updated with the base branch
+	MergeableStateUnstable    MergeableState = "UNSTABLE"    // mergeable, but non-required checks fail
+	MergeableStateDraft       MergeableState = "DRAFT"
+	MergeableStateUnknown     MergeableState = "UNKNOWN" // GitHub has not computed it yet
 )
 
 type TurnState string
@@ -110,6 +115,7 @@ type Repository struct {
 	FullName              string           `json:"full_name"`
 	DefaultBranch         string           `json:"default_branch"`
 	CachedCodeownersRules []CodeownerRule  `json:"cached_codeowners_rules"`
+	CodeownersStatus      CodeownersStatus `json:"codeowners_status"`
 	Access                RepositoryAccess `json:"access"`
 	CreatedAt             time.Time        `json:"created_at"`
 	UpdatedAt             time.Time        `json:"updated_at"`
@@ -160,7 +166,7 @@ func (pr PullRequest) Validate() error {
 func (pr PullRequest) IsReadyForReviewGate() bool {
 	return pr.State == PRStateOpen &&
 		!pr.IsDraft &&
-		pr.CIStatus == CIStatusSuccess &&
+		(pr.CIStatus == CIStatusSuccess || pr.CIStatus == CIStatusNone || pr.CIStatus == "") &&
 		pr.MergeableState != MergeableStateConflicting
 }
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 	"github.com/murilo/pr-follower/backend/internal/domain/port"
+	"github.com/murilo/pr-follower/backend/internal/domain/service"
 )
 
 // ImportableRepository is a repository the user can import, with their follow state.
@@ -105,13 +106,19 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 	}
 
 	var cachedRules []entity.CodeownerRule
+	codeownersStatus := entity.CodeownersUnknown
 	if existing, err := uc.repos.GetByGitHubRepoID(ctx, githubRepoID); err == nil {
 		cachedRules = existing.CachedCodeownersRules
+		codeownersStatus = existing.CodeownersStatus
 	} else if !errors.Is(err, entity.ErrNotFound) {
 		return nil, err
 	}
+	if rules, status, ok := uc.loadCodeowners(ctx, token, *target); ok {
+		cachedRules, codeownersStatus = rules, status
+	}
 
 	repo := target.ToRepository(cachedRules)
+	repo.CodeownersStatus = codeownersStatus
 	if err := uc.repos.Upsert(ctx, repo); err != nil {
 		return nil, err
 	}
@@ -127,6 +134,24 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 		OccurredAt:     uc.nowFunc().UTC(),
 	})
 	return repo, nil
+}
+
+// codeownersPaths is where GitHub looks for CODEOWNERS, in its order of precedence.
+var codeownersPaths = []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"}
+
+// loadCodeowners reads the repository's CODEOWNERS with the user's token. ok is false when
+// GitHub could not answer, so the caller keeps what it knew instead of guessing "absent".
+func (uc *UseCase) loadCodeowners(ctx context.Context, token string, repo entity.InstallationRepository) ([]entity.CodeownerRule, entity.CodeownersStatus, bool) {
+	for _, path := range codeownersPaths {
+		content, err := uc.github.GetRepositoryFile(ctx, token, repo.Owner, repo.Name, path)
+		if err == nil {
+			return service.ParseCodeowners(string(content)), entity.CodeownersPresent, true
+		}
+		if !errors.Is(err, entity.ErrNotFound) {
+			return nil, entity.CodeownersUnknown, false
+		}
+	}
+	return nil, entity.CodeownersAbsent, true
 }
 
 // Unfollow stops the user from following a repository. The repository row stays, since other

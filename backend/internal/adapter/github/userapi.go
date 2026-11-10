@@ -122,6 +122,35 @@ func (c *UserClient) ListInstallationRepositories(ctx context.Context, accessTok
 	return out, err
 }
 
+// GetRepositoryFile reads a file's raw content with the user's token; a missing file is
+// entity.ErrNotFound.
+func (c *UserClient) GetRepositoryFile(ctx context.Context, accessToken, owner, name, path string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	target := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.cfg.APIBaseURL, owner, name, strings.TrimPrefix(path, "/"))
+	return resilience.Retry(ctx, c.cfg.Backoff, func(reqCtx context.Context) ([]byte, error) {
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, resilience.Permanent(err)
+		}
+		req.Header.Set("Accept", "application/vnd.github.raw+json")
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		resp, err := c.cfg.HTTPClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, resilience.Permanent(fmt.Errorf("%w: github rejected the user token", entity.ErrUnauthorized))
+		}
+		if err := classifyHTTPStatus(resp); err != nil {
+			return nil, err
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	})
+}
+
 // paginate fetches ?per_page=100&page=N until total_count items were seen or a page is short.
 // consume decodes one page and returns (total_count, items on this page).
 func (c *UserClient) paginate(ctx context.Context, accessToken, path string, consume func(json.RawMessage) (int, int, error)) error {

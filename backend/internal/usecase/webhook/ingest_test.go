@@ -44,6 +44,7 @@ func (f *fakePRRepo) ListUserPRStates(_ context.Context, _ uint64, _ []uint64) (
 
 type fakeRepoRepo struct {
 	repo *entity.Repository
+	err  error
 }
 
 func (f *fakeRepoRepo) Upsert(_ context.Context, _ *entity.Repository) error { return nil }
@@ -51,6 +52,9 @@ func (f *fakeRepoRepo) GetByID(_ context.Context, _ uint64) (*entity.Repository,
 	return f.repo, nil
 }
 func (f *fakeRepoRepo) GetByGitHubRepoID(_ context.Context, _ int64) (*entity.Repository, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.repo, nil
 }
 func (f *fakeRepoRepo) ListFollowedByUser(_ context.Context, _ uint64) ([]entity.Repository, error) {
@@ -80,7 +84,7 @@ func TestIngestWebhookUseCase_HandlesPullRequestEventAndPublishesSSE(t *testing.
 	}
 	pub := &fakePub{}
 
-	uc := webhook.NewIngestUseCase(repoRepo, prRepo, pub)
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
 
 	err := uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{
 		Action:       "opened",
@@ -112,7 +116,7 @@ func TestIngestPullRequestEvent_RedeliveryIsIdempotent(t *testing.T) {
 	prRepo := &fakePRRepo{}
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "arvore/hive-web"}}
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(repoRepo, prRepo, pub)
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
 	ctx := context.Background()
 
 	payload := webhook.PullRequestEventPayload{
@@ -142,11 +146,11 @@ func TestIngestPullRequestEvent_RedeliveryIsIdempotent(t *testing.T) {
 		t.Fatalf("edit: events=%d title=%q ci=%q", len(pub.events), prRepo.upserted.Title, prRepo.upserted.CIStatus)
 	}
 
-	// A new commit resets CI to pending.
+	// A new commit has no check run reported yet: CI is NONE until one arrives.
 	pushed := edited
 	pushed.Action, pushed.HeadSHA = "synchronize", "sha-2"
 	_ = uc.IngestPullRequestEvent(ctx, pushed)
-	if len(pub.events) != 3 || prRepo.upserted.CIStatus != entity.CIStatusPending {
+	if len(pub.events) != 3 || prRepo.upserted.CIStatus != entity.CIStatusNone {
 		t.Fatalf("new commit: events=%d ci=%q", len(pub.events), prRepo.upserted.CIStatus)
 	}
 }
@@ -176,15 +180,15 @@ func TestIngestPullRequestEvent_PropagatesFailures(t *testing.T) {
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "arvore/hive-web"}}
 	payload := webhook.PullRequestEventPayload{Action: "opened", GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, HeadSHA: "a"}
 
-	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{getErr: boom}, &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
+	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{getErr: boom}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
 		t.Errorf("lookup failure: got %v", err)
 	}
-	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{upsertErr: boom}, &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
+	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{upsertErr: boom}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
 		t.Errorf("upsert failure: got %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, &fakePub{}).IngestPullRequestEvent(ctx, payload); !errors.Is(err, context.Canceled) {
+	if err := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(ctx, payload); !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled: got %v", err)
 	}
 }

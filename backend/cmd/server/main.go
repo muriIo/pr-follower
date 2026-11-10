@@ -79,7 +79,7 @@ func main() {
 		blastradius.NewScanner(),
 		sseHub,
 	)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, sseHub)
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
