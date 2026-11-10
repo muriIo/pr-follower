@@ -1,0 +1,138 @@
+package github_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/murilo/pr-follower/backend/internal/adapter/github"
+	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/infrastructure/resilience"
+)
+
+func newUserClient(server *httptest.Server) *github.UserClient {
+	return github.NewUserClient(github.UserClientConfig{
+		APIBaseURL: server.URL,
+		HTTPClient: server.Client(),
+		Backoff:    resilience.BackoffConfig{MaxAttempts: 2, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond},
+	})
+}
+
+func TestUserClient_ListInstallations(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/installations" || r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 2,
+			"installations": []map[string]any{
+				{"id": 1, "account": map[string]any{"login": "octocat", "type": "User", "avatar_url": "https://a/1"},
+					"repository_selection": "all", "html_url": "https://github.com/settings/installations/1"},
+				{"id": 2, "account": map[string]any{"login": "acme", "type": "Organization", "avatar_url": "https://a/2"},
+					"repository_selection": "selected", "html_url": "https://github.com/organizations/acme/settings/installations/2"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	got, err := newUserClient(server).ListInstallations(context.Background(), "ghu_a")
+	if err != nil {
+		t.Fatalf("ListInstallations() error: %v", err)
+	}
+	want := []entity.Installation{
+		{ID: 1, AccountLogin: "octocat", AccountType: "User", AccountAvatarURL: "https://a/1", RepositorySelection: "all",
+			SettingsURL: "https://github.com/settings/installations/1"},
+		{ID: 2, AccountLogin: "acme", AccountType: "Organization", AccountAvatarURL: "https://a/2", RepositorySelection: "selected",
+			SettingsURL: "https://github.com/organizations/acme/settings/installations/2"},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestUserClient_ListInstallationRepositoriesPaginates(t *testing.T) {
+	t.Parallel()
+	const total = 150
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/installations/9/repositories" {
+			http.NotFound(w, r)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+		if perPage != 100 {
+			t.Errorf("expected per_page=100, got %d", perPage)
+		}
+		var repos []map[string]any
+		for i := (page-1)*perPage + 1; i <= min(page*perPage, total); i++ {
+			repos = append(repos, map[string]any{
+				"id": i, "name": fmt.Sprintf("r%d", i), "full_name": fmt.Sprintf("acme/r%d", i),
+				"owner": map[string]any{"login": "acme"}, "private": i%2 == 0, "default_branch": "main",
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": total, "repositories": repos})
+	}))
+	defer server.Close()
+
+	got, err := newUserClient(server).ListInstallationRepositories(context.Background(), "ghu_a", 9)
+	if err != nil {
+		t.Fatalf("ListInstallationRepositories() error: %v", err)
+	}
+	if len(got) != total {
+		t.Fatalf("expected %d repositories across pages, got %d", total, len(got))
+	}
+	first := got[0]
+	if first.GitHubRepoID != 1 || first.InstallationID != 9 || first.Owner != "acme" || first.Name != "r1" ||
+		first.FullName != "acme/r1" || first.DefaultBranch != "main" || first.Private {
+		t.Fatalf("unexpected mapping: %+v", first)
+	}
+	if !got[1].Private {
+		t.Fatal("expected private flag to be mapped")
+	}
+}
+
+func TestUserClient_MapsAuthAndNotFoundErrors(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer revoked" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	if _, err := c.ListInstallations(context.Background(), "revoked"); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Errorf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	if _, err := c.ListInstallationRepositories(context.Background(), "ghu_a", 404); !errors.Is(err, entity.ErrNotFound) {
+		t.Errorf("unknown installation: expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUserClient_HonorsCanceledContext(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 0})
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := c.ListInstallations(ctx, "t"); !errors.Is(err, context.Canceled) {
+		t.Errorf("ListInstallations: expected context.Canceled, got %v", err)
+	}
+	if _, err := c.ListInstallationRepositories(ctx, "t", 1); !errors.Is(err, context.Canceled) {
+		t.Errorf("ListInstallationRepositories: expected context.Canceled, got %v", err)
+	}
+}

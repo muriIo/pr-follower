@@ -20,6 +20,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -39,6 +40,8 @@ type HandlerDeps struct {
 	WebhookSecret string
 	AuthUC        *auth.UseCase
 	SecureCookies bool
+	ImportUC      *repoimport.UseCase
+	InstallURL    string
 }
 
 type Handler struct {
@@ -75,58 +78,6 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		"snapshot": snapshot,
 		"timeline": h.deps.SSEHub.RecentEvents(),
 	})
-}
-
-func (h *Handler) FollowRepository(w http.ResponseWriter, r *http.Request) {
-	ctx, release := h.beginOperation(r)
-	defer release()
-
-	var req struct {
-		GitHubRepoID  int64  `json:"github_repo_id"`
-		Owner         string `json:"owner"`
-		Name          string `json:"name"`
-		DefaultBranch string `json:"default_branch"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeDomainError(w, entity.ErrInvalidInput)
-		return
-	}
-	if strings.TrimSpace(req.Owner) == "" || strings.TrimSpace(req.Name) == "" {
-		writeDomainError(w, entity.ErrInvalidInput)
-		return
-	}
-	if req.DefaultBranch == "" {
-		req.DefaultBranch = "main"
-	}
-	if req.GitHubRepoID <= 0 {
-		req.GitHubRepoID = time.Now().UnixNano()
-	}
-
-	repo := &entity.Repository{
-		GitHubRepoID:  req.GitHubRepoID,
-		Owner:         strings.TrimSpace(req.Owner),
-		Name:          strings.TrimSpace(req.Name),
-		FullName:      strings.TrimSpace(req.Owner) + "/" + strings.TrimSpace(req.Name),
-		DefaultBranch: req.DefaultBranch,
-	}
-	if err := h.deps.RepoRepo.Upsert(ctx, repo); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	if err := h.deps.RepoRepo.SetUserFollow(ctx, currentUserID(r), repo.ID, true); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	_ = h.deps.SSEHub.Publish(ctx, entity.ActivityEvent{
-		ID:             "follow-" + strconv.FormatUint(repo.ID, 10),
-		Type:           "repository.followed",
-		RepositoryID:   repo.ID,
-		RepositoryName: repo.FullName,
-		Summary:        "Followed repository " + repo.FullName,
-		OccurredAt:     time.Now().UTC(),
-	})
-
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "repository": repo})
 }
 
 func (h *Handler) ApprovePR(w http.ResponseWriter, r *http.Request) {

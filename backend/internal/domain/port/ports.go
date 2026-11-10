@@ -33,6 +33,17 @@ type GitHubOAuth interface {
 	FetchProfile(ctx context.Context, accessToken string) (entity.GitHubProfile, error)
 }
 
+// UserTokenSource yields a usable GitHub user access token for a signed-in user (ADR-0010).
+type UserTokenSource interface {
+	AccessToken(ctx context.Context, userID uint64) (string, error)
+}
+
+// GitHubUserAPI reads what a user can reach through the GitHub App, using their user token.
+type GitHubUserAPI interface {
+	ListInstallations(ctx context.Context, accessToken string) ([]entity.Installation, error)
+	ListInstallationRepositories(ctx context.Context, accessToken string, installationID int64) ([]entity.InstallationRepository, error)
+}
+
 type RepositoryRepository interface {
 	Upsert(ctx context.Context, repo *entity.Repository) error
 	GetByID(ctx context.Context, id uint64) (*entity.Repository, error)

@@ -170,23 +170,5 @@ func (c *OAuthClient) FetchProfile(ctx context.Context, accessToken string) (ent
 }
 
 func (c *OAuthClient) getJSON(ctx context.Context, accessToken, path string, out any) error {
-	_, err := resilience.Retry(ctx, c.cfg.Backoff, func(reqCtx context.Context) (struct{}, error) {
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, c.cfg.APIBaseURL+path, nil)
-		if err != nil {
-			return struct{}{}, resilience.Permanent(err)
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-
-		resp, err := c.cfg.HTTPClient.Do(req)
-		if err != nil {
-			return struct{}{}, err
-		}
-		defer resp.Body.Close()
-		if err := classifyHTTPStatus(resp); err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out)
-	})
-	return err
+	return getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, path, out)
 }
