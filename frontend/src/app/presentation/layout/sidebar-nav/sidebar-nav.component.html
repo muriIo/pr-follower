@@ -91,8 +91,12 @@
 
   <div class="pf-side-foot">
     <div class="pf-user">
-      <span class="pf-avatar" aria-hidden="true">{{ currentUser().avatarInitial }}</span>
-      <span>@{{ currentUser().login }}</span>
+      @if (currentUser()?.avatarUrl) {
+        <img class="pf-avatar" [src]="currentUser()?.avatarUrl" alt="" width="22" height="22" />
+      } @else {
+        <span class="pf-avatar" aria-hidden="true">{{ currentUser()?.avatarInitial }}</span>
+      }
+      <span>@{{ currentUser()?.login }}</span>
       <button
         type="button"
         id="pf-logout-btn"
@@ -104,7 +108,9 @@
       </button>
     </div>
     <div class="pf-user-tags">
-      <span class="pf-badge pf-tag">{{ currentUser().primaryTeam }}</span>
+      @if (currentUser()?.primaryTeam) {
+        <span class="pf-badge pf-tag">{{ currentUser()?.primaryTeam }}</span>
+      }
       <button type="button" class="pf-badge pf-tag" (click)="toggleLocale()">
         {{ localeStore.locale() }}
       </button>

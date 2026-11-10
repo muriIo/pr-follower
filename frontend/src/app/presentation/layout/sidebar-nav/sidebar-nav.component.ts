@@ -2,7 +2,6 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { AuthStore } from '../../../application/stores/auth.store';
 import { LocaleStore } from '../../../application/stores/locale.store';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
-import { createDefaultAuthenticatedUser } from '../../../domain/models/workspace.models';
 import { TranslatePipe } from '../../../infrastructure/i18n/json-translation.gateway';
 import { StatusDotComponent } from '../../common/status-dot/status-dot.component';
 
@@ -18,9 +17,7 @@ export class SidebarNavComponent {
   readonly authStore = inject(AuthStore);
   readonly localeStore = inject(LocaleStore);
 
-  readonly currentUser = computed(
-    () => this.authStore.user() ?? createDefaultAuthenticatedUser(),
-  );
+  readonly currentUser = this.authStore.user;
 
   readonly connectionDotClass = computed(() => {
     const st = this.store.connectionState();

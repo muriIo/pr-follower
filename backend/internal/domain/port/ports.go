@@ -13,6 +13,26 @@ type UserRepository interface {
 	GetByGitHubID(ctx context.Context, ghID int64) (*entity.User, error)
 }
 
+type SessionRepository interface {
+	Create(ctx context.Context, session *entity.Session) error
+	GetByTokenHash(ctx context.Context, tokenHash string) (*entity.Session, error)
+	Delete(ctx context.Context, tokenHash string) error
+}
+
+// TokenCipher encrypts GitHub tokens at rest (ADR-0010).
+type TokenCipher interface {
+	Encrypt(plaintext string) (string, error)
+	Decrypt(ciphertext string) (string, error)
+}
+
+// GitHubOAuth is the GitHub App user-authorization (web application flow) port (ADR-0010).
+type GitHubOAuth interface {
+	AuthorizeURL(state, codeChallenge string) string
+	ExchangeCode(ctx context.Context, code, codeVerifier string) (entity.OAuthToken, error)
+	RefreshToken(ctx context.Context, refreshToken string) (entity.OAuthToken, error)
+	FetchProfile(ctx context.Context, accessToken string) (entity.GitHubProfile, error)
+}
+
 type RepositoryRepository interface {
 	Upsert(ctx context.Context, repo *entity.Repository) error
 	GetByID(ctx context.Context, id uint64) (*entity.Repository, error)

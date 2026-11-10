@@ -85,15 +85,15 @@ const (
 )
 
 type User struct {
-	ID             uint64    `json:"id"`
-	GitHubID       int64     `json:"github_id"`
-	Login          string    `json:"login"`
-	Name           string    `json:"name"`
-	AvatarURL      string    `json:"avatar_url"`
-	Teams          []string  `json:"teams"`
-	EncryptedToken string    `json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID          uint64     `json:"id"`
+	GitHubID    int64      `json:"github_id"`
+	Login       string     `json:"login"`
+	Name        string     `json:"name"`
+	AvatarURL   string     `json:"avatar_url"`
+	Teams       []string   `json:"teams"`
+	GitHubToken OAuthToken `json:"-"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type CodeownerRule struct {

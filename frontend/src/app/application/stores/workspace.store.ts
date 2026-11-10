@@ -202,23 +202,39 @@ export class WorkspaceStore {
   readonly blastOpenMap = signal<Record<number, boolean>>({ 0: true });
   readonly blastShowAll = signal(false);
   private lastBatchTotal = 0;
+  private disconnectLive: (() => void) | null = null;
 
   constructor() {
     this.cancellation.registerAbortCallback((opId) => {
       void this.prGateway?.cancelServerOperation(opId);
     });
-    void this.loadWorkspace();
-    const disconnect = this.sseGateway?.connect(
-      (evt) => {
-        if (!this.pausedTimeline()) {
-          this.appendTimelineEvent(evt.kind, evt.text, evt.repo, evt.pr);
-        }
-      },
-      (state) => this.connectionState.set(state),
-    );
-    if (disconnect) {
-      this.destroyRef.onDestroy(disconnect);
+    this.destroyRef.onDestroy(() => this.stopLiveSession());
+  }
+
+  /**
+   * Loads the workspace and opens the live event stream for the signed-in user.
+   * Nothing is fetched before sign-in, so signed-out visitors never hit the API (ADR-0006, ADR-0010).
+   */
+  startLiveSession(): void {
+    if (this.disconnectLive) {
+      return;
     }
+    void this.loadWorkspace();
+    this.disconnectLive =
+      this.sseGateway?.connect(
+        (evt) => {
+          if (!this.pausedTimeline()) {
+            this.appendTimelineEvent(evt.kind, evt.text, evt.repo, evt.pr);
+          }
+        },
+        (state) => this.connectionState.set(state),
+      ) ?? (() => undefined);
+  }
+
+  stopLiveSession(): void {
+    const disconnect = this.disconnectLive;
+    this.disconnectLive = null;
+    disconnect?.();
   }
 
   async loadWorkspace(options?: ActionRequestOptions): Promise<void> {

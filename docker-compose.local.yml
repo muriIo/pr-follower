@@ -34,8 +34,15 @@ services:
       CGO_ENABLED: '0'
       PORT: '8080'
       DATABASE_URL: postgres://prfollower:prfollower_secret@localhost:5432/pr_follower_local?sslmode=disable
-      GITHUB_WEBHOOK_SECRET: dev-webhook-secret
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-dev-webhook-secret}
       ALLOWED_ORIGIN: http://localhost:4200
+      # GitHub-only sign-in (ADR-0010). Put your dev GitHub App credentials in a root .env
+      # (see .env.example); without them the login screen reports "not configured".
+      PUBLIC_URL: http://localhost:4200
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # Local-only key; production must set its own secret value.
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-yfYm0n3yY3owYS1usyLqydvMge5O6ts0bF9AGsGXar8=}
     volumes:
       - ./backend:/app
       - go-mod-cache:/go/pkg/mod

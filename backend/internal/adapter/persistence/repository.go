@@ -7,17 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/adapter/persistence/sqlcgen"
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/domain/port"
 )
 
 type UserRepository struct {
-	q *sqlcgen.Queries
+	q      *sqlcgen.Queries
+	cipher port.TokenCipher
 }
 
-func NewUserRepository(db *sql.DB) *UserRepository {
-	return &UserRepository{q: sqlcgen.New(db)}
+// NewUserRepository stores users with their GitHub tokens encrypted by cipher (ADR-0010).
+func NewUserRepository(db *sql.DB, cipher port.TokenCipher) *UserRepository {
+	return &UserRepository{q: sqlcgen.New(db), cipher: cipher}
 }
 
 func (r *UserRepository) Upsert(ctx context.Context, user *entity.User) error {
@@ -29,13 +33,25 @@ func (r *UserRepository) Upsert(ctx context.Context, user *entity.User) error {
 		teamsBytes = []byte("[]")
 	}
 
+	encAccess, err := r.cipher.Encrypt(user.GitHubToken.AccessToken)
+	if err != nil {
+		return fmt.Errorf("encrypt access token: %w", err)
+	}
+	encRefresh, err := r.cipher.Encrypt(user.GitHubToken.RefreshToken)
+	if err != nil {
+		return fmt.Errorf("encrypt refresh token: %w", err)
+	}
+
 	row, err := r.q.UpsertUser(ctx, sqlcgen.UpsertUserParams{
-		GithubID:       user.GitHubID,
-		Login:          user.Login,
-		Name:           user.Name,
-		AvatarUrl:      user.AvatarURL,
-		TeamsJson:      string(teamsBytes),
-		EncryptedToken: user.EncryptedToken,
+		GithubID:              user.GitHubID,
+		Login:                 user.Login,
+		Name:                  user.Name,
+		AvatarUrl:             user.AvatarURL,
+		TeamsJson:             string(teamsBytes),
+		EncryptedToken:        encAccess,
+		EncryptedRefreshToken: encRefresh,
+		AccessTokenExpiresAt:  toUnix(user.GitHubToken.AccessTokenExpiresAt),
+		RefreshTokenExpiresAt: toUnix(user.GitHubToken.RefreshTokenExpiresAt),
 	})
 	if err != nil {
 		return err
@@ -57,7 +73,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uint64) (*entity.User, 
 		}
 		return nil, err
 	}
-	return toDomainUser(row), nil
+	return r.toDomainUser(row), nil
 }
 
 func (r *UserRepository) GetByGitHubID(ctx context.Context, ghID int64) (*entity.User, error) {
@@ -71,25 +87,98 @@ func (r *UserRepository) GetByGitHubID(ctx context.Context, ghID int64) (*entity
 		}
 		return nil, err
 	}
-	return toDomainUser(row), nil
+	return r.toDomainUser(row), nil
 }
 
-func toDomainUser(m sqlcgen.User) *entity.User {
+// toDomainUser decrypts the stored tokens. A token that no longer decrypts (for example after
+// TOKEN_ENCRYPTION_KEY rotation) is dropped, which sends the user back through GitHub sign-in.
+func (r *UserRepository) toDomainUser(m sqlcgen.User) *entity.User {
 	var teams []string
 	if m.TeamsJson != "" {
 		_ = json.Unmarshal([]byte(m.TeamsJson), &teams)
 	}
-	return &entity.User{
-		ID:             uint64(m.ID),
-		GitHubID:       m.GithubID,
-		Login:          m.Login,
-		Name:           m.Name,
-		AvatarURL:      m.AvatarUrl,
-		Teams:          teams,
-		EncryptedToken: m.EncryptedToken,
-		CreatedAt:      m.CreatedAt,
-		UpdatedAt:      m.UpdatedAt,
+	token := entity.OAuthToken{
+		AccessTokenExpiresAt:  fromUnix(m.AccessTokenExpiresAt),
+		RefreshTokenExpiresAt: fromUnix(m.RefreshTokenExpiresAt),
 	}
+	access, accessErr := r.cipher.Decrypt(m.EncryptedToken)
+	refresh, refreshErr := r.cipher.Decrypt(m.EncryptedRefreshToken)
+	if accessErr != nil || refreshErr != nil {
+		token = entity.OAuthToken{}
+	} else {
+		token.AccessToken = access
+		token.RefreshToken = refresh
+	}
+	return &entity.User{
+		ID:          uint64(m.ID),
+		GitHubID:    m.GithubID,
+		Login:       m.Login,
+		Name:        m.Name,
+		AvatarURL:   m.AvatarUrl,
+		Teams:       teams,
+		GitHubToken: token,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
+}
+
+func toUnix(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
+}
+
+func fromUnix(sec int64) time.Time {
+	if sec == 0 {
+		return time.Time{}
+	}
+	return time.Unix(sec, 0).UTC()
+}
+
+type SessionRepository struct {
+	q *sqlcgen.Queries
+}
+
+func NewSessionRepository(db *sql.DB) *SessionRepository {
+	return &SessionRepository{q: sqlcgen.New(db)}
+}
+
+func (r *SessionRepository) Create(ctx context.Context, session *entity.Session) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.CreateSession(ctx, sqlcgen.CreateSessionParams{
+		TokenHash: session.TokenHash,
+		UserID:    int64(session.UserID),
+		ExpiresAt: toUnix(session.ExpiresAt),
+	})
+}
+
+func (r *SessionRepository) GetByTokenHash(ctx context.Context, tokenHash string) (*entity.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetSessionByTokenHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	return &entity.Session{
+		TokenHash: row.TokenHash,
+		UserID:    uint64(row.UserID),
+		ExpiresAt: fromUnix(row.ExpiresAt),
+		CreatedAt: row.CreatedAt,
+	}, nil
+}
+
+func (r *SessionRepository) Delete(ctx context.Context, tokenHash string) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.DeleteSession(ctx, tokenHash)
 }
 
 type RepositoryRepository struct {

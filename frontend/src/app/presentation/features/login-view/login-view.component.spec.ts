@@ -1,85 +1,58 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  AUTH_GATEWAY,
-  LIVE_EVENT_GATEWAY,
-  PULL_REQUEST_GATEWAY,
-  TRANSLATION_GATEWAY,
-} from '../../../domain/gateways/workspace.gateways';
-import { createDefaultAuthenticatedUser } from '../../../domain/models/workspace.models';
+import { AUTH_GATEWAY, TRANSLATION_GATEWAY } from '../../../domain/gateways/workspace.gateways';
 import { AuthStore } from '../../../application/stores/auth.store';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { LoginViewComponent } from './login-view.component';
 
-describe('LoginViewComponent', () => {
-  it('renders GitHub handle/team login form, supports quick preset sign-in, and submits credentials', async () => {
-    TestBed.configureTestingModule({
-      imports: [LoginViewComponent],
-      providers: [
-        WorkspaceStore,
-        AuthStore,
-        {
-          provide: AUTH_GATEWAY,
-          useValue: {
-            login: vi.fn(async (creds) => ({
-              ...createDefaultAuthenticatedUser(),
-              login: creds.login,
-              primaryTeam: creds.team,
-            })),
-            fetchCurrentUser: async () => null,
-            logout: async () => undefined,
-            loadStoredSession: () => null,
-            saveStoredSession: () => undefined,
-            clearStoredSession: () => undefined,
-          },
-        },
-        {
-          provide: PULL_REQUEST_GATEWAY,
-          useValue: {
-            fetchWorkspace: async () => null,
-            approvePullRequest: async () => undefined,
-            mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
-            commentOnPullRequest: async () => undefined,
-            snoozePullRequest: async () => undefined,
-            cancelServerOperation: async () => undefined,
-          },
-        },
-        {
-          provide: LIVE_EVENT_GATEWAY,
-          useValue: {
-            connect: (_onEvent: unknown, onState: (s: 'conectado') => void) => {
-              onState('conectado');
-              return () => undefined;
-            },
-          },
-        },
-        {
-          provide: TRANSLATION_GATEWAY,
-          useValue: { loadDictionary: async () => ({}) },
-        },
-      ],
-    });
+function setup(authError: string | null = null) {
+  const gateway = {
+    fetchCurrentUser: async () => null,
+    startSignIn: vi.fn(),
+    consumeAuthError: () => authError,
+    logout: async () => undefined,
+  };
+  TestBed.configureTestingModule({
+    imports: [LoginViewComponent],
+    providers: [
+      AuthStore,
+      { provide: WorkspaceStore, useValue: { startLiveSession: vi.fn(), stopLiveSession: vi.fn(), closeDrawer: vi.fn() } },
+      { provide: AUTH_GATEWAY, useValue: gateway },
+      { provide: TRANSLATION_GATEWAY, useValue: { loadDictionary: async () => ({}) } },
+    ],
+  });
+  return { gateway, authStore: TestBed.inject(AuthStore) };
+}
 
-    const authStore = TestBed.inject(AuthStore);
-    const loginSpy = vi.spyOn(authStore, 'login');
+describe('LoginViewComponent (GitHub-only sign-in)', () => {
+  it('offers a single "sign in with GitHub" action and no credential fields', async () => {
+    const { gateway, authStore } = setup();
+    await authStore.restore();
 
     const fixture = TestBed.createComponent(LoginViewComponent);
     fixture.detectChanges();
-
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('.pf-login-card')).toBeTruthy();
 
-    // Select second quick preset and submit
-    const presetButtons = el.querySelectorAll('.pf-login-preset');
-    expect(presetButtons.length).toBeGreaterThanOrEqual(2);
-    (presetButtons[1] as HTMLButtonElement).click();
+    expect(el.querySelector('.pf-login-card')).toBeTruthy();
+    expect(el.querySelectorAll('input').length).toBe(0);
+    expect(el.querySelector('.pf-login-error')).toBeNull();
+
+    const button = el.querySelector('#pf-login-github') as HTMLButtonElement;
+    expect(button).toBeTruthy();
+    button.click();
     fixture.detectChanges();
 
-    const form = el.querySelector('form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit'));
-    expect(loginSpy).toHaveBeenCalledWith({
-      login: 'bianca-dev',
-      team: '@arvore/core-architects',
-    });
+    expect(gateway.startSignIn).toHaveBeenCalledTimes(1);
+    expect((el.querySelector('#pf-login-github') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('explains why the previous sign-in attempt failed', async () => {
+    const { authStore } = setup('access_denied');
+    await authStore.restore();
+
+    const fixture = TestBed.createComponent(LoginViewComponent);
+    fixture.detectChanges();
+    const error = (fixture.nativeElement as HTMLElement).querySelector('.pf-login-error');
+    expect(error?.textContent).toContain('Você cancelou a autorização no GitHub.');
   });
 });

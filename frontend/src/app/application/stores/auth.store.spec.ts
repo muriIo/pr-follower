@@ -1,116 +1,79 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  AUTH_GATEWAY,
-  AuthGateway,
-  LIVE_EVENT_GATEWAY,
-  PULL_REQUEST_GATEWAY,
-} from '../../domain/gateways/workspace.gateways';
-import { AuthenticatedUser, createDefaultAuthenticatedUser } from '../../domain/models/workspace.models';
-import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
+import { AUTH_GATEWAY, AuthGateway } from '../../domain/gateways/workspace.gateways';
+import { AuthErrorCode, AuthenticatedUser, buildAuthenticatedUser } from '../../domain/models/workspace.models';
 import { AuthStore } from './auth.store';
 import { WorkspaceStore } from './workspace.store';
 
-describe('AuthStore', () => {
-  it('starts unauthenticated when no stored session exists, logs in via AuthGateway, and logs out cleanly', async () => {
-    let savedUser: AuthenticatedUser | null = null;
-    const authGateway: AuthGateway = {
-      login: vi.fn(async (creds) => ({
-        ...createDefaultAuthenticatedUser(),
-        login: creds.login,
-        primaryTeam: creds.team,
-        teams: [creds.team],
-      })),
-      logout: vi.fn(async () => undefined),
-      loadStoredSession: vi.fn(() => savedUser),
-      saveStoredSession: vi.fn((u) => {
-        savedUser = u;
-      }),
-      clearStoredSession: vi.fn(() => {
-        savedUser = null;
-      }),
-    };
+const octocat = buildAuthenticatedUser({ id: 7, login: 'octocat', teams: ['@acme/web'] });
 
-    TestBed.configureTestingModule({
-      providers: [
-        ActionCancellationManager,
-        WorkspaceStore,
-        AuthStore,
-        { provide: AUTH_GATEWAY, useValue: authGateway },
-        {
-          provide: PULL_REQUEST_GATEWAY,
-          useValue: {
-            fetchWorkspace: async () => null,
-            approvePullRequest: async () => undefined,
-            mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
-            commentOnPullRequest: async () => undefined,
-            snoozePullRequest: async () => undefined,
-            cancelServerOperation: async () => undefined,
-          },
-        },
-        {
-          provide: LIVE_EVENT_GATEWAY,
-          useValue: {
-            connect: (_onEvent: unknown, onState: (s: 'conectado') => void) => {
-              onState('conectado');
-              return () => undefined;
-            },
-          },
-        },
-      ],
-    });
+function setup(current: AuthenticatedUser | null, authError: AuthErrorCode | null = null) {
+  const gateway = {
+    fetchCurrentUser: vi.fn(async () => current),
+    startSignIn: vi.fn(),
+    consumeAuthError: vi.fn(() => authError),
+    logout: vi.fn(async () => undefined),
+  } satisfies AuthGateway;
+  const workspace = {
+    startLiveSession: vi.fn(),
+    stopLiveSession: vi.fn(),
+    closeDrawer: vi.fn(),
+  };
+  TestBed.configureTestingModule({
+    providers: [
+      AuthStore,
+      { provide: AUTH_GATEWAY, useValue: gateway },
+      { provide: WorkspaceStore, useValue: workspace },
+    ],
+  });
+  return { store: TestBed.inject(AuthStore), gateway, workspace };
+}
 
-    const authStore = TestBed.inject(AuthStore);
-    const workspaceStore = TestBed.inject(WorkspaceStore);
-    expect(authStore.isAuthenticated()).toBe(false);
-    expect(authStore.user()).toBeNull();
+describe('AuthStore (GitHub-only sign-in, ADR-0010)', () => {
+  it('starts in checking state and restores an existing session', async () => {
+    const { store, workspace } = setup(octocat);
+    expect(store.status()).toBe('checking');
+    expect(store.isAuthenticated()).toBe(false);
 
-    // Sign in
-    await authStore.login({ login: 'murilo', team: '@arvore/frontend' }, 5);
-    expect(authStore.isAuthenticated()).toBe(true);
-    expect(authStore.user()?.login).toBe('murilo');
-    expect(authStore.user()?.primaryTeam).toBe('@arvore/frontend');
-    expect(authGateway.saveStoredSession).toHaveBeenCalled();
+    await store.restore();
 
-    // Open a drawer then logout -> closes drawer and clears session
-    workspaceStore.openPr(142);
-    expect(workspaceStore.selectedPrId()).toBe(142);
-
-    await authStore.logout();
-    expect(authStore.isAuthenticated()).toBe(false);
-    expect(authStore.user()).toBeNull();
-    expect(workspaceStore.selectedPrId()).toBeNull();
-    expect(authGateway.clearStoredSession).toHaveBeenCalled();
-    expect(authGateway.logout).toHaveBeenCalled();
+    expect(store.status()).toBe('signed-in');
+    expect(store.user()?.login).toBe('octocat');
+    expect(store.isAuthenticated()).toBe(true);
+    expect(workspace.startLiveSession).toHaveBeenCalledTimes(1);
   });
 
-  it('supports cooperative cancellation while login is in flight', async () => {
-    const authGateway: AuthGateway = {
-      login: vi.fn(async () => createDefaultAuthenticatedUser()),
-      logout: vi.fn(async () => undefined),
-      loadStoredSession: vi.fn(() => null),
-      saveStoredSession: vi.fn(),
-      clearStoredSession: vi.fn(),
-    };
+  it('shows the sign-in screen when there is no session, without starting the workspace', async () => {
+    const { store, workspace } = setup(null, 'access_denied');
+    await store.restore();
 
-    TestBed.configureTestingModule({
-      providers: [
-        ActionCancellationManager,
-        WorkspaceStore,
-        AuthStore,
-        { provide: AUTH_GATEWAY, useValue: authGateway },
-      ],
-    });
+    expect(store.status()).toBe('signed-out');
+    expect(store.user()).toBeNull();
+    expect(store.authError()).toBe('access_denied');
+    expect(workspace.startLiveSession).not.toHaveBeenCalled();
+  });
 
-    const authStore = TestBed.inject(AuthStore);
-    const loginPromise = authStore.login({ login: 'murilo', team: '@arvore/frontend' }, 200);
-    expect(authStore.loginAction().running).toBe(true);
+  it('signs in by handing the browser to GitHub and clears any previous error', async () => {
+    const { store, gateway } = setup(null, 'login_failed');
+    await store.restore();
 
-    authStore.cancelLogin();
-    await loginPromise;
+    store.signIn();
 
-    expect(authStore.loginAction().running).toBe(false);
-    expect(authStore.isAuthenticated()).toBe(false);
-    expect(authStore.loginAction().note).toContain('cancelada');
+    expect(store.authError()).toBeNull();
+    expect(store.status()).toBe('redirecting');
+    expect(gateway.startSignIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs out: ends the server session and stops the live workspace', async () => {
+    const { store, gateway, workspace } = setup(octocat);
+    await store.restore();
+
+    await store.logout();
+
+    expect(gateway.logout).toHaveBeenCalledTimes(1);
+    expect(workspace.stopLiveSession).toHaveBeenCalledTimes(1);
+    expect(workspace.closeDrawer).toHaveBeenCalledTimes(1);
+    expect(store.user()).toBeNull();
+    expect(store.status()).toBe('signed-out');
   });
 });

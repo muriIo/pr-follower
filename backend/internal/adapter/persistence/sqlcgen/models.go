@@ -76,16 +76,26 @@ type Repository struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+type Session struct {
+	TokenHash string    `json:"token_hash"`
+	UserID    int64     `json:"user_id"`
+	ExpiresAt int64     `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type User struct {
-	ID             int64     `json:"id"`
-	GithubID       int64     `json:"github_id"`
-	Login          string    `json:"login"`
-	Name           string    `json:"name"`
-	AvatarUrl      string    `json:"avatar_url"`
-	TeamsJson      string    `json:"teams_json"`
-	EncryptedToken string    `json:"encrypted_token"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                    int64     `json:"id"`
+	GithubID              int64     `json:"github_id"`
+	Login                 string    `json:"login"`
+	Name                  string    `json:"name"`
+	AvatarUrl             string    `json:"avatar_url"`
+	TeamsJson             string    `json:"teams_json"`
+	EncryptedToken        string    `json:"encrypted_token"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	EncryptedRefreshToken string    `json:"encrypted_refresh_token"`
+	AccessTokenExpiresAt  int64     `json:"access_token_expires_at"`
+	RefreshTokenExpiresAt int64     `json:"refresh_token_expires_at"`
 }
 
 type UserRepoFollow struct {
