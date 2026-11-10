@@ -32,7 +32,6 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 			private.Get("/auth/me", h.AuthMe)
 			private.Get("/workspace", h.GetWorkspace)
 			private.Get("/events/stream", h.ServeSSE)
-			private.Post("/demo/seed", h.SeedDemoData)
 			private.Get("/github/installations", h.ListGitHubInstallations)
 			private.Get("/github/installations/{installationID}/repositories", h.ListInstallationRepositories)
 			private.Post("/repositories/import", h.ImportRepository)
