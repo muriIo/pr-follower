@@ -6,9 +6,19 @@ import {
 } from './workspace-api.mapper';
 
 describe('workspace-api.mapper', () => {
-  it('returns null when snapshot or seats are empty', () => {
+  it('returns null without a snapshot, and an empty workspace when nothing is followed', () => {
     expect(mapApiWorkspaceResponseToDataset({})).toBeNull();
-    expect(mapApiWorkspaceResponseToDataset({ snapshot: { seats: [] } })).toBeNull();
+    // An empty answer is real: the UI must show nothing, not keep stale or demo data.
+    expect(mapApiWorkspaceResponseToDataset({ snapshot: { seats: [] } })).toEqual({
+      repos: [],
+      prs: [],
+      events: [],
+      approvedMap: {},
+      silencedMap: {},
+    });
+    expect(
+      mapApiWorkspaceResponseToDataset({ snapshot: { seats: null as never }, timeline: null as never })?.repos,
+    ).toEqual([]);
   });
 
   it('maps backend GET /api/v1/workspace snapshot and timeline into WorkspaceDataset', () => {
@@ -224,13 +234,15 @@ describe('workspace-api.mapper', () => {
     expect(dataset!.repos.map((r) => r.access)).toEqual(['removed', 'suspended', 'active']);
   });
 
-  it('marks repository access events as failures or recoveries that refresh the workspace', () => {
+  it('marks every server activity as a workspace change, with access losses as failures', () => {
     const event = (type: string) =>
       mapActivityEventToTimelineItem({ id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
 
     expect(event('repository.access_lost')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
     expect(event('repository.access_suspended')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
     expect(event('repository.access_restored')).toMatchObject({ kind: 'ok', refreshWorkspace: true });
-    expect(event('pr.approved').refreshWorkspace).toBeUndefined();
+    // A new PR or commit from GitHub must show up in Seats without a manual refresh.
+    expect(event('pr.opened').refreshWorkspace).toBe(true);
+    expect(event('pr.synchronize').refreshWorkspace).toBe(true);
   });
 });

@@ -120,18 +120,19 @@ export interface ApiWorkspaceResponseDto {
 
 export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): WorkspaceDataset | null {
   const snapshot = dto.snapshot;
-  if (!snapshot || !snapshot.seats || snapshot.seats.length === 0) {
+  if (!snapshot) {
     return null;
   }
 
-  const repos: RepoInfo[] = snapshot.seats.map((s) => ({
+  const seats = snapshot.seats ?? [];
+  const repos: RepoInfo[] = seats.map((s) => ({
     name: s.repository.full_name,
     branch: s.repository.default_branch || 'main',
     access: s.repository.access ?? 'active',
   }));
 
   const repoRulesMap = new Map<string, string>();
-  for (const s of snapshot.seats) {
+  for (const s of seats) {
     const rule = s.repository.cached_codeowners_rules?.[0];
     if (rule) {
       repoRulesMap.set(s.repository.full_name, `${rule.pattern} (${rule.owners.join(', ')})`);
@@ -192,7 +193,8 @@ export function mapActivityEventToTimelineItem(
     repo: ev.repository_name,
     pr: ev.pr_number || ev.pull_request_id,
     fresh: true,
-    ...(ev.type.startsWith('repository.access_') ? { refreshWorkspace: true } : {}),
+    // Every server activity changes what the workspace shows (a new PR, a commit, lost access).
+    refreshWorkspace: true,
   };
 }
 

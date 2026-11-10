@@ -6,6 +6,8 @@ import {
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
 import { DependabotRadarViewComponent } from './dependabot-radar-view.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
+import { WorkspaceStore } from '../../../application/stores/workspace.store';
 
 describe('DependabotRadarViewComponent', () => {
   it('renders batch merge bar and Dependabot PRs grouped by risk tier', () => {
@@ -38,6 +40,8 @@ describe('DependabotRadarViewComponent', () => {
         },
       ],
     });
+
+    loadWorkspaceFixture(TestBed.inject(WorkspaceStore));
 
     const fixture = TestBed.createComponent(DependabotRadarViewComponent);
     fixture.detectChanges();

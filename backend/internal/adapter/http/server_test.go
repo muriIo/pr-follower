@@ -110,6 +110,7 @@ type testServer struct {
 	opReg  *operation.Registry
 	authUC *auth.UseCase
 	repos  *persistence.RepositoryRepository
+	prs    *persistence.PullRequestRepository
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -224,7 +225,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		Follows:        repoRepo,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -248,10 +249,8 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 		t.Fatal("GitHub tokens must never be returned to the browser")
 	}
 
-	// 2. Demo Seed (for the signed-in user)
-	if rec := ts.do(t, http.MethodPost, "/api/v1/demo/seed", "", session); rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 on /api/v1/demo/seed, got %d: %s", rec.Code, rec.Body.String())
-	}
+	// 2. Test fixture for the signed-in user
+	ts.seedWorkspaceFixture(t, session)
 
 	// 2.5 Import a repository reachable through the GitHub App
 	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":901}`, session); rec.Code != http.StatusOK {
@@ -367,7 +366,6 @@ func TestAuth_ProtectedRoutesRequireSession(t *testing.T) {
 		{http.MethodGet, "/api/v1/auth/me"},
 		{http.MethodGet, "/api/v1/workspace"},
 		{http.MethodGet, "/api/v1/events/stream"},
-		{http.MethodPost, "/api/v1/demo/seed"},
 		{http.MethodPost, "/api/v1/repositories/import"},
 		{http.MethodPost, "/api/v1/prs/1/approve"},
 		{http.MethodDelete, "/api/v1/operations/x"},
@@ -739,5 +737,174 @@ func TestLiveEvents_OnlyReachUsersWhoFollowTheRepository(t *testing.T) {
 	}
 	if got := nextEvent(t, hubotEvents); !strings.Contains(got, "acme/api") {
 		t.Fatalf("hubot follows only acme/api; acme/web activity leaked:\n%s", got)
+	}
+}
+
+// seedWorkspaceFixture writes test repositories, PRs, analyses and turn state for the signed-in
+// user straight through persistence (test data only; production has no demo endpoint).
+func (ts testServer) seedWorkspaceFixture(t *testing.T, session *http.Cookie) {
+	t.Helper()
+	ctx := context.Background()
+	var me struct {
+		User entity.User `json:"user"`
+	}
+	if err := json.NewDecoder(ts.do(t, http.MethodGet, "/api/v1/auth/me", "", session).Body).Decode(&me); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	user := &me.User
+
+	repos := []entity.Repository{
+		{
+			GitHubRepoID:  5001,
+			Owner:         "arvore",
+			Name:          "hive-web",
+			FullName:      "arvore/hive-web",
+			DefaultBranch: "main",
+			CachedCodeownersRules: []entity.CodeownerRule{
+				{Pattern: "/src/app/", Owners: []string{"@" + user.Login, "@arvore/frontend"}},
+			},
+		},
+		{
+			GitHubRepoID:  5002,
+			Owner:         "arvore",
+			Name:          "checkout-api",
+			FullName:      "arvore/checkout-api",
+			DefaultBranch: "main",
+			CachedCodeownersRules: []entity.CodeownerRule{
+				{Pattern: "*", Owners: []string{"@arvore/core-architects"}},
+			},
+		},
+	}
+
+	for i := range repos {
+		if err := ts.repos.Upsert(ctx, &repos[i]); err != nil {
+			t.Fatalf("seed repository: %v", err)
+		}
+		_ = ts.repos.SetUserFollow(ctx, user.ID, repos[i].ID, true)
+	}
+
+	pr1 := &entity.PullRequest{
+		RepositoryID:   repos[0].ID,
+		RepositoryName: repos[0].FullName,
+		GitHubPRID:     80001,
+		Number:         142,
+		Title:          "feat(seats): add real-time CI status pulse to repo tiles",
+		AuthorLogin:    "bianca-dev",
+		HTMLURL:        "https://github.com/arvore/hive-web/pull/142",
+		IsDependabot:   false,
+		IsDraft:        false,
+		State:          entity.PRStateOpen,
+		MergeableState: entity.MergeableStateClean,
+		CIStatus:       entity.CIStatusSuccess,
+		HeadSHA:        "7f8a9b1",
+		BaseRef:        "main",
+	}
+	_ = ts.prs.Upsert(ctx, pr1)
+	_ = ts.prs.UpsertUserPRState(ctx, &entity.UserPRState{
+		PullRequestID: pr1.ID,
+		UserID:        user.ID,
+		TurnState:     entity.TurnStateWaitingOnMe,
+		OwnedFilesChanged: []entity.ChangedFile{
+			{
+				Path:      "src/app/features/seats-grid/seat-card.component.ts",
+				Additions: 24,
+				Deletions: 3,
+				Patch:     "@@ -12,3 +12,24 @@\n+  readonly ciPulse = computed(() => this.seat().failingCiCount === 0);",
+			},
+		},
+	})
+
+	pr2 := &entity.PullRequest{
+		RepositoryID:   repos[0].ID,
+		RepositoryName: repos[0].FullName,
+		GitHubPRID:     80002,
+		Number:         145,
+		Title:          "chore(deps-dev): bump vitest from 2.1.1 to 2.1.4",
+		AuthorLogin:    "dependabot[bot]",
+		HTMLURL:        "https://github.com/arvore/hive-web/pull/145",
+		IsDependabot:   true,
+		State:          entity.PRStateOpen,
+		MergeableState: entity.MergeableStateClean,
+		CIStatus:       entity.CIStatusSuccess,
+		HeadSHA:        "9c0d1e2",
+		BaseRef:        "main",
+	}
+	_ = ts.prs.Upsert(ctx, pr2)
+	_ = ts.prs.SaveAnalysis(ctx, &entity.DependabotAnalysis{
+		PullRequestID:     pr2.ID,
+		HeadSHA:           pr2.HeadSHA,
+		Ecosystem:         "npm",
+		PackageName:       "vitest",
+		FromVersion:       "2.1.1",
+		ToVersion:         "2.1.4",
+		SemverBumpType:    entity.SemverBumpPatch,
+		IsDirectDep:       true,
+		DepScope:          entity.DependencyScopeDev,
+		RiskVerdict:       entity.RiskVerdictLow,
+		RiskScore:         12,
+		VerdictSummaryKey: "dependabot.verdict.low.dev_safe",
+		DependencyPathGraph: []entity.DependencyNode{
+			{Name: "hive-web", Version: "root", Scope: entity.DependencyScopeProd},
+			{Name: "vitest", Version: "2.1.4", Scope: entity.DependencyScopeDev},
+		},
+	})
+
+	pr3 := &entity.PullRequest{
+		RepositoryID:   repos[1].ID,
+		RepositoryName: repos[1].FullName,
+		GitHubPRID:     80003,
+		Number:         89,
+		Title:          "chore(deps): bump axios from 1.7.7 to 2.0.0",
+		AuthorLogin:    "dependabot[bot]",
+		HTMLURL:        "https://github.com/arvore/checkout-api/pull/89",
+		IsDependabot:   true,
+		State:          entity.PRStateOpen,
+		MergeableState: entity.MergeableStateClean,
+		CIStatus:       entity.CIStatusSuccess,
+		HeadSHA:        "3a4b5c6",
+		BaseRef:        "main",
+	}
+	_ = ts.prs.Upsert(ctx, pr3)
+	_ = ts.prs.SaveAnalysis(ctx, &entity.DependabotAnalysis{
+		PullRequestID:     pr3.ID,
+		HeadSHA:           pr3.HeadSHA,
+		Ecosystem:         "npm",
+		PackageName:       "axios",
+		FromVersion:       "1.7.7",
+		ToVersion:         "2.0.0",
+		SemverBumpType:    entity.SemverBumpMajor,
+		IsDirectDep:       true,
+		DepScope:          entity.DependencyScopeProd,
+		RiskVerdict:       entity.RiskVerdictHigh,
+		RiskScore:         88,
+		VerdictSummaryKey: "dependabot.verdict.high.direct_prod_major",
+		DependencyPathGraph: []entity.DependencyNode{
+			{Name: "checkout-api", Version: "root", Scope: entity.DependencyScopeProd},
+			{Name: "axios", Version: "2.0.0", Scope: entity.DependencyScopeProd},
+		},
+		BlastRadiusUsages: []entity.BlastRadiusUsage{
+			{
+				FilePath:    "src/infra/payment-gateway.client.ts",
+				LineNumber:  4,
+				ImportStmt:  "import axios, { AxiosInstance } from 'axios';",
+				CodeSnippet: "import { Injectable } from '@nestjs/common';\nimport axios, { AxiosInstance } from 'axios';\n\n@Injectable()",
+			},
+		},
+		AdvisoriesAndNotes: []entity.AdvisoryAndNote{
+			{
+				Severity:       "HIGH",
+				Summary:        "Major v2.0.0 drops legacy CommonJS default export behavior",
+				IsBreakingNote: true,
+			},
+		},
+	})
+}
+
+func TestDemoSeedEndpointIsGone(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/demo/seed", "", session); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/v1/demo/seed must not exist in production, got %d", rec.Code)
 	}
 }

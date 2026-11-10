@@ -10,6 +10,8 @@ import {
 import { AuthenticatedUser, buildAuthenticatedUser } from '../../../domain/models/workspace.models';
 import { AuthStore } from '../../../application/stores/auth.store';
 import { WorkspaceShellComponent } from './workspace-shell.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
+import { WorkspaceStore } from '../../../application/stores/workspace.store';
 
 describe('WorkspaceShellComponent', () => {
   it('checks the session, renders login-view when signed out, the workspace when signed in, and login-view after logout', async () => {
@@ -65,6 +67,8 @@ describe('WorkspaceShellComponent', () => {
         },
       ],
     });
+
+    loadWorkspaceFixture(TestBed.inject(WorkspaceStore));
 
     const fixture = TestBed.createComponent(WorkspaceShellComponent);
     fixture.detectChanges();

@@ -32,7 +32,6 @@ export interface PullRequestGateway {
   commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void>;
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;
   claimPullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
-  seedDemoWorkspace?(options?: ActionRequestOptions): Promise<void>;
   cancelServerOperation(operationId: string): Promise<void>;
 }
 

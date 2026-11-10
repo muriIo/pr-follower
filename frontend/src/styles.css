@@ -52,7 +52,7 @@ h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .pf-user-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* Status Dots */
-.pf-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+.pf-dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
 .pf-dot-ok { background: var(--emerald); }
 .pf-dot-warn { background: var(--amber); }
 .pf-dot-fail { background: var(--rose); }
@@ -262,6 +262,8 @@ button.pf-blast-head { white-space: normal; text-align: left; border-bottom-colo
 .pf-resize:hover .pf-grip, .pf-resize:focus-visible .pf-grip, .pf-app.is-resizing .pf-grip { color: var(--text); border-color: var(--focus); }
 .pf-app.is-resizing { cursor: col-resize; user-select: none; }
 app-sidebar-nav, app-inspection-drawer { display: contents; }
+/* The dot component wraps its <span>; without this the span is plain inline and renders at 0x0. */
+app-status-dot { display: inline-flex; align-items: center; flex: none; }
 
 /* Login & Logout */
 .pf-login-shell { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; background: var(--canvas); color: var(--text); font-family: var(--sans); font-size: 13px; }
