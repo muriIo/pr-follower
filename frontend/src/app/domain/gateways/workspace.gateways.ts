@@ -2,6 +2,7 @@ import { InjectionToken } from '@angular/core';
 import {
   AuthErrorCode,
   AuthenticatedUser,
+  ChangedFileItem,
   SseConnectionState,
   TimelineEventItem,
   WorkspaceDataset,
@@ -33,6 +34,8 @@ export interface PullRequestGateway {
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;
   claimPullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
   cancelServerOperation(operationId: string): Promise<void>;
+  /** A PR's changed files from GitHub, owned files first; rejects when they cannot be read. */
+  fetchChangedFiles?(repo: string, number: number, options?: ActionRequestOptions): Promise<readonly ChangedFileItem[]>;
 }
 
 export interface LiveEventGateway {

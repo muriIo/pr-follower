@@ -107,3 +107,42 @@ describe('HttpPullRequestGateway', () => {
     );
   });
 });
+
+describe('HttpPullRequestGateway changed files', () => {
+  it('reads a PR\'s changed files with ownership and parses each patch', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          files: [
+            { path: 'src/app.ts', status: 'modified', additions: 3, deletions: 1, patch: '@@ -1 +1 @@\n-a\n+b', owned: true },
+            { path: 'assets/logo.png', status: 'added', additions: 0, deletions: 0, owned: false },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    TestBed.configureTestingModule({ providers: [HttpPullRequestGateway] });
+    const ctrl = new AbortController();
+
+    const files = await TestBed.inject(HttpPullRequestGateway).fetchChangedFiles('acme/web', 7, { signal: ctrl.signal });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      '/api/v1/repositories/acme/web/pulls/7/files',
+      expect.objectContaining({ method: 'GET', signal: ctrl.signal }),
+    );
+    expect(files.map((f) => [f.path, f.status, f.additions, f.deletions, f.owned])).toEqual([
+      ['src/app.ts', 'modified', 3, 1, true],
+      ['assets/logo.png', 'added', 0, 0, false],
+    ]);
+    expect(files[0].hunk.length).toBe(3);
+    expect(files[1].hunk).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
+  it('fails instead of pretending there are no files when GitHub cannot be reached', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 502 }));
+    TestBed.configureTestingModule({ providers: [HttpPullRequestGateway] });
+    await expect(TestBed.inject(HttpPullRequestGateway).fetchChangedFiles('acme/web', 7)).rejects.toThrow();
+    vi.restoreAllMocks();
+  });
+});

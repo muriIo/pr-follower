@@ -1,8 +1,13 @@
 import { Injectable } from '@angular/core';
 import { ActionRequestOptions, PullRequestGateway } from '../../domain/gateways/workspace.gateways';
-import { WorkspaceDataset } from '../../domain/models/workspace.models';
+import { ChangedFileItem, WorkspaceDataset } from '../../domain/models/workspace.models';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
-import { ApiWorkspaceResponseDto, mapApiWorkspaceResponseToDataset } from './workspace-api.mapper';
+import {
+  ApiPullRequestFileDto,
+  ApiWorkspaceResponseDto,
+  mapApiWorkspaceResponseToDataset,
+  mapPullRequestFile,
+} from './workspace-api.mapper';
 
 @Injectable({ providedIn: 'root' })
 export class HttpPullRequestGateway implements PullRequestGateway {
@@ -61,6 +66,23 @@ export class HttpPullRequestGateway implements PullRequestGateway {
     } catch {
       // Best-effort server cancellation; the request may already be gone
     }
+  }
+
+  async fetchChangedFiles(
+    repo: string,
+    number: number,
+    options?: ActionRequestOptions,
+  ): Promise<readonly ChangedFileItem[]> {
+    const res = await this.requestJson<{ files?: ApiPullRequestFileDto[] }>(
+      `/api/v1/repositories/${repo}/pulls/${number}/files`,
+      'GET',
+      undefined,
+      options,
+    );
+    if (!res) {
+      throw new Error('changed files unavailable');
+    }
+    return (res.files ?? []).map(mapPullRequestFile);
   }
 
   private async requestJson<T>(

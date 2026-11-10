@@ -46,6 +46,10 @@ export interface ChangedFileItem {
   readonly additions: number;
   readonly deletions: number;
   readonly hunk: readonly DiffHunkLine[];
+  /** GitHub's file status: added, modified, removed, renamed... */
+  readonly status?: string;
+  /** The signed-in user owns this file through CODEOWNERS. */
+  readonly owned?: boolean;
 }
 
 export interface PullRequestItem {

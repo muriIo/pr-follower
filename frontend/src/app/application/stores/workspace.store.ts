@@ -6,6 +6,7 @@ import {
 } from '../../domain/gateways/workspace.gateways';
 import {
   BlastFileItem,
+  ChangedFileItem,
   CiState,
   DiffHunkLine,
   MergeState,
@@ -31,6 +32,8 @@ const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   draft: 'drawer.blocked.draft',
 };
 
+export type ChangedFilesState = 'loading' | 'ready' | 'error';
+
 /** One changed file in the drawer preview, collapsible like the Dependabot affected-code cards. */
 export interface ChangedFileCardViewModel {
   readonly index: number;
@@ -38,6 +41,7 @@ export interface ChangedFileCardViewModel {
   readonly deltaAdd: string;
   readonly deltaDel: string;
   readonly expanded: boolean;
+  readonly owned: boolean;
   readonly hasDiff: boolean;
   readonly lines: readonly RenderedDiffLine[];
 }
@@ -185,6 +189,7 @@ export interface DrawerViewModel {
   readonly showDiff: boolean;
   readonly hasFiles: boolean;
   readonly files: readonly ChangedFileCardViewModel[];
+  readonly filesState: ChangedFilesState;
   readonly hasVerdict: boolean;
   readonly showIdle: boolean;
   readonly showMerged: boolean;
@@ -233,6 +238,13 @@ export class WorkspaceStore {
   readonly blastOpenMap = signal<Record<number, boolean>>({ 0: true });
   readonly blastShowAll = signal(false);
   readonly changedFileOpenMap = signal<Record<number, boolean>>({ 0: true });
+  /** Files loaded from GitHub for the open PR (see loadChangedFiles). */
+  readonly changedFiles = signal<{
+    readonly prId: number;
+    readonly state: ChangedFilesState;
+    readonly files: readonly ChangedFileItem[];
+  } | null>(null);
+  private filesLoad: AbortController | null = null;
   private lastBatchTotal = 0;
   private disconnectLive: (() => void) | null = null;
 
@@ -280,6 +292,11 @@ export class WorkspaceStore {
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       void this.loadWorkspace();
+      // A live change may be a new commit on the open PR: reload its files too (cached by head).
+      const open = this.selectedPrId();
+      if (open !== null && this.changedFiles()?.prId === open) {
+        void this.loadChangedFiles(open);
+      }
     }, WORKSPACE_REFRESH_DEBOUNCE_MS);
   }
 
@@ -629,12 +646,16 @@ export class WorkspaceStore {
 
     const vLabel = pr.verdict ? RISK_LABELS[pr.verdict] : '';
     const openFiles = this.changedFileOpenMap();
-    const files: ChangedFileCardViewModel[] = pr.files.map((f, index) => ({
+    const loaded = this.changedFiles();
+    const filesState: ChangedFilesState = loaded?.prId === pr.id ? loaded.state : 'ready';
+    const sourceFiles = loaded?.prId === pr.id ? loaded.files : pr.files;
+    const files: ChangedFileCardViewModel[] = sourceFiles.map((f, index) => ({
       index,
       path: f.path,
       deltaAdd: `+${f.additions}`,
       deltaDel: `-${f.deletions}`,
       expanded: Boolean(openFiles[index]),
+      owned: Boolean(f.owned),
       hasDiff: f.hunk.length > 0,
       lines: this.renderDiffLines(f.hunk),
     }));
@@ -652,7 +673,7 @@ export class WorkspaceStore {
       ghUrl: `https://github.com/${pr.repo}/pull/${pr.id}`,
       focused: Boolean(pr.focusRule),
       banner: pr.focusRule
-        ? `Você foi acionado via regra ${pr.focusRule}. Exibindo apenas o diff dos arquivos sob sua responsabilidade.`
+        ? `Você foi acionado via regra ${pr.focusRule}. Seus arquivos aparecem primeiro, marcados como "Seu".`
         : '',
       general: Boolean(!pr.focusRule && !pr.dep),
       vCls: pr.verdict ? `pf-badge-${pr.verdict}` : '',
@@ -682,6 +703,7 @@ export class WorkspaceStore {
       showDiff: !pr.dep,
       hasFiles: files.length > 0,
       files,
+      filesState,
       showIdle: act.idle && !merged,
       showMerged: act.idle && merged,
       showSecondary: !merged && !act.hasNote,
@@ -727,9 +749,43 @@ export class WorkspaceStore {
     this.blastOpenMap.set({ 0: true });
     this.blastShowAll.set(false);
     this.changedFileOpenMap.set({ 0: true });
+    void this.loadChangedFiles(prId);
+  }
+
+  /**
+   * Loads the PR's changed files from GitHub, cancelling any load still in flight (ADR-0007).
+   * Dependabot PRs show their impact analysis instead, so nothing is loaded for them.
+   */
+  async loadChangedFiles(prId: number): Promise<void> {
+    this.filesLoad?.abort();
+    this.filesLoad = null;
+    const pr = this.prs().find((p) => p.id === prId);
+    if (!pr || pr.dep || !this.prGateway?.fetchChangedFiles) {
+      this.changedFiles.set(null);
+      return;
+    }
+    const controller = new AbortController();
+    this.filesLoad = controller;
+    this.changedFiles.set({ prId, state: 'loading', files: [] });
+    try {
+      const files = await this.prGateway.fetchChangedFiles(pr.repo, prId, { signal: controller.signal });
+      if (controller.signal.aborted) {
+        return;
+      }
+      const firstOwned = files.findIndex((f) => f.owned);
+      this.changedFileOpenMap.set({ [firstOwned >= 0 ? firstOwned : 0]: true });
+      this.changedFiles.set({ prId, state: 'ready', files });
+    } catch {
+      if (!controller.signal.aborted) {
+        this.changedFiles.set({ prId, state: 'error', files: [] });
+      }
+    }
   }
 
   closeDrawer(): void {
+    this.filesLoad?.abort();
+    this.filesLoad = null;
+    this.changedFiles.set(null);
     this.selectedPrId.set(null);
     this.closingDrawer.set(false);
     this.isResizingDrawer.set(false);

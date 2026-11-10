@@ -1,5 +1,6 @@
 import {
   BlastFileItem,
+  ChangedFileItem,
   CiState,
   CodeownersState,
   DependencyViaNode,
@@ -235,6 +236,26 @@ const MERGE_STATES: Readonly<Record<ApiPullRequestDto['mergeable_state'], MergeS
 
 function mapMergeState(state: ApiPullRequestDto['mergeable_state']): MergeState {
   return MERGE_STATES[state] ?? 'unknown';
+}
+
+export interface ApiPullRequestFileDto {
+  readonly path: string;
+  readonly status?: string;
+  readonly additions: number;
+  readonly deletions: number;
+  readonly patch?: string;
+  readonly owned: boolean;
+}
+
+export function mapPullRequestFile(dto: ApiPullRequestFileDto): ChangedFileItem {
+  return {
+    path: dto.path,
+    status: dto.status,
+    additions: dto.additions,
+    deletions: dto.deletions,
+    owned: dto.owned,
+    hunk: parsePatchToHunkLines(dto.patch),
+  };
 }
 
 function parsePatchToHunkLines(patch?: string): readonly DiffHunkLine[] {
