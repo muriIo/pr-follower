@@ -1,0 +1,79 @@
+name: pr-follower-local
+
+# Dev stack with source bind-mounted. api and panel share postgres' network namespace,
+# so the Angular proxy (proxy.conf.json -> localhost:8080) and DATABASE_URL (localhost:5432)
+# work unchanged. Every published port is therefore declared on the postgres service.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: prfollower
+      POSTGRES_PASSWORD: prfollower_secret
+      POSTGRES_DB: pr_follower_local
+    ports:
+      - '5433:5432' # postgres (5433 avoids clashing with `make db-up` / a host postgres)
+      - '8080:8080' # api
+      - '4200:4200' # panel
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U prfollower -d pr_follower_local']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    image: golang:1.27-alpine
+    network_mode: service:postgres
+    working_dir: /app
+    # Migrations run on startup (embedded goose). Restart the service to pick up Go changes:
+    #   docker compose -f docker-compose.local.yml restart api
+    command: ['go', 'run', './cmd/server']
+    environment:
+      CGO_ENABLED: '0'
+      PORT: '8080'
+      DATABASE_URL: postgres://prfollower:prfollower_secret@localhost:5432/pr_follower_local?sslmode=disable
+      GITHUB_WEBHOOK_SECRET: dev-webhook-secret
+      ALLOWED_ORIGIN: http://localhost:4200
+    volumes:
+      - ./backend:/app
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8080/healthz >/dev/null']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5m # first boot downloads modules and compiles
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  panel:
+    image: node:24-alpine
+    network_mode: service:postgres
+    working_dir: /app
+    command:
+      - sh
+      - -c
+      - |
+        hash=$$(sha1sum package-lock.json)
+        [ "$$(cat node_modules/.lock-hash 2>/dev/null)" = "$$hash" ] || { npm ci && echo "$$hash" > node_modules/.lock-hash; }
+        npm start -- --host 0.0.0.0 --poll 1000
+    environment:
+      CHOKIDAR_USEPOLLING: 'true'
+      TSC_WATCHFILE: DynamicPriorityPolling
+      TSC_WATCHDIRECTORY: DynamicPriorityPolling
+    volumes:
+      - ./frontend:/app
+      - panel-node-modules:/app/node_modules
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  go-mod-cache:
+  go-build-cache:
+  panel-node-modules:
