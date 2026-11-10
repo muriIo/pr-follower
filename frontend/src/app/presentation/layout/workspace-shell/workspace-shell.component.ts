@@ -27,4 +27,8 @@ import { SidebarNavComponent } from '../sidebar-nav/sidebar-nav.component';
 export class WorkspaceShellComponent {
   readonly store = inject(WorkspaceStore);
   readonly authStore = inject(AuthStore);
+
+  constructor() {
+    void this.authStore.restore();
+  }
 }

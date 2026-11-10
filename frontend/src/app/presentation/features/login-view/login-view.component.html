@@ -17,61 +17,30 @@
         </button>
       </div>
       <h1 id="pf-login-heading" class="pf-login-title">{{ 'auth.title' | t }}</h1>
+      <p class="pf-login-lead">{{ 'auth.lead' | t }}</p>
     </header>
 
-    <form class="pf-login-form" (submit)="onSubmit($event)">
-      <div class="pf-field">
-        <label class="pf-field-label" for="pf-login-handle">{{ 'auth.handleLabel' | t }}</label>
-        <input
-          id="pf-login-handle"
-          class="pf-input pf-mono"
-          type="text"
-          autocomplete="username"
-          [value]="loginHandle()"
-          [placeholder]="'auth.handlePlaceholder' | t"
-          (input)="onHandleInput($event)"
+    @if (errorKey(); as key) {
+      <p class="pf-login-error" role="alert">{{ key | t }}</p>
+    }
+
+    <button
+      type="button"
+      id="pf-login-github"
+      class="pf-btn pf-btn-primary pf-login-github"
+      [disabled]="redirecting()"
+      (click)="signIn()"
+    >
+      <svg class="pf-login-github-mark" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path
+          fill="currentColor"
+          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
         />
-      </div>
+      </svg>
+      {{ (redirecting() ? 'auth.redirecting' : 'auth.signInWithGitHub') | t }}
+    </button>
 
-      <div class="pf-field">
-        <label class="pf-field-label" for="pf-login-team">{{ 'auth.teamLabel' | t }}</label>
-        <input
-          id="pf-login-team"
-          class="pf-input pf-mono"
-          type="text"
-          [value]="teamHandle()"
-          (input)="onTeamInput($event)"
-        />
-      </div>
-
-      <div class="pf-field">
-        <span class="pf-field-label">{{ 'auth.quickPreset' | t }}</span>
-        <div class="pf-login-presets">
-          @for (preset of presets; track preset.login) {
-            <button
-              type="button"
-              class="pf-login-preset"
-              (click)="selectPreset(preset.login, preset.team)"
-            >
-              <span class="pf-mono">@{{ preset.login }}</span>
-              <span class="pf-mono">{{ preset.team }}</span>
-            </button>
-          }
-        </div>
-      </div>
-
-      @if (authStore.loginAction().idle) {
-        <button type="submit" id="pf-login-submit" class="pf-btn pf-btn-primary">
-          {{ 'auth.signIn' | t }}
-        </button>
-      }
-
-      <app-cancellable-action
-        [action]="authStore.loginAction()"
-        mode="header"
-        cancelButtonId="pf-login-cancel"
-      />
-    </form>
+    <p class="pf-login-note">{{ 'auth.noPasswords' | t }}</p>
 
     <footer class="pf-login-foot">
       <app-status-dot dotClass="pf-dot pf-dot-ok" />

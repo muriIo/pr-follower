@@ -62,11 +62,16 @@
   "drawer.passToTeammate": "Pass to teammate",
   "drawer.resize": "Resize panel",
   "auth.subtitle": "Turn-based CODEOWNERS triage and zero-clone Dependabot blast-radius analysis.",
-  "auth.loginLabel": "GitHub Handle",
-  "auth.teamLabel": "CODEOWNERS Team",
-  "auth.tokenLabel": "GitHub Token (Optional)",
-  "auth.submitGithub": "Sign in with GitHub",
-  "auth.quickSeats": "Quick Access (Team Seats)",
-  "auth.authenticating": "Authenticating with GitHub...",
-  "auth.logout": "Sign out"
+  "auth.logout": "Sign out",
+  "auth.title": "Sign in to follow your PRs",
+  "auth.lead": "Use your GitHub account. You will see the repositories where the PR Follower app is installed.",
+  "auth.signInWithGitHub": "Sign in with GitHub",
+  "auth.redirecting": "Redirecting to GitHub...",
+  "auth.noPasswords": "We never store passwords: access is always authorized by GitHub.",
+  "auth.logoutTitle": "End session",
+  "auth.error.not_configured": "GitHub sign-in is not configured on this server yet.",
+  "auth.error.state_mismatch": "The sign-in attempt expired or could not be verified. Please try again.",
+  "auth.error.access_denied": "You cancelled the authorization on GitHub.",
+  "auth.error.login_failed": "GitHub did not confirm the sign-in. Please try again.",
+  "auth.error.unknown": "Could not sign in. Please try again."
 }

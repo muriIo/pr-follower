@@ -90,13 +90,14 @@ Visual source of truth: `design/references/` (Claude Design export; tokens porte
 
 ## 6. Status (2026-11-10)
 
-Done: backend core (domain, use cases, persistence, SSE, chi router, webhook HMAC verification), Claude Design references, Angular frontend (all four perspectives, drawer, i18n, cancellation, resilience), stub login/logout, ADR gate, Docker images and dev stack.
+Done: backend core (domain, use cases, persistence, SSE, chi router, webhook HMAC verification), Claude Design references, Angular frontend (all four perspectives, drawer, i18n, cancellation, resilience), GitHub-only sign-in, ADR gate, Docker images and dev stack.
 
 Open:
 
-- [ ] **GitHub App auth.** `GITHUB_APP_ID` / `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` are loaded but unused. Needs OAuth user login (replacing the fabricated user in `AuthLogin`), a private-key setting, installation tokens, and passing them to the gateway (`cmd/server/main.go` builds it with no token).
-- [ ] **Session auth.** The session token returned by `AuthLogin` is not verified; `resolveUserID` trusts a header. Protect `/api/v1` routes.
-- [ ] **Repository selection.** UI for choosing followed repos and managing the GitHub App installation (backend has `POST /api/v1/repositories/follow` only).
+- [x] **GitHub-only sign-in** (ADR-0010): web flow with state + PKCE, server-side sessions in an HttpOnly cookie, tokens encrypted at rest and refreshed, every `/api/v1` route behind `RequireSession`, single "Entrar com GitHub" screen.
+- [ ] **Vercel-style repository import** (ADR-0010 §5): list the user's installations and repositories (`GET /user/installations`, `/user/installations/{id}/repositories`), account switcher and search, "install / adjust GitHub App" link, Setup URL back to the import screen, `installation` / `installation_repositories` webhooks. Replaces the free-form `POST /api/v1/repositories/follow`.
+- [ ] **Act as the user on GitHub.** Approve / merge / comment must call GitHub with the user's token (`auth.UseCase.AccessToken`); the gateway in `cmd/server/main.go` still has no token. Background work needs an installation token (GitHub App ID + private key settings).
+- [ ] **Expired session in the SPA.** A 401 from any API call should return the user to the sign-in screen (today only `/auth/me` is checked, at start-up).
 - [ ] **Run the Dependabot analysis.** `AnalyzeUseCase` is built and injected into the handler but nothing calls it: trigger it from webhook ingest (and/or an on-demand cancellable endpoint) and store the result.
 - [ ] **yarn / pnpm lockfiles.** `CanAnalyze` accepts them, but path reconstruction is npm lockfile v2/v3 (`buildNpmV3DependencyPath`). Verify or implement the others.
 - [ ] **Outbound concurrency bound.** Plan called for a bounded worker pool on GitHub requests and honoring `X-RateLimit-Reset`; only `Retry-After` is handled today.

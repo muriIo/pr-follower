@@ -1,7 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import {
+  AuthErrorCode,
   AuthenticatedUser,
-  LoginCredentials,
   RepoInfo,
   SseConnectionState,
   TimelineEventItem,
@@ -13,12 +13,15 @@ export interface ActionRequestOptions {
   readonly operationId?: string;
 }
 
+/** GitHub-only sign-in backed by a server-side session cookie (ADR-0010). */
 export interface AuthGateway {
-  login(credentials: LoginCredentials, options?: ActionRequestOptions): Promise<AuthenticatedUser>;
-  logout(token?: string): Promise<void>;
-  loadStoredSession(): AuthenticatedUser | null;
-  saveStoredSession(user: AuthenticatedUser): void;
-  clearStoredSession(): void;
+  /** The session user, or null when signed out. */
+  fetchCurrentUser(options?: ActionRequestOptions): Promise<AuthenticatedUser | null>;
+  /** Hands the browser to the backend, which redirects to GitHub. */
+  startSignIn(): void;
+  /** Reads (once) why the last sign-in failed, if it did. */
+  consumeAuthError(): AuthErrorCode | null;
+  logout(): Promise<void>;
 }
 
 export interface PullRequestGateway {

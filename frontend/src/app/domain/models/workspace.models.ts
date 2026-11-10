@@ -100,41 +100,40 @@ export interface WorkspaceDataset {
   readonly silencedMap?: Record<number, string>;
 }
 
+/** The signed-in GitHub user (ADR-0010). Tokens never reach the browser. */
 export interface AuthenticatedUser {
   readonly id: number;
   readonly login: string;
   readonly name: string;
+  readonly avatarUrl: string;
   readonly avatarInitial: string;
   readonly primaryTeam: string;
   readonly teams: readonly string[];
-  readonly token: string;
 }
 
-export interface LoginCredentials {
+export interface GitHubProfileInput {
+  readonly id: number;
   readonly login: string;
-  readonly team: string;
-  readonly githubToken?: string;
+  readonly name?: string;
+  readonly avatarUrl?: string;
+  readonly teams?: readonly string[];
 }
 
-export function createDefaultAuthenticatedUser(
-  login: string = 'murilo',
-  team: string = '@arvore/frontend',
-  token: string = 'pf_sess_default',
-): AuthenticatedUser {
-  const cleanLogin = login.replace(/^@/, '').trim() || 'murilo';
-  const cleanTeam = team.trim()
-    ? team.trim().startsWith('@')
-      ? team.trim()
-      : `@${team.trim()}`
-    : '@arvore/frontend';
+/** Why the last GitHub sign-in attempt failed (`?auth_error=` from the backend callback). */
+export type AuthErrorCode = 'not_configured' | 'state_mismatch' | 'access_denied' | 'login_failed' | 'unknown';
+
+export type AuthStatus = 'checking' | 'signed-out' | 'redirecting' | 'signed-in';
+
+export function buildAuthenticatedUser(profile: GitHubProfileInput): AuthenticatedUser {
+  const teams = profile.teams ?? [];
   return {
-    id: 1,
-    login: cleanLogin,
-    name: cleanLogin.charAt(0).toUpperCase() + cleanLogin.slice(1),
-    avatarInitial: cleanLogin.charAt(0).toUpperCase(),
-    primaryTeam: cleanTeam,
-    teams: [cleanTeam, '@arvore/core-architects'],
-    token,
+    id: profile.id,
+    login: profile.login,
+    name: profile.name || profile.login,
+    avatarUrl: profile.avatarUrl ?? '',
+    avatarInitial: profile.login.charAt(0).toUpperCase(),
+    primaryTeam: teams[0] ?? '',
+    teams,
   };
 }
 

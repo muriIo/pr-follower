@@ -91,6 +91,8 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+    expect(fetchWorkspaceSpy).not.toHaveBeenCalled();
+    store.startLiveSession();
     expect(fetchWorkspaceSpy).toHaveBeenCalled();
 
     // Follow a new repository via API
@@ -156,5 +158,42 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     expect(store.drawerWidth()).toBe(584);
     store.stepDrawerWidth(-48, 900);
     expect(store.drawerWidth()).toBe(536);
+  });
+});
+
+describe('WorkspaceStore live session lifecycle (ADR-0010)', () => {
+  it('stays idle until signed in, then loads and streams once, and disconnects on sign-out', () => {
+    const { prGateway } = createFakeGateways();
+    const fetchSpy = vi.spyOn(prGateway, 'fetchWorkspace');
+    const disconnect = vi.fn();
+    const connect = vi.fn((_onEvent, onState: (s: 'conectado') => void) => {
+      onState('conectado');
+      return disconnect;
+    });
+
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: { connect } },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(connect).not.toHaveBeenCalled();
+
+    store.startLiveSession();
+    store.startLiveSession();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(connect).toHaveBeenCalledTimes(1);
+
+    store.stopLiveSession();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    store.stopLiveSession();
+    expect(disconnect).toHaveBeenCalledTimes(1);
+
+    store.startLiveSession();
+    expect(connect).toHaveBeenCalledTimes(2);
   });
 });

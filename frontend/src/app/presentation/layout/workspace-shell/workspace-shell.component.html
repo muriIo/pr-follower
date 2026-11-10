@@ -1,4 +1,8 @@
-@if (!authStore.isAuthenticated()) {
+@if (authStore.status() === 'checking') {
+  <main class="pf-auth-checking" aria-busy="true">
+    <span class="pf-brand-mark" aria-hidden="true">PF</span>
+  </main>
+} @else if (!authStore.isAuthenticated()) {
   <app-login-view />
 } @else {
   <div

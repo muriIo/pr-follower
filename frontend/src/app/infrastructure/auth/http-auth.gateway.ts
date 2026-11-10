@@ -1,126 +1,109 @@
-import { Injectable } from '@angular/core';
+import { Injectable, InjectionToken, inject } from '@angular/core';
 import { ActionRequestOptions, AuthGateway } from '../../domain/gateways/workspace.gateways';
 import {
+  AuthErrorCode,
   AuthenticatedUser,
-  LoginCredentials,
-  createDefaultAuthenticatedUser,
+  buildAuthenticatedUser,
 } from '../../domain/models/workspace.models';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
 
-const STORAGE_KEY = 'pf-auth-session';
+/** The slice of `window` the gateway needs, injectable so tests never navigate. */
+export interface BrowserWindow {
+  readonly location: Pick<Location, 'assign' | 'search' | 'pathname' | 'hash'>;
+  readonly history: Pick<History, 'replaceState'>;
+}
+
+export const BROWSER_WINDOW = new InjectionToken<BrowserWindow>('BROWSER_WINDOW', {
+  providedIn: 'root',
+  factory: () => window,
+});
+
+const SIGN_IN_PATH = '/api/v1/auth/github/login';
+const KNOWN_AUTH_ERRORS: readonly AuthErrorCode[] = [
+  'not_configured',
+  'state_mismatch',
+  'access_denied',
+  'login_failed',
+];
+
+interface MeResponseDto {
+  readonly user?: {
+    readonly id: number;
+    readonly login: string;
+    readonly name?: string;
+    readonly avatar_url?: string;
+    readonly teams?: readonly string[] | null;
+  };
+}
 
 @Injectable({ providedIn: 'root' })
 export class HttpAuthGateway implements AuthGateway {
-  async login(
-    credentials: LoginCredentials,
-    options?: ActionRequestOptions,
-  ): Promise<AuthenticatedUser> {
-    const cleanLogin = credentials.login.replace(/^@/, '').trim() || 'murilo';
-    const cleanTeam = credentials.team.trim()
-      ? credentials.team.trim().startsWith('@')
-        ? credentials.team.trim()
-        : `@${credentials.team.trim()}`
-      : '@arvore/frontend';
+  private readonly win = inject(BROWSER_WINDOW);
 
-    const res = await retryWithJitter(
-      async () => {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (options?.operationId) {
-          headers['X-Operation-ID'] = options.operationId;
-        }
-        try {
-          const response = await fetch('/api/v1/auth/login', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              login: cleanLogin,
-              team: cleanTeam,
-              github_token: credentials.githubToken ?? '',
-            }),
+  async fetchCurrentUser(options?: ActionRequestOptions): Promise<AuthenticatedUser | null> {
+    try {
+      const body = await retryWithJitter(
+        async () => {
+          const response = await fetch('/api/v1/auth/me', {
+            method: 'GET',
+            credentials: 'same-origin',
             signal: options?.signal,
           });
-          if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          if (response.status === 401) {
+            return null;
+          }
+          if (response.status >= 400 && response.status < 500) {
             throw new PermanentError(`HTTP ${response.status}`);
           }
           if (!response.ok) {
             throw new Error(`Transient HTTP ${response.status}`);
           }
-          return (await response.json()) as {
-            token?: string;
-            user?: { id?: number; login?: string; name?: string; teams?: string[] };
-          };
-        } catch (err: unknown) {
-          if (err instanceof DOMException && err.name === 'AbortError') {
-            throw err;
-          }
-          if (err instanceof PermanentError) {
-            throw err;
-          }
-          return null;
-        }
-      },
-      { baseDelayMs: 40, maxDelayMs: 400, maxAttempts: 2 },
-      options?.signal,
-    );
-
-    const fallback = createDefaultAuthenticatedUser(
-      res?.user?.login ?? cleanLogin,
-      res?.user?.teams?.[0] ?? cleanTeam,
-      res?.token ?? `pf_sess_${Date.now()}`,
-    );
-
-    return {
-      ...fallback,
-      id: res?.user?.id ?? fallback.id,
-      name: res?.user?.name ?? fallback.name,
-      teams: res?.user?.teams && res.user.teams.length > 0 ? res.user.teams : fallback.teams,
-    };
-  }
-
-  async logout(token?: string): Promise<void> {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+          return (await response.json()) as MeResponseDto;
+        },
+        { baseDelayMs: 100, maxDelayMs: 1000, maxAttempts: 3 },
+        options?.signal,
+      );
+      if (!body?.user) {
+        return null;
       }
-      await fetch('/api/v1/auth/logout', {
-        method: 'POST',
-        headers,
+      return buildAuthenticatedUser({
+        id: body.user.id,
+        login: body.user.login,
+        name: body.user.name,
+        avatarUrl: body.user.avatar_url,
+        teams: body.user.teams ?? [],
       });
     } catch {
-      // Best-effort server logout when offline
-    }
-  }
-
-  loadStoredSession(): AuthenticatedUser | null {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return null;
-      }
-      const parsed = JSON.parse(raw) as AuthenticatedUser;
-      if (!parsed || !parsed.login) {
-        return null;
-      }
-      return parsed;
-    } catch {
+      // Unreachable backend or rejected session: the user sees the sign-in screen.
       return null;
     }
   }
 
-  saveStoredSession(user: AuthenticatedUser): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    } catch {
-      // Ignore storage quota errors
-    }
+  startSignIn(): void {
+    this.win.location.assign(SIGN_IN_PATH);
   }
 
-  clearStoredSession(): void {
+  consumeAuthError(): AuthErrorCode | null {
+    const params = new URLSearchParams(this.win.location.search);
+    const raw = params.get('auth_error');
+    if (raw === null) {
+      return null;
+    }
+    params.delete('auth_error');
+    const query = params.toString();
+    this.win.history.replaceState(
+      null,
+      '',
+      `${this.win.location.pathname}${query ? `?${query}` : ''}${this.win.location.hash}`,
+    );
+    return (KNOWN_AUTH_ERRORS as readonly string[]).includes(raw) ? (raw as AuthErrorCode) : 'unknown';
+  }
+
+  async logout(): Promise<void> {
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {
-      // Ignore storage errors
+      // The local sign-out still happens; the server session expires on its own.
     }
   }
 }

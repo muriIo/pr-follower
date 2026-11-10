@@ -1,17 +1,18 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   AUTH_GATEWAY,
   LIVE_EVENT_GATEWAY,
   PULL_REQUEST_GATEWAY,
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
-import { createDefaultAuthenticatedUser } from '../../../domain/models/workspace.models';
+import { AuthenticatedUser, buildAuthenticatedUser } from '../../../domain/models/workspace.models';
 import { AuthStore } from '../../../application/stores/auth.store';
 import { WorkspaceShellComponent } from './workspace-shell.component';
 
 describe('WorkspaceShellComponent', () => {
-  it('renders login-view when unauthenticated, transitions to workspace after login, and returns to login-view after logout', async () => {
+  it('checks the session, renders login-view when signed out, the workspace when signed in, and login-view after logout', async () => {
+    let sessionUser: AuthenticatedUser | null = null;
     TestBed.configureTestingModule({
       imports: [WorkspaceShellComponent],
       providers: [
@@ -19,12 +20,12 @@ describe('WorkspaceShellComponent', () => {
         {
           provide: AUTH_GATEWAY,
           useValue: {
-            login: async () => createDefaultAuthenticatedUser(),
-            fetchCurrentUser: async () => null,
-            logout: async () => undefined,
-            loadStoredSession: () => null,
-            saveStoredSession: () => undefined,
-            clearStoredSession: () => undefined,
+            fetchCurrentUser: async () => sessionUser,
+            startSignIn: vi.fn(),
+            consumeAuthError: () => null,
+            logout: async () => {
+              sessionUser = null;
+            },
           },
         },
         {
@@ -58,12 +59,19 @@ describe('WorkspaceShellComponent', () => {
     fixture.detectChanges();
 
     const el = fixture.nativeElement as HTMLElement;
-    // Starts unauthenticated -> shows login-view
+    // While the session is being checked neither screen flashes
+    expect(el.querySelector('.pf-auth-checking')).toBeTruthy();
+    expect(el.querySelector('app-login-view')).toBeNull();
+
+    // No session -> shows login-view
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(el.querySelector('app-login-view')).toBeTruthy();
     expect(el.querySelector('app-sidebar-nav')).toBeNull();
 
-    // Sign in -> transitions to workspace
-    await fixture.componentInstance.authStore.login({ login: 'murilo', team: '@arvore/frontend' }, 5);
+    // Back from GitHub with a session -> transitions to workspace
+    sessionUser = buildAuthenticatedUser({ id: 7, login: 'octocat', teams: ['@acme/web'] });
+    await fixture.componentInstance.authStore.restore();
     fixture.detectChanges();
 
     expect(el.querySelector('app-login-view')).toBeNull();

@@ -6,7 +6,7 @@ import {
   PULL_REQUEST_GATEWAY,
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
-import { createDefaultAuthenticatedUser } from '../../../domain/models/workspace.models';
+import { buildAuthenticatedUser } from '../../../domain/models/workspace.models';
 import { AuthStore } from '../../../application/stores/auth.store';
 import { SidebarNavComponent } from './sidebar-nav.component';
 
@@ -19,12 +19,11 @@ describe('SidebarNavComponent', () => {
         {
           provide: AUTH_GATEWAY,
           useValue: {
-            login: async () => createDefaultAuthenticatedUser(),
-            fetchCurrentUser: async () => createDefaultAuthenticatedUser(),
+            fetchCurrentUser: async () =>
+              buildAuthenticatedUser({ id: 7, login: 'octocat', teams: ['@acme/web'] }),
+            startSignIn: vi.fn(),
+            consumeAuthError: () => null,
             logout: vi.fn(async () => undefined),
-            loadStoredSession: () => createDefaultAuthenticatedUser(),
-            saveStoredSession: () => undefined,
-            clearStoredSession: vi.fn(),
           },
         },
         {
@@ -55,6 +54,7 @@ describe('SidebarNavComponent', () => {
     });
 
     const authStore = TestBed.inject(AuthStore);
+    await authStore.restore();
     const logoutSpy = vi.spyOn(authStore, 'logout');
 
     const fixture = TestBed.createComponent(SidebarNavComponent);

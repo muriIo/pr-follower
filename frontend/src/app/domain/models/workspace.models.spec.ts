@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAuthenticatedUser,
   computeSemverBumpLabel,
   createInitialPrDataset,
   isActionableTurn,
@@ -34,5 +35,34 @@ describe('Domain Models & Policies (workspace.models)', () => {
     expect(isSafeBatchCandidate(vitestPr, 'fail')).toBe(false);
     expect(isSafeBatchCandidate(axiosPr)).toBe(false);
     expect(isSafeBatchCandidate(pgFailingPr)).toBe(false);
+  });
+});
+
+describe('buildAuthenticatedUser', () => {
+  it('derives avatar initial, display name and primary team from the GitHub profile', () => {
+    const user = buildAuthenticatedUser({
+      id: 7,
+      login: 'octocat',
+      name: 'The Octocat',
+      avatarUrl: 'https://a/u/7',
+      teams: ['@acme/web', '@acme/infra'],
+    });
+    expect(user).toEqual({
+      id: 7,
+      login: 'octocat',
+      name: 'The Octocat',
+      avatarUrl: 'https://a/u/7',
+      avatarInitial: 'O',
+      primaryTeam: '@acme/web',
+      teams: ['@acme/web', '@acme/infra'],
+    });
+  });
+
+  it('falls back to the login when GitHub has no name, team or avatar', () => {
+    const user = buildAuthenticatedUser({ id: 8, login: 'solo' });
+    expect(user.name).toBe('solo');
+    expect(user.avatarUrl).toBe('');
+    expect(user.primaryTeam).toBe('');
+    expect(user.teams).toEqual([]);
   });
 });
