@@ -74,6 +74,7 @@ type Repository struct {
 	CodeownersJson string    `json:"codeowners_json"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	Access         string    `json:"access"`
 }
 
 type Session struct {

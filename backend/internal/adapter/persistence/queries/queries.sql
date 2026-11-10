@@ -24,30 +24,31 @@ FROM users
 WHERE github_id = $1;
 
 -- name: UpsertRepository :one
-INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 ON CONFLICT (github_repo_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
+    access = EXCLUDED.access,
     owner = EXCLUDED.owner,
     name = EXCLUDED.name,
     full_name = EXCLUDED.full_name,
     default_branch = EXCLUDED.default_branch,
     codeowners_json = EXCLUDED.codeowners_json,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at;
+RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access;
 
 -- name: GetRepositoryByID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
 FROM repositories
 WHERE id = $1;
 
 -- name: GetRepositoryByGitHubRepoID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
 FROM repositories
 WHERE github_repo_id = $1;
 
 -- name: ListFollowedRepositoriesByUser :many
-SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at
+SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access
 FROM repositories r
 JOIN user_repo_follows urf ON urf.repository_id = r.id
 WHERE urf.user_id = $1
@@ -155,6 +156,7 @@ FROM pr_user_states
 WHERE pull_request_id = $1 AND user_id = $2;
 
 -- name: CreateSession :exec
+-- idempotent: token_hash is the SHA-256 of a random 256-bit token, so a retry cannot collide.
 INSERT INTO sessions (token_hash, user_id, expires_at)
 VALUES ($1, $2, $3);
 
@@ -166,3 +168,14 @@ WHERE token_hash = $1;
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE token_hash = $1;
+
+-- name: ListRepositoriesByInstallation :many
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+FROM repositories
+WHERE installation_id = $1
+ORDER BY full_name ASC;
+
+-- name: UpdateRepositoryAccess :exec
+UPDATE repositories
+SET installation_id = $2, access = $3, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;

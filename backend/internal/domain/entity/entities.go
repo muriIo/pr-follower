@@ -102,16 +102,17 @@ type CodeownerRule struct {
 }
 
 type Repository struct {
-	ID                    uint64          `json:"id"`
-	GitHubRepoID          int64           `json:"github_repo_id"`
-	InstallationID        int64           `json:"installation_id"`
-	Owner                 string          `json:"owner"`
-	Name                  string          `json:"name"`
-	FullName              string          `json:"full_name"`
-	DefaultBranch         string          `json:"default_branch"`
-	CachedCodeownersRules []CodeownerRule `json:"cached_codeowners_rules"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
+	ID                    uint64           `json:"id"`
+	GitHubRepoID          int64            `json:"github_repo_id"`
+	InstallationID        int64            `json:"installation_id"`
+	Owner                 string           `json:"owner"`
+	Name                  string           `json:"name"`
+	FullName              string           `json:"full_name"`
+	DefaultBranch         string           `json:"default_branch"`
+	CachedCodeownersRules []CodeownerRule  `json:"cached_codeowners_rules"`
+	Access                RepositoryAccess `json:"access"`
+	CreatedAt             time.Time        `json:"created_at"`
+	UpdatedAt             time.Time        `json:"updated_at"`
 }
 
 func (r Repository) Validate() error {

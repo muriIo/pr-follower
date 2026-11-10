@@ -42,6 +42,8 @@ type HandlerDeps struct {
 	SecureCookies bool
 	ImportUC      *repoimport.UseCase
 	InstallURL    string
+	// InstallationUC syncs repository access from installation webhooks (ADR-0010).
+	InstallationUC *webhook.InstallationUseCase
 }
 
 type Handler struct {
@@ -236,6 +238,12 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eventType := r.Header.Get("X-GitHub-Event")
+	if eventType == "installation" || eventType == "installation_repositories" {
+		if err := h.ingestInstallationWebhook(r.Context(), eventType, payload); err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
 	if eventType == "pull_request" {
 		var raw struct {
 			Action      string `json:"action"`
