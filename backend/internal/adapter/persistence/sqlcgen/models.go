@@ -29,6 +29,16 @@ type DependabotAnalysis struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+type PrCheckRun struct {
+	CheckRunID   int64     `json:"check_run_id"`
+	RepositoryID int64     `json:"repository_id"`
+	HeadSha      string    `json:"head_sha"`
+	Name         string    `json:"name"`
+	Status       string    `json:"status"`
+	Conclusion   string    `json:"conclusion"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type PrUserState struct {
 	ID                    int64     `json:"id"`
 	PullRequestID         int64     `json:"pull_request_id"`
@@ -64,17 +74,18 @@ type PullRequest struct {
 }
 
 type Repository struct {
-	ID             int64     `json:"id"`
-	GithubRepoID   int64     `json:"github_repo_id"`
-	InstallationID int64     `json:"installation_id"`
-	Owner          string    `json:"owner"`
-	Name           string    `json:"name"`
-	FullName       string    `json:"full_name"`
-	DefaultBranch  string    `json:"default_branch"`
-	CodeownersJson string    `json:"codeowners_json"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Access         string    `json:"access"`
+	ID               int64     `json:"id"`
+	GithubRepoID     int64     `json:"github_repo_id"`
+	InstallationID   int64     `json:"installation_id"`
+	Owner            string    `json:"owner"`
+	Name             string    `json:"name"`
+	FullName         string    `json:"full_name"`
+	DefaultBranch    string    `json:"default_branch"`
+	CodeownersJson   string    `json:"codeowners_json"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Access           string    `json:"access"`
+	CodeownersStatus string    `json:"codeowners_status"`
 }
 
 type Session struct {

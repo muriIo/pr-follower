@@ -3,6 +3,7 @@ import {
   CiState,
   DependencyViaNode,
   DiffHunkLine,
+  MergeState,
   OwnersState,
   PullRequestItem,
   RepoInfo,
@@ -19,6 +20,8 @@ export interface ApiRepositoryDto {
   readonly full_name: string;
   readonly default_branch: string;
   readonly cached_codeowners_rules?: readonly { pattern: string; owners: readonly string[] }[];
+  /** '' until checked, then whether the repository has a CODEOWNERS file. */
+  readonly codeowners_status?: '' | 'present' | 'absent';
   readonly access?: RepositoryAccessState;
 }
 
@@ -33,8 +36,9 @@ export interface ApiPullRequestDto {
   readonly is_dependabot: boolean;
   readonly is_draft: boolean;
   readonly state: 'OPEN' | 'CLOSED' | 'MERGED';
-  readonly mergeable_state: 'CLEAN' | 'CONFLICTING' | 'UNKNOWN';
-  readonly ci_status: 'PENDING' | 'SUCCESS' | 'FAILURE';
+  readonly mergeable_state: 'CLEAN' | 'CONFLICTING' | 'BLOCKED' | 'BEHIND' | 'UNSTABLE' | 'DRAFT' | 'UNKNOWN';
+  /** NONE: GitHub reported no check run for the head commit (e.g. the repository has no CI). */
+  readonly ci_status: 'NONE' | 'PENDING' | 'SUCCESS' | 'FAILURE';
   readonly head_sha: string;
   readonly base_ref: string;
   readonly claimed_by_login?: string;
@@ -125,11 +129,16 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   }
 
   const seats = snapshot.seats ?? [];
-  const repos: RepoInfo[] = seats.map((s) => ({
-    name: s.repository.full_name,
-    branch: s.repository.default_branch || 'main',
-    access: s.repository.access ?? 'active',
-  }));
+  const repos: RepoInfo[] = seats.map((s) => {
+    const codeowners = s.repository.codeowners_status;
+    return {
+      name: s.repository.full_name,
+      branch: s.repository.default_branch || 'main',
+      access: s.repository.access ?? 'active',
+      ...(codeowners === 'present' || codeowners === 'absent' ? { codeowners } : {}),
+    };
+  });
+  const reposWithoutCodeowners = new Set(repos.filter((r) => r.codeowners === 'absent').map((r) => r.name));
 
   const repoRulesMap = new Map<string, string>();
   for (const s of seats) {
@@ -144,12 +153,14 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   const silencedMap: Record<number, string> = {};
 
   for (const item of snapshot.inbox_waiting_on_me ?? []) {
-    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap);
+    const noCodeowners = reposWithoutCodeowners.has(item.pull_request.repository_name);
+    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap, noCodeowners);
     prs.push(mapped);
   }
 
   for (const item of snapshot.inbox_dimmed ?? []) {
-    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, false, repoRulesMap);
+    const noCodeowners = reposWithoutCodeowners.has(item.pull_request.repository_name);
+    const mapped = mapInboxPrToModel(item.pull_request, item.user_state, false, repoRulesMap, noCodeowners);
     prs.push(mapped);
     if (item.user_state.turn_state === 'APPROVED_BY_ME') {
       approvedMap[mapped.id] = true;
@@ -205,7 +216,25 @@ function mapCiStatus(status: ApiPullRequestDto['ci_status']): { ci: CiState; ciT
   if (status === 'PENDING') {
     return { ci: 'run', ciText: 'CI em execução' };
   }
-  return { ci: 'ok', ciText: 'Todos os checks passaram' };
+  if (status === 'SUCCESS') {
+    return { ci: 'ok', ciText: 'Todos os checks passaram' };
+  }
+  // NONE, or a value this client does not know yet: never claim a result GitHub did not report.
+  return { ci: 'none', ciText: '' };
+}
+
+const MERGE_STATES: Readonly<Record<ApiPullRequestDto['mergeable_state'], MergeState>> = {
+  CLEAN: 'clean',
+  CONFLICTING: 'conflict',
+  BLOCKED: 'blocked',
+  BEHIND: 'behind',
+  UNSTABLE: 'unstable',
+  DRAFT: 'draft',
+  UNKNOWN: 'unknown',
+};
+
+function mapMergeState(state: ApiPullRequestDto['mergeable_state']): MergeState {
+  return MERGE_STATES[state] ?? 'unknown';
 }
 
 function parsePatchToHunkLines(patch?: string): readonly DiffHunkLine[] {
@@ -231,6 +260,7 @@ function mapInboxPrToModel(
   st: ApiUserPrStateDto,
   isActionable: boolean,
   repoRulesMap: Map<string, string>,
+  noCodeowners: boolean,
 ): PullRequestItem {
   const prId = pr.number || pr.id;
   const { ci, ciText } = mapCiStatus(pr.ci_status);
@@ -242,12 +272,15 @@ function mapInboxPrToModel(
       : `@${st.approved_by_login}`
     : undefined;
 
-  const owners: OwnersState = isActionable ? 'voce' : approvedBy ? 'ok' : 'pend';
-  const ownersText = isActionable
-    ? `Você é dono de ${ownedFiles.length || 1} arquivo(s)`
-    : approvedBy
-      ? `Aprovado por ${approvedBy}`
-      : 'Revisão pendente';
+  // Without a CODEOWNERS file nobody's review is pending by ownership; the UI says so.
+  const owners: OwnersState = noCodeowners ? 'none' : isActionable ? 'voce' : approvedBy ? 'ok' : 'pend';
+  const ownersText = noCodeowners
+    ? ''
+    : isActionable
+      ? `Você é dono de ${ownedFiles.length || 1} arquivo(s)`
+      : approvedBy
+        ? `Aprovado por ${approvedBy}`
+        : 'Revisão pendente';
 
   let muteBadge: string | undefined;
   let muteTip: string | undefined;
@@ -276,6 +309,7 @@ function mapInboxPrToModel(
     ciText,
     owners,
     ownersText,
+    merge: mapMergeState(pr.mergeable_state),
     size: `${Math.max(ownedFiles.length, 1)} arquivo(s)`,
     turn: isActionable,
     ownFiles: ownedFiles.length || undefined,
@@ -357,6 +391,7 @@ function mapDependabotPrToModel(
     ciText,
     owners: 'ok',
     ownersText: 'Sem dono obrigatório',
+    merge: mapMergeState(pr.mergeable_state),
     size: '2 arquivos, lockfile incluído',
     turn: false,
     dep: true,

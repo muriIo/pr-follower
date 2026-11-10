@@ -1,8 +1,14 @@
 export type PerspectiveView = 'seats' | 'inbox' | 'radar' | 'timeline' | 'import';
 export type SeatFilterType = 'todos' | 'turn' | 'deps';
 export type RiskVerdictTier = 'baixo' | 'medio' | 'alto';
-export type CiState = 'ok' | 'run' | 'fail';
-export type OwnersState = 'ok' | 'voce' | 'pend';
+/** CI of the PR head as GitHub reported it; `none` means no check was ever reported (e.g. no CI). */
+export type CiState = 'ok' | 'run' | 'fail' | 'none';
+/** CODEOWNERS review state; `none` means the repository has no CODEOWNERS file. */
+export type OwnersState = 'ok' | 'voce' | 'pend' | 'none';
+/** GitHub's mergeable_state; `unknown` until GitHub computes it. */
+export type MergeState = 'clean' | 'conflict' | 'behind' | 'blocked' | 'unstable' | 'draft' | 'unknown';
+/** Whether a repository has a CODEOWNERS file, once checked. */
+export type CodeownersState = 'present' | 'absent';
 export type SseConnectionState = 'conectado' | 'reconectando' | 'desconectado';
 
 export interface DiffHunkLine {
@@ -44,6 +50,7 @@ export interface PullRequestItem {
   readonly ciText: string;
   readonly owners: OwnersState;
   readonly ownersText: string;
+  readonly merge?: MergeState;
   readonly size: string;
   readonly turn: boolean;
   readonly ownFiles?: number;
@@ -84,6 +91,8 @@ export interface RepoInfo {
   readonly name: string;
   readonly branch: string;
   readonly access?: RepositoryAccessState;
+  /** Unset until the backend has checked the repository for a CODEOWNERS file. */
+  readonly codeowners?: CodeownersState;
 }
 
 export interface TimelineEventItem {

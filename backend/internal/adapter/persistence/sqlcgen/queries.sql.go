@@ -70,6 +70,35 @@ func (q *Queries) FollowRepository(ctx context.Context, arg FollowRepositoryPara
 	return err
 }
 
+const getCheckRun = `-- name: GetCheckRun :one
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+FROM pr_check_runs
+WHERE check_run_id = $1
+`
+
+type GetCheckRunRow struct {
+	CheckRunID   int64  `json:"check_run_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+}
+
+func (q *Queries) GetCheckRun(ctx context.Context, checkRunID int64) (GetCheckRunRow, error) {
+	row := q.db.QueryRowContext(ctx, getCheckRun, checkRunID)
+	var i GetCheckRunRow
+	err := row.Scan(
+		&i.CheckRunID,
+		&i.RepositoryID,
+		&i.HeadSha,
+		&i.Name,
+		&i.Status,
+		&i.Conclusion,
+	)
+	return i, err
+}
+
 const getDependabotAnalysisByPRAndSHA = `-- name: GetDependabotAnalysisByPRAndSHA :one
 SELECT id, pull_request_id, head_sha, ecosystem, package_name, from_version, to_version,
        semver_bump_type, is_direct_dep, dep_scope, risk_verdict, risk_score,
@@ -182,7 +211,7 @@ func (q *Queries) GetPullRequestByRepoAndNumber(ctx context.Context, arg GetPull
 }
 
 const getRepositoryByGitHubRepoID = `-- name: GetRepositoryByGitHubRepoID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE github_repo_id = $1
 `
@@ -202,12 +231,13 @@ func (q *Queries) GetRepositoryByGitHubRepoID(ctx context.Context, githubRepoID 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Access,
+		&i.CodeownersStatus,
 	)
 	return i, err
 }
 
 const getRepositoryByID = `-- name: GetRepositoryByID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE id = $1
 `
@@ -227,6 +257,7 @@ func (q *Queries) GetRepositoryByID(ctx context.Context, id int64) (Repository, 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Access,
+		&i.CodeownersStatus,
 	)
 	return i, err
 }
@@ -331,8 +362,59 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 	return i, err
 }
 
+const listCheckRunsByHead = `-- name: ListCheckRunsByHead :many
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+FROM pr_check_runs
+WHERE repository_id = $1 AND head_sha = $2
+ORDER BY check_run_id ASC
+`
+
+type ListCheckRunsByHeadParams struct {
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+}
+
+type ListCheckRunsByHeadRow struct {
+	CheckRunID   int64  `json:"check_run_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+}
+
+func (q *Queries) ListCheckRunsByHead(ctx context.Context, arg ListCheckRunsByHeadParams) ([]ListCheckRunsByHeadRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCheckRunsByHead, arg.RepositoryID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCheckRunsByHeadRow{}
+	for rows.Next() {
+		var i ListCheckRunsByHeadRow
+		if err := rows.Scan(
+			&i.CheckRunID,
+			&i.RepositoryID,
+			&i.HeadSha,
+			&i.Name,
+			&i.Status,
+			&i.Conclusion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFollowedRepositoriesByUser = `-- name: ListFollowedRepositoriesByUser :many
-SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access
+SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access, r.codeowners_status
 FROM repositories r
 JOIN user_repo_follows urf ON urf.repository_id = r.id
 WHERE urf.user_id = $1
@@ -360,6 +442,63 @@ func (q *Queries) ListFollowedRepositoriesByUser(ctx context.Context, userID int
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Access,
+			&i.CodeownersStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenPullRequestsByHead = `-- name: ListOpenPullRequestsByHead :many
+SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
+       is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
+       claimed_by_user_id, claimed_by_login, updated_at
+FROM pull_requests
+WHERE repository_id = $1 AND head_sha = $2 AND state = 'OPEN'
+ORDER BY number ASC
+`
+
+type ListOpenPullRequestsByHeadParams struct {
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+}
+
+func (q *Queries) ListOpenPullRequestsByHead(ctx context.Context, arg ListOpenPullRequestsByHeadParams) ([]PullRequest, error) {
+	rows, err := q.db.QueryContext(ctx, listOpenPullRequestsByHead, arg.RepositoryID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PullRequest{}
+	for rows.Next() {
+		var i PullRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.RepositoryID,
+			&i.RepositoryName,
+			&i.GithubPrID,
+			&i.Number,
+			&i.Title,
+			&i.AuthorLogin,
+			&i.HtmlUrl,
+			&i.IsDependabot,
+			&i.IsDraft,
+			&i.State,
+			&i.MergeableState,
+			&i.CiStatus,
+			&i.HeadSha,
+			&i.BaseRef,
+			&i.ClaimedByUserID,
+			&i.ClaimedByLogin,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -375,7 +514,7 @@ func (q *Queries) ListFollowedRepositoriesByUser(ctx context.Context, userID int
 }
 
 const listRepositoriesByInstallation = `-- name: ListRepositoriesByInstallation :many
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 FROM repositories
 WHERE installation_id = $1
 ORDER BY full_name ASC
@@ -402,6 +541,7 @@ func (q *Queries) ListRepositoriesByInstallation(ctx context.Context, installati
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Access,
+			&i.CodeownersStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -445,6 +585,38 @@ type UpdateRepositoryAccessParams struct {
 
 func (q *Queries) UpdateRepositoryAccess(ctx context.Context, arg UpdateRepositoryAccessParams) error {
 	_, err := q.db.ExecContext(ctx, updateRepositoryAccess, arg.ID, arg.InstallationID, arg.Access)
+	return err
+}
+
+const upsertCheckRun = `-- name: UpsertCheckRun :exec
+INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+ON CONFLICT (check_run_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    name = EXCLUDED.name,
+    status = EXCLUDED.status,
+    conclusion = EXCLUDED.conclusion,
+    updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertCheckRunParams struct {
+	CheckRunID   int64  `json:"check_run_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+}
+
+func (q *Queries) UpsertCheckRun(ctx context.Context, arg UpsertCheckRunParams) error {
+	_, err := q.db.ExecContext(ctx, upsertCheckRun,
+		arg.CheckRunID,
+		arg.RepositoryID,
+		arg.HeadSha,
+		arg.Name,
+		arg.Status,
+		arg.Conclusion,
+	)
 	return err
 }
 
@@ -618,29 +790,31 @@ func (q *Queries) UpsertPullRequest(ctx context.Context, arg UpsertPullRequestPa
 }
 
 const upsertRepository = `-- name: UpsertRepository :one
-INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, codeowners_status, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
 ON CONFLICT (github_repo_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     access = EXCLUDED.access,
+    codeowners_status = EXCLUDED.codeowners_status,
     owner = EXCLUDED.owner,
     name = EXCLUDED.name,
     full_name = EXCLUDED.full_name,
     default_branch = EXCLUDED.default_branch,
     codeowners_json = EXCLUDED.codeowners_json,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status
 `
 
 type UpsertRepositoryParams struct {
-	GithubRepoID   int64  `json:"github_repo_id"`
-	InstallationID int64  `json:"installation_id"`
-	Owner          string `json:"owner"`
-	Name           string `json:"name"`
-	FullName       string `json:"full_name"`
-	DefaultBranch  string `json:"default_branch"`
-	CodeownersJson string `json:"codeowners_json"`
-	Access         string `json:"access"`
+	GithubRepoID     int64  `json:"github_repo_id"`
+	InstallationID   int64  `json:"installation_id"`
+	Owner            string `json:"owner"`
+	Name             string `json:"name"`
+	FullName         string `json:"full_name"`
+	DefaultBranch    string `json:"default_branch"`
+	CodeownersJson   string `json:"codeowners_json"`
+	Access           string `json:"access"`
+	CodeownersStatus string `json:"codeowners_status"`
 }
 
 func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryParams) (Repository, error) {
@@ -653,6 +827,7 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 		arg.DefaultBranch,
 		arg.CodeownersJson,
 		arg.Access,
+		arg.CodeownersStatus,
 	)
 	var i Repository
 	err := row.Scan(
@@ -667,6 +842,7 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Access,
+		&i.CodeownersStatus,
 	)
 	return i, err
 }

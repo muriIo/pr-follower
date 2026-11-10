@@ -254,18 +254,48 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if eventType == "check_run" {
+		var raw struct {
+			CheckRun struct {
+				ID         int64  `json:"id"`
+				Name       string `json:"name"`
+				HeadSHA    string `json:"head_sha"`
+				Status     string `json:"status"`
+				Conclusion string `json:"conclusion"`
+			} `json:"check_run"`
+			Repository struct {
+				ID int64 `json:"id"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			writeDomainError(w, entity.ErrInvalidInput)
+			return
+		}
+		if err := h.deps.WebhookUC.IngestCheckRunEvent(r.Context(), webhook.CheckRunEventPayload{
+			CheckRunID:   raw.CheckRun.ID,
+			GitHubRepoID: raw.Repository.ID,
+			HeadSHA:      raw.CheckRun.HeadSHA,
+			Name:         raw.CheckRun.Name,
+			Status:       raw.CheckRun.Status,
+			Conclusion:   raw.CheckRun.Conclusion,
+		}); err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
 	if eventType == "pull_request" {
 		var raw struct {
 			Action      string `json:"action"`
 			Number      int    `json:"number"`
 			PullRequest struct {
-				ID      int64  `json:"id"`
-				Number  int    `json:"number"`
-				Title   string `json:"title"`
-				State   string `json:"state"`
-				Draft   bool   `json:"draft"`
-				HTMLURL string `json:"html_url"`
-				User    struct {
+				ID             int64  `json:"id"`
+				Number         int    `json:"number"`
+				Title          string `json:"title"`
+				State          string `json:"state"`
+				Draft          bool   `json:"draft"`
+				HTMLURL        string `json:"html_url"`
+				MergeableState string `json:"mergeable_state"`
+				User           struct {
 					Login string `json:"login"`
 				} `json:"user"`
 				Head struct {
@@ -291,17 +321,18 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.deps.WebhookUC.IngestPullRequestEvent(r.Context(), webhook.PullRequestEventPayload{
-			Action:       raw.Action,
-			GitHubRepoID: raw.Repository.ID,
-			GitHubPRID:   raw.PullRequest.ID,
-			Number:       raw.PullRequest.Number,
-			Title:        raw.PullRequest.Title,
-			AuthorLogin:  raw.PullRequest.User.Login,
-			HTMLURL:      raw.PullRequest.HTMLURL,
-			IsDraft:      raw.PullRequest.Draft,
-			State:        state,
-			HeadSHA:      raw.PullRequest.Head.SHA,
-			BaseRef:      raw.PullRequest.Base.Ref,
+			Action:         raw.Action,
+			GitHubRepoID:   raw.Repository.ID,
+			GitHubPRID:     raw.PullRequest.ID,
+			Number:         raw.PullRequest.Number,
+			Title:          raw.PullRequest.Title,
+			AuthorLogin:    raw.PullRequest.User.Login,
+			HTMLURL:        raw.PullRequest.HTMLURL,
+			IsDraft:        raw.PullRequest.Draft,
+			State:          state,
+			HeadSHA:        raw.PullRequest.Head.SHA,
+			BaseRef:        raw.PullRequest.Base.Ref,
+			MergeableState: raw.PullRequest.MergeableState,
 		}); err != nil {
 			writeDomainError(w, err)
 			return

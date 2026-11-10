@@ -127,6 +127,7 @@ button.pf-badge:hover { filter: brightness(1.2); }
 .pf-ci-fail { color: #FB7185; }
 .pf-ci-warn { color: #FBBF24; }
 .pf-ci-ok { color: var(--text-3); }
+.pf-ci-none { color: var(--text-3); }
 
 /* Triage Lists */
 .pf-group { display: flex; flex-direction: column; gap: 8px; }

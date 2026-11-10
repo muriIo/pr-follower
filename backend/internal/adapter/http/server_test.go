@@ -95,6 +95,14 @@ func (fakeGitHubUserAPI) ListInstallations(_ context.Context, token string) ([]e
 		SettingsURL: "https://github.com/organizations/acme/settings/installations/20"}}, nil
 }
 
+// GetRepositoryFile: acme/web has CODEOWNERS, acme/api has none.
+func (fakeGitHubUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
+	if owner+"/"+name == "acme/web" && path == ".github/CODEOWNERS" {
+		return []byte("* @octocat\n"), nil
+	}
+	return nil, entity.ErrNotFound
+}
+
 func (fakeGitHubUserAPI) ListInstallationRepositories(_ context.Context, _ string, id int64) ([]entity.InstallationRepository, error) {
 	if id != 20 {
 		return nil, entity.ErrNotFound
@@ -203,7 +211,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub)
 	actionUC := action.NewUseCase(prRepo, repoRepo, ghGw, sseHub)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, sseHub)
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
@@ -906,5 +914,73 @@ func TestDemoSeedEndpointIsGone(t *testing.T) {
 	session := ts.signIn(t)
 	if rec := ts.do(t, http.MethodPost, "/api/v1/demo/seed", "", session); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST /api/v1/demo/seed must not exist in production, got %d", rec.Code)
+	}
+}
+
+func seatPR(t *testing.T, ts testServer, session *http.Cookie, fullName string, number int) (entity.Repository, entity.PullRequest) {
+	t.Helper()
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	var body struct {
+		Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode workspace: %v", err)
+	}
+	for _, seat := range body.Snapshot.Seats {
+		if seat.Repository.FullName != fullName {
+			continue
+		}
+		for _, pr := range seat.PullRequests {
+			if pr.Number == number {
+				return seat.Repository, pr
+			}
+		}
+	}
+	t.Fatalf("PR %s#%d not found in workspace", fullName, number)
+	return entity.Repository{}, entity.PullRequest{}
+}
+
+func TestPRState_ReflectsGitHubForRepositoriesWithoutCIOrCodeowners(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	for _, id := range []int{900, 901} {
+		if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", fmt.Sprintf(`{"installation_id":20,"github_repo_id":%d}`, id), session); rec.Code != http.StatusOK {
+			t.Fatalf("import %d: %d %s", id, rec.Code, rec.Body.String())
+		}
+	}
+
+	pr := `{"action":"opened","number":11,"pull_request":{"id":1111,"number":11,"title":"chore: updating README","state":"open",` +
+		`"mergeable_state":"blocked","user":{"login":"murilo"},"head":{"sha":"h-11"},"base":{"ref":"main"}},"repository":{"id":901}}`
+	if rec := ts.postWebhook(t, "pull_request", pr); rec.Code != http.StatusAccepted {
+		t.Fatalf("pull_request webhook: %d %s", rec.Code, rec.Body.String())
+	}
+
+	repo, got := seatPR(t, ts, session, "acme/api", 11)
+	if repo.CodeownersStatus != entity.CodeownersAbsent {
+		t.Errorf("acme/api has no CODEOWNERS: got %q", repo.CodeownersStatus)
+	}
+	if got.CIStatus != entity.CIStatusNone || got.MergeableState != entity.MergeableStateBlocked {
+		t.Errorf("no CI reported and GitHub says blocked: got CI %q, merge %q", got.CIStatus, got.MergeableState)
+	}
+	if web, _ := ts.repos.GetByGitHubRepoID(context.Background(), 900); web.CodeownersStatus != entity.CodeownersPresent {
+		t.Errorf("acme/web has CODEOWNERS: got %q", web.CodeownersStatus)
+	}
+
+	checkRun := func(status, conclusion string) string {
+		return fmt.Sprintf(`{"action":"x","check_run":{"id":555,"name":"test","head_sha":"h-11","status":%q,"conclusion":%q},"repository":{"id":901}}`, status, conclusion)
+	}
+	if rec := ts.postWebhook(t, "check_run", checkRun("in_progress", "")); rec.Code != http.StatusAccepted {
+		t.Fatalf("check_run webhook: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, got := seatPR(t, ts, session, "acme/api", 11); got.CIStatus != entity.CIStatusPending {
+		t.Fatalf("a running check: expected PENDING, got %q", got.CIStatus)
+	}
+	_ = ts.postWebhook(t, "check_run", checkRun("completed", "success"))
+	if _, got := seatPR(t, ts, session, "acme/api", 11); got.CIStatus != entity.CIStatusSuccess {
+		t.Fatalf("a passed check: expected SUCCESS, got %q", got.CIStatus)
+	}
+	if rec := ts.postWebhook(t, "check_run", `{`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed check_run: expected 400, got %d", rec.Code)
 	}
 }

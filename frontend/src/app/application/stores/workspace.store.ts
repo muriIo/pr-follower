@@ -8,6 +8,7 @@ import {
   BlastFileItem,
   CiState,
   DiffHunkLine,
+  MergeState,
   PerspectiveView,
   PullRequestItem,
   RepoInfo,
@@ -20,6 +21,15 @@ import {
   isSafeBatchCandidate,
 } from '../../domain/models/workspace.models';
 import { ActionCancellationManager, ActionViewModel } from '../use-cases/action-cancellation.manager';
+import { LocaleStore } from './locale.store';
+
+/** i18n keys for the GitHub mergeable states that stop a merge; the others do not block. */
+const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
+  conflict: 'drawer.blocked.conflict',
+  behind: 'drawer.blocked.behind',
+  blocked: 'drawer.blocked.protection',
+  draft: 'drawer.blocked.draft',
+};
 
 export interface SyntaxToken {
   readonly s: string;
@@ -71,6 +81,8 @@ export interface SeatCardViewModel {
   readonly isEmpty: boolean;
   /** i18n key explaining lost GitHub App access, or null when the repository is reachable. */
   readonly accessKey: string | null;
+  /** The repository was checked and has no CODEOWNERS file. */
+  readonly noCodeowners: boolean;
   readonly stream: readonly SeatStreamRowViewModel[];
 }
 
@@ -181,6 +193,7 @@ export class WorkspaceStore {
   private readonly prGateway = inject(PULL_REQUEST_GATEWAY, { optional: true });
   private readonly sseGateway = inject(LIVE_EVENT_GATEWAY, { optional: true });
   private readonly cancellation = inject(ActionCancellationManager);
+  private readonly locale = inject(LocaleStore);
 
   readonly repos = signal<readonly RepoInfo[]>([]);
   readonly prs = signal<readonly PullRequestItem[]>([]);
@@ -334,7 +347,9 @@ export class WorkspaceStore {
       const fails = repoPrs.filter((p) => this.effectiveCi(p).ci === 'fail').length;
       const runs = repoPrs.filter((p) => this.effectiveCi(p).ci === 'run').length;
       const risky = deps.some((p) => p.verdict !== 'baixo');
-      const ciState: CiState = fails > 0 ? 'fail' : runs > 0 ? 'run' : 'ok';
+      // "Stable" needs evidence: when no open PR ever reported a check, the repository has no CI to show.
+      const noCi = repoPrs.length > 0 && repoPrs.every((p) => this.effectiveCi(p).ci === 'none');
+      const ciState: CiState = fails > 0 ? 'fail' : runs > 0 ? 'run' : noCi ? 'none' : 'ok';
 
       const stream: SeatStreamRowViewModel[] = repoPrs
         .slice()
@@ -397,13 +412,20 @@ export class WorkspaceStore {
           fail: 'pf-dot pf-dot-fail pf-dot-pulse',
           run: 'pf-dot pf-dot-warn pf-dot-pulse',
           ok: 'pf-dot pf-dot-ok',
+          none: 'pf-dot',
         }[ciState],
-        ciCls: { fail: 'pf-ci-fail', run: 'pf-ci-warn', ok: 'pf-ci-stable' }[ciState],
-        ciLabel: { fail: `${fails} CI Falhando`, run: `${runs} CI Rodando`, ok: 'CI Estável' }[ciState],
+        ciCls: { fail: 'pf-ci-fail', run: 'pf-ci-warn', ok: 'pf-ci-stable', none: 'pf-ci-none' }[ciState],
+        ciLabel: {
+          fail: `${fails} CI Falhando`,
+          run: `${runs} CI Rodando`,
+          ok: 'CI Estável',
+          none: this.locale.translate('ci.none'),
+        }[ciState],
         ciTip: {
           fail: 'PRs abertos deste repositório com CI falhando.',
           run: 'PRs abertos deste repositório com CI ainda rodando.',
           ok: 'Nenhum PR aberto com CI falhando ou rodando.',
+          none: this.locale.translate('seats.ci.noneTip'),
         }[ciState],
         turn: turnCount,
         turnCls: turnCount > 0 ? 'pf-turn' : 'pf-badge-zero',
@@ -412,6 +434,7 @@ export class WorkspaceStore {
         openLabel: this.plural(repoPrs.length, 'PR Aberto', 'PRs Abertos'),
         isEmpty: repoPrs.length === 0,
         accessKey,
+        noCodeowners: r.codeowners === 'absent',
         stream,
       };
     });
@@ -482,8 +505,8 @@ export class WorkspaceStore {
                   : p.depType === 'devDependencies'
                     ? 'Usada só em desenvolvimento. Não entra no build de produção.'
                     : 'Declarada no package.json e carregada em produção.',
-              ciShort: { ok: 'CI verde', run: 'CI rodando', fail: 'CI falhando' }[ci],
-              ciTextCls: { ok: 'pf-ci-ok', run: 'pf-ci-warn', fail: 'pf-ci-fail' }[ci],
+              ciShort: { ok: 'CI verde', run: 'CI rodando', fail: 'CI falhando', none: this.locale.translate('ci.none') }[ci],
+              ciTextCls: { ok: 'pf-ci-ok', run: 'pf-ci-warn', fail: 'pf-ci-fail', none: 'pf-ci-none' }[ci],
               approvedMine: Boolean(approved[p.id]),
               sel: selected === p.id ? 'is-sel' : '',
             };
@@ -561,11 +584,22 @@ export class WorkspaceStore {
     const merged = Boolean(this.mergedMap()[pr.id]);
     const mine = Boolean(this.approvedMap()[pr.id]);
     const act = this.cancellation.getView(this.cancellation.actionsState(), `merge:${pr.id}`);
-    const dotCi = { ok: 'pf-dot pf-dot-ok', run: 'pf-dot pf-dot-warn pf-dot-pulse', fail: 'pf-dot pf-dot-fail' }[
-      ci.ci
-    ];
-    const dotOwners = { ok: 'pf-dot pf-dot-ok', voce: 'pf-dot pf-dot-turn', pend: 'pf-dot pf-dot-warn' }[pr.owners];
+    const dotCi = {
+      ok: 'pf-dot pf-dot-ok',
+      run: 'pf-dot pf-dot-warn pf-dot-pulse',
+      fail: 'pf-dot pf-dot-fail',
+      none: 'pf-dot',
+    }[ci.ci];
+    const dotOwners = {
+      ok: 'pf-dot pf-dot-ok',
+      voce: 'pf-dot pf-dot-turn',
+      pend: 'pf-dot pf-dot-warn',
+      none: 'pf-dot',
+    }[pr.owners];
+    const ciText = ci.ci === 'none' ? this.locale.translate('drawer.ci.none') : ci.ciText;
+    const ownersText = pr.owners === 'none' ? this.locale.translate('drawer.codeowners.none') : pr.ownersText;
 
+    // Only what GitHub reported blocks a merge: missing CI or a missing CODEOWNERS file never does.
     let blockedText = '';
     if (ci.ci === 'fail') {
       blockedText = 'Mesclagem bloqueada: o CI está falhando.';
@@ -573,6 +607,8 @@ export class WorkspaceStore {
       blockedText = 'Mesclagem bloqueada: o CI ainda está rodando.';
     } else if (pr.owners === 'pend') {
       blockedText = 'Mesclagem bloqueada: falta aprovação de CODEOWNERS.';
+    } else if (pr.merge && MERGE_BLOCKER_KEYS[pr.merge]) {
+      blockedText = this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!);
     }
     const needsApproval = !blockedText && !mine && !pr.approvedBy;
     if (needsApproval) {
@@ -596,8 +632,8 @@ export class WorkspaceStore {
       vLabel,
       why: pr.why,
       signals: [
-        { k: 'CI', v: ci.ciText, dot: dotCi },
-        { k: 'CODEOWNERS', v: pr.ownersText, dot: dotOwners },
+        { k: 'CI', v: ciText, dot: dotCi },
+        { k: 'CODEOWNERS', v: ownersText, dot: dotOwners },
         { k: 'Tamanho', v: pr.size, dot: 'pf-dot' },
       ],
       isDep: Boolean(pr.dep),
@@ -959,8 +995,8 @@ export class WorkspaceStore {
       title: pr.title,
       sel: selected === pr.id ? 'is-sel' : '',
       authorLabel: pr.author.startsWith('@') ? pr.author : `@${pr.author}`,
-      ciLabel: { ok: 'CI Verde', run: 'CI Pendente', fail: 'CI Falhando' }[ci],
-      ciTextCls: { ok: 'pf-ci-stable', run: 'pf-ci-warn', fail: 'pf-ci-fail' }[ci],
+      ciLabel: { ok: 'CI Verde', run: 'CI Pendente', fail: 'CI Falhando', none: this.locale.translate('ci.none') }[ci],
+      ciTextCls: { ok: 'pf-ci-stable', run: 'pf-ci-warn', fail: 'pf-ci-fail', none: 'pf-ci-none' }[ci],
       hasPill: Boolean(pr.ownPill),
       ownPill: pr.ownPill,
       hasClaim: Boolean(pr.claim),

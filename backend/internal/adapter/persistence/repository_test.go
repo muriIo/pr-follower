@@ -403,3 +403,77 @@ func TestRepositoryRepository_IsFollowing(t *testing.T) {
 		t.Fatal("expected cancellation error")
 	}
 }
+
+func TestPullRequestRepository_CheckRunsAndHeadLookup(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	open := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: 1, Number: 1, State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "abc", BaseRef: "main"}
+	closed := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: 2, Number: 2, State: entity.PRStateClosed,
+		MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "abc", BaseRef: "main"}
+	_ = prs.Upsert(ctx, open)
+	_ = prs.Upsert(ctx, closed)
+
+	if got, err := prs.ListOpenByHeadSHA(ctx, repo.ID, "abc"); err != nil || len(got) != 1 || got[0].Number != 1 {
+		t.Fatalf("ListOpenByHeadSHA() = %+v, %v", got, err)
+	}
+
+	if _, err := prs.GetCheckRun(ctx, 77); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown run: expected ErrNotFound, got %v", err)
+	}
+	run := entity.CheckRun{ID: 77, RepositoryID: repo.ID, HeadSHA: "abc", Name: "test", Status: "in_progress"}
+	if err := prs.UpsertCheckRun(ctx, run); err != nil {
+		t.Fatalf("UpsertCheckRun() error: %v", err)
+	}
+	run.Status, run.Conclusion = "completed", "success"
+	_ = prs.UpsertCheckRun(ctx, run) // same id: updated, not duplicated
+	_ = prs.UpsertCheckRun(ctx, entity.CheckRun{ID: 78, RepositoryID: repo.ID, HeadSHA: "other", Status: "queued"})
+
+	runs, err := prs.ListCheckRuns(ctx, repo.ID, "abc")
+	if err != nil || len(runs) != 1 || runs[0].Status != "completed" || runs[0].Conclusion != "success" {
+		t.Fatalf("ListCheckRuns() = %+v, %v", runs, err)
+	}
+	got, err := prs.GetCheckRun(ctx, 77)
+	if err != nil || got.Name != "test" || got.Conclusion != "success" {
+		t.Fatalf("GetCheckRun() = %+v, %v", got, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := prs.ListOpenByHeadSHA(canceled, repo.ID, "abc"); err == nil {
+		t.Error("ListOpenByHeadSHA: expected cancellation error")
+	}
+	if err := prs.UpsertCheckRun(canceled, run); err == nil {
+		t.Error("UpsertCheckRun: expected cancellation error")
+	}
+	if _, err := prs.ListCheckRuns(canceled, repo.ID, "abc"); err == nil {
+		t.Error("ListCheckRuns: expected cancellation error")
+	}
+	if _, err := prs.GetCheckRun(canceled, 77); err == nil {
+		t.Error("GetCheckRun: expected cancellation error")
+	}
+}
+
+func TestRepositoryRepository_CodeownersStatusRoundTrip(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+
+	repo := &entity.Repository{GitHubRepoID: 1, Owner: "a", Name: "b", FullName: "a/b", DefaultBranch: "main", CodeownersStatus: entity.CodeownersAbsent}
+	_ = repos.Upsert(ctx, repo)
+	got, _ := repos.GetByID(ctx, repo.ID)
+	if got.CodeownersStatus != entity.CodeownersAbsent {
+		t.Fatalf("expected absent, got %q", got.CodeownersStatus)
+	}
+	followed, _ := repos.ListByInstallation(ctx, 0)
+	if len(followed) != 1 || followed[0].CodeownersStatus != entity.CodeownersAbsent {
+		t.Fatalf("list must carry codeowners status: %+v", followed)
+	}
+}

@@ -136,3 +136,40 @@ func TestUserClient_HonorsCanceledContext(t *testing.T) {
 		t.Errorf("ListInstallationRepositories: expected context.Canceled, got %v", err)
 	}
 }
+
+func TestUserClient_GetRepositoryFile(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/repos/acme/web/contents/.github/CODEOWNERS" {
+			if r.Header.Get("Accept") != "application/vnd.github.raw+json" {
+				t.Errorf("expected the raw media type, got %q", r.Header.Get("Accept"))
+			}
+			_, _ = w.Write([]byte("* @acme/web\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+	ctx := context.Background()
+
+	got, err := c.GetRepositoryFile(ctx, "ghu_a", "acme", "web", ".github/CODEOWNERS")
+	if err != nil || string(got) != "* @acme/web\n" {
+		t.Fatalf("GetRepositoryFile() = %q, %v", got, err)
+	}
+	if _, err := c.GetRepositoryFile(ctx, "ghu_a", "acme", "web", "CODEOWNERS"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("missing file: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.GetRepositoryFile(ctx, "revoked", "acme", "web", "CODEOWNERS"); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := c.GetRepositoryFile(canceled, "ghu_a", "acme", "web", "CODEOWNERS"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}

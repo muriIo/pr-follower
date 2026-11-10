@@ -42,6 +42,8 @@ type UserTokenSource interface {
 type GitHubUserAPI interface {
 	ListInstallations(ctx context.Context, accessToken string) ([]entity.Installation, error)
 	ListInstallationRepositories(ctx context.Context, accessToken string, installationID int64) ([]entity.InstallationRepository, error)
+	// GetRepositoryFile returns a file's raw content; entity.ErrNotFound when it does not exist.
+	GetRepositoryFile(ctx context.Context, accessToken, owner, name, path string) ([]byte, error)
 }
 
 // RepositoryAccessStore updates repository access from installation webhooks (ADR-0010).
@@ -54,6 +56,14 @@ type RepositoryAccessStore interface {
 // FollowChecker scopes live events to the repositories a user follows.
 type FollowChecker interface {
 	IsFollowing(ctx context.Context, userID, repositoryID uint64) (bool, error)
+}
+
+// CheckRunStore keeps CI check runs and finds the PRs a commit belongs to.
+type CheckRunStore interface {
+	UpsertCheckRun(ctx context.Context, run entity.CheckRun) error
+	GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error)
+	ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error)
+	ListOpenByHeadSHA(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.PullRequest, error)
 }
 
 type RepositoryRepository interface {

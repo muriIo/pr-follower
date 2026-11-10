@@ -22,6 +22,7 @@ describe('SeatCardComponent', () => {
       openLabel: '4 PRs Abertos',
       isEmpty: false,
       accessKey: null,
+      noCodeowners: false,
       stream: [
         {
           id: 142,
@@ -85,5 +86,11 @@ describe('SeatCardComponent', () => {
     expect(el.querySelector('.pf-seat-access')).toBeTruthy();
     (el.querySelector('.pf-seat-access-fix') as HTMLButtonElement).click();
     expect(fixSpy).toHaveBeenCalledTimes(1);
+
+    // A repository without a CODEOWNERS file says so instead of implying pending reviews.
+    expect(el.querySelector('.pf-seat-no-codeowners')).toBeNull();
+    fixture.componentRef.setInput('seat', { ...seatVm, noCodeowners: true });
+    fixture.detectChanges();
+    expect(el.querySelector('.pf-seat-no-codeowners')?.textContent?.trim()).toBe('Sem CODEOWNERS');
   });
 });
