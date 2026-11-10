@@ -244,6 +244,59 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 		}
 	})
 
+	t.Run("ADR-0008: detects hardcoded display text outside the dictionaries", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		fe := filepath.Join(root, "frontend")
+		files := map[string]string{
+			"package.json":           `{"name":"frontend"}`,
+			".mcp.json":              `{"mcpServers":{"angular-cli":{"command":"npx","args":["-y","@angular/cli","mcp"]}}}`,
+			"public/i18n/pt-BR.json": `{"k.ok":"ok"}`,
+			"public/i18n/en-US.json": `{"k.ok":"ok"}`,
+			"src/app/application/stores/store.ts": "const blocked = 'Mesclagem bloqueada: o CI ainda está rodando.';\n" +
+				"const label = `Todos (${n})`;\n" +
+				"const key = 'drawer.blocked.conflict';\n" +
+				"const css = 'pf-dot pf-dot-ok';\n",
+			"src/app/application/stores/locale.store.ts": "const DEFAULT = { 'k.ok': 'Você aprovou' };\n",
+			"src/app/testing/fixtures.ts":                "const fixture = 'Você aprovou #1';\n",
+			"src/app/application/stores/store.spec.ts":   "expect(x).toBe('Você aprovou');\n",
+			"src/app/presentation/common/card/card.component.html": "<p>Este PR foi mesclado</p>\n" +
+				"<span>{{ 'k.ok' | t }}</span>\n" +
+				"<app-badge label=\"Usa API que quebra\" />\n" +
+				"<app-badge [label]=\"'k.ok' | t\" />\n",
+		}
+		for rel, content := range files {
+			path := filepath.Join(fe, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", rel, err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", rel, err)
+			}
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected hardcoded text to be reported")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{
+			"store.ts:1 hardcoded text \"Mesclagem bloqueada",
+			"store.ts:2 hardcoded text \"Todos (${n})\"",
+			"card.component.html raw text \"Este PR foi mesclado\"",
+			"card.component.html literal label=\"Usa API que quebra\"",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected violation containing %q, got:\n%s", want, joined)
+			}
+		}
+		for _, allowed := range []string{"store.ts:3", "store.ts:4", "locale.store.ts", "fixtures.ts", "store.spec.ts"} {
+			if strings.Contains(joined, allowed) {
+				t.Errorf("%s is allowed and must not be reported:\n%s", allowed, joined)
+			}
+		}
+	})
+
 	t.Run("ADR-0011: detects non-idempotent writes, schema, retries and missing redelivery tests", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)
