@@ -556,6 +556,35 @@ func (q *Queries) ListRepositoriesByInstallation(ctx context.Context, installati
 	return items, nil
 }
 
+const listRepositoryFollowerIDs = `-- name: ListRepositoryFollowerIDs :many
+SELECT user_id FROM user_repo_follows
+WHERE repository_id = $1
+ORDER BY user_id ASC
+`
+
+func (q *Queries) ListRepositoryFollowerIDs(ctx context.Context, repositoryID int64) ([]int64, error) {
+	rows, err := q.db.QueryContext(ctx, listRepositoryFollowerIDs, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var user_id int64
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unfollowRepository = `-- name: UnfollowRepository :exec
 DELETE FROM user_repo_follows
 WHERE user_id = $1 AND repository_id = $2
@@ -787,6 +816,26 @@ func (q *Queries) UpsertPullRequest(ctx context.Context, arg UpsertPullRequestPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertPullRequestChangedFiles = `-- name: UpsertPullRequestChangedFiles :exec
+INSERT INTO pr_changed_files (pull_request_id, head_sha, files_json, updated_at)
+VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+ON CONFLICT (pull_request_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    files_json = EXCLUDED.files_json,
+    updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertPullRequestChangedFilesParams struct {
+	PullRequestID int64  `json:"pull_request_id"`
+	HeadSha       string `json:"head_sha"`
+	FilesJson     string `json:"files_json"`
+}
+
+func (q *Queries) UpsertPullRequestChangedFiles(ctx context.Context, arg UpsertPullRequestChangedFilesParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPullRequestChangedFiles, arg.PullRequestID, arg.HeadSha, arg.FilesJson)
+	return err
 }
 
 const upsertRepository = `-- name: UpsertRepository :one

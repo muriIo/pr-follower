@@ -111,7 +111,7 @@ func checkRunSetup() (*webhook.IngestUseCase, *fakeChecks, *fakePub) {
 	pr := &entity.PullRequest{ID: 1, RepositoryID: 10, GitHubPRID: 501, Number: 7, State: entity.PRStateOpen, HeadSHA: "sha-1", CIStatus: entity.CIStatusNone}
 	checks := newFakeChecks(pr)
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo}, &savingPRRepo{checks: checks}, checks, pub)
+	uc := webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo}, &savingPRRepo{checks: checks}, checks, pub, nil)
 	return uc, checks, pub
 }
 
@@ -187,7 +187,7 @@ func TestIngestCheckRunEvent_IgnoresUnknownRepositoriesAndOtherCommits(t *testin
 		t.Fatalf("a run on another commit must not change the PR: CI=%q events=%d", got, len(pub.events))
 	}
 
-	unknownRepoUC := webhook.NewIngestUseCase(&fakeRepoRepo{err: entity.ErrNotFound}, &fakePRRepo{}, newFakeChecks(), &fakePub{})
+	unknownRepoUC := webhook.NewIngestUseCase(&fakeRepoRepo{err: entity.ErrNotFound}, &fakePRRepo{}, newFakeChecks(), &fakePub{}, nil)
 	if err := unknownRepoUC.IngestCheckRunEvent(ctx, run(9, "completed", "success")); err != nil {
 		t.Fatalf("a repository nobody follows is ignored, got %v", err)
 	}
@@ -216,7 +216,7 @@ func TestIngestPullRequestEvent_UsesGitHubStateNotDefaults(t *testing.T) {
 	repo := &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}
 	checks := newFakeChecks()
 	prs := &savingPRRepo{checks: checks}
-	uc := webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo}, prs, checks, &fakePub{})
+	uc := webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo}, prs, checks, &fakePub{}, nil)
 
 	// No CI ever reported: the PR is NONE, not "running".
 	payload := webhook.PullRequestEventPayload{Action: "opened", GitHubRepoID: 9001, GitHubPRID: 600, Number: 11,
@@ -270,7 +270,7 @@ func TestIngestCheckRunEvent_EachStoreFailureIsReturned(t *testing.T) {
 		checks := newFakeChecks(pr)
 		prs := &savingPRRepo{checks: checks}
 		mut(checks, prs)
-		return webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo, err: repoErr}, prs, checks, pub)
+		return webhook.NewIngestUseCase(&fakeRepoRepo{repo: repo, err: repoErr}, prs, checks, pub, nil)
 	}
 	cases := map[string]*webhook.IngestUseCase{
 		"repository lookup": build(func(*fakeChecks, *savingPRRepo) {}, boom, &fakePub{}),

@@ -213,3 +213,16 @@ SELECT id, repository_id, repository_name, github_pr_id, number, title, author_l
 FROM pull_requests
 WHERE repository_id = $1 AND head_sha = $2 AND state = 'OPEN'
 ORDER BY number ASC;
+
+-- name: UpsertPullRequestChangedFiles :exec
+INSERT INTO pr_changed_files (pull_request_id, head_sha, files_json, updated_at)
+VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+ON CONFLICT (pull_request_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    files_json = EXCLUDED.files_json,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- name: ListRepositoryFollowerIDs :many
+SELECT user_id FROM user_repo_follows
+WHERE repository_id = $1
+ORDER BY user_id ASC;

@@ -312,6 +312,22 @@ func (r *RepositoryRepository) ListFollowedByUser(ctx context.Context, userID ui
 	return out, nil
 }
 
+// ListFollowerIDs lists the users who follow a repository, oldest account first.
+func (r *RepositoryRepository) ListFollowerIDs(ctx context.Context, repositoryID uint64) ([]uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	ids, err := r.q.ListRepositoryFollowerIDs(ctx, int64(repositoryID))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uint64, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, uint64(id))
+	}
+	return out, nil
+}
+
 func (r *RepositoryRepository) SetUserFollow(ctx context.Context, userID, repoID uint64, follow bool) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
@@ -498,6 +514,64 @@ func (r *PullRequestRepository) ListCheckRuns(ctx context.Context, repositoryID 
 		out = append(out, entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion})
 	}
 	return out, nil
+}
+
+// SaveChangedFiles stores the files a PR changes at a commit, replacing those of an older commit.
+// Patches are dropped: ownership needs only the paths, and the drawer reads patches live.
+func (r *PullRequestRepository) SaveChangedFiles(ctx context.Context, files entity.PRChangedFiles) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	slim := make([]entity.ChangedFile, 0, len(files.Files))
+	for _, f := range files.Files {
+		slim = append(slim, entity.ChangedFile{Path: f.Path, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions})
+	}
+	raw, err := json.Marshal(slim)
+	if err != nil {
+		return err
+	}
+	return r.q.UpsertPullRequestChangedFiles(ctx, sqlcgen.UpsertPullRequestChangedFilesParams{
+		PullRequestID: int64(files.PullRequestID),
+		HeadSha:       files.HeadSHA,
+		FilesJson:     string(raw),
+	})
+}
+
+// ListChangedFiles returns the stored changed files of the given PRs; PRs without any are absent.
+func (r *PullRequestRepository) ListChangedFiles(ctx context.Context, prIDs []uint64) (map[uint64]entity.PRChangedFiles, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	out := make(map[uint64]entity.PRChangedFiles, len(prIDs))
+	if len(prIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(prIDs))
+	args := make([]any, 0, len(prIDs))
+	for i, id := range prIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args = append(args, int64(id))
+	}
+	query := fmt.Sprintf(`SELECT pull_request_id, head_sha, files_json FROM pr_changed_files WHERE pull_request_id IN (%s)`,
+		strings.Join(placeholders, ","))
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var prID int64
+		var headSHA, filesJSON string
+		if err := rows.Scan(&prID, &headSHA, &filesJSON); err != nil {
+			return nil, err
+		}
+		files := []entity.ChangedFile{}
+		if err := json.Unmarshal([]byte(filesJSON), &files); err != nil {
+			return nil, fmt.Errorf("decode changed files of pull request %d: %w", prID, err)
+		}
+		out[uint64(prID)] = entity.PRChangedFiles{PullRequestID: uint64(prID), HeadSHA: headSHA, Files: files}
+	}
+	return out, rows.Err()
 }
 
 func (r *PullRequestRepository) ListOpenByRepoIDs(ctx context.Context, repoIDs []uint64) ([]entity.PullRequest, error) {

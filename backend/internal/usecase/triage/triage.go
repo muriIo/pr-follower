@@ -7,7 +7,12 @@ import (
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 	"github.com/murilo/pr-follower/backend/internal/domain/port"
+	"github.com/murilo/pr-follower/backend/internal/domain/service"
 )
+
+// MaxOwnershipSyncsPerLoad bounds how many PRs one workspace load reads from GitHub to learn
+// their changed files; the rest stay pending until the next load.
+const MaxOwnershipSyncsPerLoad = 10
 
 type InboxItem struct {
 	PullRequest entity.PullRequest `json:"pull_request"`
@@ -33,6 +38,9 @@ type WorkspaceSnapshot struct {
 	InboxDimmed      []InboxItem      `json:"inbox_dimmed"`
 	DependabotPRs    []DependabotItem `json:"dependabot_prs"`
 	Seats            []RepoSeat       `json:"seats"`
+	// OwnershipPendingPRIDs are PRs whose changed files are not known for their head commit yet,
+	// so nobody can say whether they touch the user's files. They are never shown as a turn.
+	OwnershipPendingPRIDs []uint64 `json:"ownership_pending_pr_ids"`
 }
 
 type UseCase struct {
@@ -40,20 +48,21 @@ type UseCase struct {
 	repoRepo port.RepositoryRepository
 	prRepo   port.PullRequestRepository
 	pub      port.EventPublisher
+	files    port.ChangedFilesStore
+	syncer   port.ChangedFilesSyncer
 }
 
+// NewUseCase wires the triage use case. files holds each PR's changed files and syncer reads the
+// missing ones from GitHub with the reader's token; without them every PR stays "not evaluated".
 func NewUseCase(
 	userRepo port.UserRepository,
 	repoRepo port.RepositoryRepository,
 	prRepo port.PullRequestRepository,
 	pub port.EventPublisher,
+	files port.ChangedFilesStore,
+	syncer port.ChangedFilesSyncer,
 ) *UseCase {
-	return &UseCase{
-		userRepo: userRepo,
-		repoRepo: repoRepo,
-		prRepo:   prRepo,
-		pub:      pub,
-	}
+	return &UseCase{userRepo: userRepo, repoRepo: repoRepo, prRepo: prRepo, pub: pub, files: files, syncer: syncer}
 }
 
 func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*WorkspaceSnapshot, error) {
@@ -91,11 +100,26 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 		return nil, err
 	}
 
+	changed := map[uint64]entity.PRChangedFiles{}
+	if uc.files != nil {
+		if changed, err = uc.files.ListChangedFiles(ctx, prIDs); err != nil {
+			return nil, err
+		}
+	}
+	var reader entity.User
+	if user, err := uc.userRepo.GetByID(ctx, userID); err != nil {
+		return nil, err
+	} else if user != nil {
+		reader = *user
+	}
+	syncBudget := MaxOwnershipSyncsPerLoad
+
 	snapshot := &WorkspaceSnapshot{
-		InboxWaitingOnMe: []InboxItem{},
-		InboxDimmed:      []InboxItem{},
-		DependabotPRs:    []DependabotItem{},
-		Seats:            make([]RepoSeat, 0, len(repos)),
+		InboxWaitingOnMe:      []InboxItem{},
+		InboxDimmed:           []InboxItem{},
+		DependabotPRs:         []DependabotItem{},
+		Seats:                 make([]RepoSeat, 0, len(repos)),
+		OwnershipPendingPRIDs: []uint64{},
 	}
 
 	for _, pr := range prs {
@@ -120,23 +144,57 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 			continue
 		}
 
-		st, ok := userStates[pr.ID]
-		if !ok {
-			st = entity.UserPRState{
-				PullRequestID: pr.ID,
-				UserID:        userID,
-				TurnState:     entity.TurnStateWaitingOnMe,
-			}
+		// The turn is derived here from facts (the PR, its changed files, CODEOWNERS, what the
+		// user did), never from a stored state that could be stale or was never evaluated.
+		st := userStates[pr.ID]
+		st.PullRequestID, st.UserID = pr.ID, userID
+
+		// What the user did in the app holds whoever owns the files.
+		if st.TurnState == entity.TurnStateApprovedByMe {
+			snapshot.InboxDimmed = append(snapshot.InboxDimmed, InboxItem{PullRequest: pr, UserState: st})
+			continue
+		}
+		if st.IsSnoozedFor(pr.HeadSHA, pr.CIStatus) {
+			st.TurnState = entity.TurnStateSnoozed
+			snapshot.InboxDimmed = append(snapshot.InboxDimmed, InboxItem{PullRequest: pr, UserState: st})
+			continue
+		}
+		if seat == nil || seat.Repository.CodeownersStatus != entity.CodeownersPresent {
+			continue // no CODEOWNERS (or not checked): no review is assigned to anyone
 		}
 
-		item := InboxItem{PullRequest: pr, UserState: st}
-		if st.TurnState == entity.TurnStateWaitingOnMe && pr.IsReadyForReviewGate() && !st.IsSnoozedFor(pr.HeadSHA, pr.CIStatus) {
-			snapshot.InboxWaitingOnMe = append(snapshot.InboxWaitingOnMe, item)
-			if seat != nil {
-				seat.WaitingOnMeCount++
+		files, known := changed[pr.ID]
+		known = known && files.IsCurrentFor(pr)
+		if !known && uc.files != nil && uc.syncer != nil && syncBudget > 0 {
+			syncBudget--
+			syncErr := uc.syncer.SyncAsUser(ctx, userID, seat.Repository, pr)
+			if err := ctx.Err(); err != nil {
+				return nil, context.Cause(ctx)
 			}
-		} else {
-			snapshot.InboxDimmed = append(snapshot.InboxDimmed, item)
+			if syncErr == nil {
+				fresh, err := uc.files.ListChangedFiles(ctx, []uint64{pr.ID})
+				if err != nil {
+					return nil, err
+				}
+				files = fresh[pr.ID]
+				known = files.IsCurrentFor(pr)
+			}
+		}
+		if !known {
+			snapshot.OwnershipPendingPRIDs = append(snapshot.OwnershipPendingPRIDs, pr.ID)
+			continue
+		}
+
+		owned := service.EvaluateCodeownersForUser(seat.Repository.CachedCodeownersRules, files.Files, reader).OwnedFiles
+		st.OwnedFilesChanged = owned
+		st.TurnState = service.ComputeTurnState(service.TurnStateInput{PR: pr, OwnedFiles: owned, ExistingState: st})
+		item := InboxItem{PullRequest: pr, UserState: st}
+		switch {
+		case st.TurnState == entity.TurnStateWaitingOnMe:
+			snapshot.InboxWaitingOnMe = append(snapshot.InboxWaitingOnMe, item)
+			seat.WaitingOnMeCount++
+		case len(owned) > 0:
+			snapshot.InboxDimmed = append(snapshot.InboxDimmed, item) // mine, but the gate is closed
 		}
 	}
 

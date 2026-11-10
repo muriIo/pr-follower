@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/server"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
+	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
@@ -96,8 +98,11 @@ func (fakeGitHubUserAPI) ListInstallations(_ context.Context, token string) ([]e
 		SettingsURL: "https://github.com/organizations/acme/settings/installations/20"}}, nil
 }
 
-// ListPullRequestFiles: acme/web #7 changes two files.
+// ListPullRequestFiles: acme/web #7 changes two files and #42 one; no other PR is known.
 func (fakeGitHubUserAPI) ListPullRequestFiles(_ context.Context, _ string, owner, name string, number int) ([]entity.ChangedFile, error) {
+	if owner+"/"+name == "acme/web" && number == 42 {
+		return []entity.ChangedFile{{Path: "src/cart.ts", Status: "modified", Additions: 5, Deletions: 2, Patch: "@@ -1 +1 @@"}}, nil
+	}
 	if owner+"/"+name != "acme/web" || number != 7 {
 		return nil, entity.ErrNotFound
 	}
@@ -237,11 +242,12 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	opReg := operation.NewRegistry()
 	ghGw := &noopGHGateway{}
 
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub)
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
-	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub)
+	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo)
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC)
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC)
+	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
 
@@ -793,21 +799,23 @@ func (ts testServer) seedWorkspaceFixture(t *testing.T, session *http.Cookie) {
 
 	repos := []entity.Repository{
 		{
-			GitHubRepoID:  5001,
-			Owner:         "arvore",
-			Name:          "hive-web",
-			FullName:      "arvore/hive-web",
-			DefaultBranch: "main",
+			GitHubRepoID:     5001,
+			Owner:            "arvore",
+			Name:             "hive-web",
+			FullName:         "arvore/hive-web",
+			DefaultBranch:    "main",
+			CodeownersStatus: entity.CodeownersPresent,
 			CachedCodeownersRules: []entity.CodeownerRule{
 				{Pattern: "/src/app/", Owners: []string{"@" + user.Login, "@arvore/frontend"}},
 			},
 		},
 		{
-			GitHubRepoID:  5002,
-			Owner:         "arvore",
-			Name:          "checkout-api",
-			FullName:      "arvore/checkout-api",
-			DefaultBranch: "main",
+			GitHubRepoID:     5002,
+			Owner:            "arvore",
+			Name:             "checkout-api",
+			FullName:         "arvore/checkout-api",
+			DefaultBranch:    "main",
+			CodeownersStatus: entity.CodeownersPresent,
 			CachedCodeownersRules: []entity.CodeownerRule{
 				{Pattern: "*", Owners: []string{"@arvore/core-architects"}},
 			},
@@ -838,19 +846,10 @@ func (ts testServer) seedWorkspaceFixture(t *testing.T, session *http.Cookie) {
 		BaseRef:        "main",
 	}
 	_ = ts.prs.Upsert(ctx, pr1)
-	_ = ts.prs.UpsertUserPRState(ctx, &entity.UserPRState{
-		PullRequestID: pr1.ID,
-		UserID:        user.ID,
-		TurnState:     entity.TurnStateWaitingOnMe,
-		OwnedFilesChanged: []entity.ChangedFile{
-			{
-				Path:      "src/app/features/seats-grid/seat-card.component.ts",
-				Additions: 24,
-				Deletions: 3,
-				Patch:     "@@ -12,3 +12,24 @@\n+  readonly ciPulse = computed(() => this.seat().failingCiCount === 0);",
-			},
-		},
-	})
+	// The turn is derived: PR #142 changes a file the signed-in user owns.
+	_ = ts.prs.SaveChangedFiles(ctx, entity.PRChangedFiles{PullRequestID: pr1.ID, HeadSHA: pr1.HeadSHA, Files: []entity.ChangedFile{
+		{Path: "src/app/features/seats-grid/seat-card.component.ts", Additions: 24, Deletions: 3},
+	}})
 
 	pr2 := &entity.PullRequest{
 		RepositoryID:   repos[0].ID,
@@ -1134,5 +1133,77 @@ func TestRepositoryImport_ShowsAlreadyOpenPullRequestsWithoutAWebhook(t *testing
 	if pr.Title != "feat: already open" || pr.State != entity.PRStateOpen || pr.CIStatus != entity.CIStatusSuccess ||
 		pr.MergeableState != entity.MergeableStateUnknown || pr.HeadSHA != "sha42" {
 		t.Fatalf("the PR open at import time must appear with GitHub's CI and an honest unknown merge state: %+v", pr)
+	}
+}
+
+func TestTurnEngine_MinhaVezHoldsOnlyPRsTouchingMyFiles(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat, hubot := ts.signIn(t), ts.signInAs(t, "other")
+	for _, session := range []*http.Cookie{octocat, hubot} {
+		if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+			t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	workspace := func(session *http.Cookie) triage.WorkspaceSnapshot {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		return body.Snapshot
+	}
+	numbers := func(items []triage.InboxItem) []int {
+		out := []int{}
+		for _, it := range items {
+			out = append(out, it.PullRequest.Number)
+		}
+		sort.Ints(out)
+		return out
+	}
+
+	// acme/web's CODEOWNERS is "* @octocat": the PR open at import time is octocat's turn only.
+	mine := workspace(octocat)
+	if got := numbers(mine.InboxWaitingOnMe); len(got) != 1 || got[0] != 42 {
+		t.Fatalf("octocat's turn = %v, want [42]", got)
+	}
+	owned := mine.InboxWaitingOnMe[0].UserState.OwnedFilesChanged
+	if len(owned) != 1 || owned[0].Path != "src/cart.ts" || owned[0].Patch != "" {
+		t.Fatalf("octocat's files in the PR, without patches: %+v", owned)
+	}
+	theirs := workspace(hubot)
+	if len(theirs.InboxWaitingOnMe) != 0 || len(theirs.InboxDimmed) != 0 || len(theirs.OwnershipPendingPRIDs) != 0 {
+		t.Fatalf("hubot owns nothing there: the PR must not be in hubot's inbox: %+v", theirs)
+	}
+	if len(theirs.Seats) != 1 || theirs.Seats[0].OpenPRCount != 1 || theirs.Seats[0].WaitingOnMeCount != 0 {
+		t.Fatalf("hubot still sees the PR in the seat: %+v", theirs.Seats)
+	}
+
+	// A PR opened later: the webhook reads its files with a follower's token.
+	opened := func(number int) string {
+		return fmt.Sprintf(`{"action":"opened","number":%d,"pull_request":{"id":%d,"number":%d,"title":"t","state":"open",`+
+			`"user":{"login":"bianca"},"head":{"sha":"s%d"},"base":{"ref":"main"}},"repository":{"id":900},"sender":{"login":"bianca"}}`,
+			number, 8000+number, number, number)
+	}
+	if rec := ts.postWebhook(t, "pull_request", opened(7)); rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := numbers(workspace(octocat).InboxWaitingOnMe); len(got) != 2 || got[0] != 7 {
+		t.Fatalf("octocat's turn = %v, want [7 42]", got)
+	}
+
+	// A PR whose files GitHub cannot give us is never shown as a turn: it stays pending.
+	if rec := ts.postWebhook(t, "pull_request", opened(8)); rec.Code != http.StatusAccepted {
+		t.Fatalf("a failed files read must not lose the webhook: %d", rec.Code)
+	}
+	after := workspace(octocat)
+	if got := numbers(after.InboxWaitingOnMe); len(got) != 2 {
+		t.Fatalf("an unevaluated PR is not a turn: %v", got)
+	}
+	if len(after.OwnershipPendingPRIDs) != 1 || after.Seats[0].OpenPRCount != 3 {
+		t.Fatalf("expected one pending PR among three open: pending=%v seat=%+v", after.OwnershipPendingPRIDs, after.Seats[0])
 	}
 }

@@ -111,3 +111,16 @@ type RemotePullRequest struct {
 func IsDependabotAuthor(login string) bool {
 	return strings.Contains(strings.ToLower(login), "dependabot")
 }
+
+// PRChangedFiles is the list of files a pull request changes at one commit, as GitHub reported
+// it. It is evaluated only when HeadSHA is the PR's current head.
+type PRChangedFiles struct {
+	PullRequestID uint64
+	HeadSHA       string
+	Files         []ChangedFile
+}
+
+// IsCurrentFor reports whether the files describe the PR's current head commit.
+func (f PRChangedFiles) IsCurrentFor(pr PullRequest) bool {
+	return f.HeadSHA != "" && f.HeadSHA == pr.HeadSHA
+}

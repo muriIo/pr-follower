@@ -110,3 +110,14 @@ func TestIsDependabotAuthor(t *testing.T) {
 		}
 	}
 }
+
+func TestPRChangedFiles_IsCurrentOnlyForTheHeadCommit(t *testing.T) {
+	t.Parallel()
+	pr := entity.PullRequest{HeadSHA: "abc"}
+	if !(entity.PRChangedFiles{HeadSHA: "abc"}).IsCurrentFor(pr) {
+		t.Error("files read at the head commit are current")
+	}
+	if (entity.PRChangedFiles{HeadSHA: "old"}).IsCurrentFor(pr) || (entity.PRChangedFiles{}).IsCurrentFor(pr) {
+		t.Error("files of another commit, or none, are not current")
+	}
+}
