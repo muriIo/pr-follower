@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after the timeline fix).
+Last reviewed: 2026-11-10 (after the PR backfill).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,10 +12,9 @@ Last reviewed: 2026-11-10 (after the timeline fix).
 ## Next up
 
 In order:
-1. **P1** Load a repository's open PRs at import ([PR state](#3-pr-state-from-github)).
-2. **P1** Compute turn state so "Minha Vez" fills with real PRs ([CODEOWNERS inbox](#4-codeowners-inbox--minha-vez)).
-3. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
-4. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
+1. **P1** Compute turn state so "Minha Vez" fills with real PRs ([CODEOWNERS inbox](#4-codeowners-inbox--minha-vez)).
+2. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
+3. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
 
 ## 1. Identity & sessions
 
@@ -37,7 +36,8 @@ In order:
 - [x] `pull_request` webhooks ingested idempotently: redelivery changes nothing, CI kept on the same commit (ADR-0011, #8).
 - [x] CI from `check_run` webhooks: running / passing / failing, `NONE` when nothing was reported (#12).
 - [x] GitHub's `mergeable_state` stored and used as the only source of merge blockers (#12, #13).
-- [ ] **P1** Backfill on import: list the repository's open PRs (and their check runs) when it is imported. Today a PR appears only after its next webhook.
+- [x] Backfill on import: the repository's open PRs (up to 1,000) and their check runs are read with the user's token before the follow is recorded, so existing PRs appear without waiting for a webhook. A failure leaves the repository unfollowed so the import can be retried; PRs already kept live by webhooks are never rewound; merge state stays `unknown` (the list does not carry it).
+- [ ] **P2** Resync a followed repository on demand (re-read open PRs, closing those GitHub no longer lists as open), for PRs that changed while the app was not receiving webhooks.
 - [ ] **P1** Review state: ingest `pull_request_review` (approved / changes requested / dismissed) so the drawer can say who reviewed.
 - [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown.
 - [ ] **P2** Legacy commit statuses (`status` event) are not ingested; CI that only reports statuses shows as "Sem CI".

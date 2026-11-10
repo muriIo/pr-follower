@@ -228,3 +228,97 @@ func TestUserClient_ListPullRequestFilesPaginates(t *testing.T) {
 		t.Fatalf("canceled: expected context.Canceled, got %v", err)
 	}
 }
+
+func TestUserClient_ListOpenPullRequestsPaginatesAndMaps(t *testing.T) {
+	t.Parallel()
+	const total = 130
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/repos/acme/web/pulls" || r.URL.Query().Get("state") != "open" {
+			http.NotFound(w, r)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		var prs []map[string]any
+		for i := (page-1)*100 + 1; i <= min(page*100, total); i++ {
+			prs = append(prs, map[string]any{
+				"id": 5000 + i, "number": i, "title": fmt.Sprintf("PR %d", i), "html_url": fmt.Sprintf("https://github.com/acme/web/pull/%d", i),
+				"draft": i == 2, "user": map[string]any{"login": "bia"},
+				"head": map[string]any{"sha": fmt.Sprintf("sha%d", i)}, "base": map[string]any{"ref": "main"},
+			})
+		}
+		_ = json.NewEncoder(w).Encode(prs)
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	prs, err := c.ListOpenPullRequests(context.Background(), "ghu_a", "acme", "web")
+	if err != nil {
+		t.Fatalf("ListOpenPullRequests() error: %v", err)
+	}
+	if len(prs) != total {
+		t.Fatalf("expected %d PRs across pages, got %d", total, len(prs))
+	}
+	first := prs[0]
+	if first.GitHubPRID != 5001 || first.Number != 1 || first.Title != "PR 1" || first.AuthorLogin != "bia" ||
+		first.HeadSHA != "sha1" || first.BaseRef != "main" || first.HTMLURL != "https://github.com/acme/web/pull/1" || first.IsDraft {
+		t.Fatalf("unexpected mapping: %+v", first)
+	}
+	if !prs[1].IsDraft {
+		t.Fatal("a draft PR must be reported as draft")
+	}
+
+	if _, err := c.ListOpenPullRequests(context.Background(), "ghu_a", "acme", "missing"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown repository: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.ListOpenPullRequests(context.Background(), "revoked", "acme", "web"); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.ListOpenPullRequests(canceled, "ghu_a", "acme", "web"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}
+
+func TestUserClient_ListCommitCheckRuns(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/repos/acme/web/commits/abc123/check-runs" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"total_count": 2,
+			"check_runs": []map[string]any{
+				{"id": 11, "name": "build", "status": "completed", "conclusion": "success", "head_sha": "abc123"},
+				{"id": 12, "name": "test", "status": "in_progress", "conclusion": nil, "head_sha": "abc123"},
+			},
+		})
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	runs, err := c.ListCommitCheckRuns(context.Background(), "ghu_a", "acme", "web", "abc123")
+	if err != nil {
+		t.Fatalf("ListCommitCheckRuns() error: %v", err)
+	}
+	if len(runs) != 2 || runs[0] != (entity.CheckRun{ID: 11, HeadSHA: "abc123", Name: "build", Status: "completed", Conclusion: "success"}) ||
+		runs[1].Status != "in_progress" || runs[1].Conclusion != "" {
+		t.Fatalf("unexpected check runs: %+v", runs)
+	}
+
+	if _, err := c.ListCommitCheckRuns(context.Background(), "ghu_a", "acme", "web", "nope"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown commit: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.ListCommitCheckRuns(context.Background(), "revoked", "acme", "web", "abc123"); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+}

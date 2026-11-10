@@ -198,3 +198,11 @@ func TestList_PropagatesFailuresAndCancellation(t *testing.T) {
 		t.Errorf("canceled: got %v", err)
 	}
 }
+
+func (f *fakeGitHub) ListOpenPullRequests(context.Context, string, string, string) ([]entity.RemotePullRequest, error) {
+	return nil, nil
+}
+
+func (f *fakeGitHub) ListCommitCheckRuns(context.Context, string, string, string, string) ([]entity.CheckRun, error) {
+	return nil, nil
+}

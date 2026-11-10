@@ -101,7 +101,7 @@ func main() {
 			Sessions: sessionRepo,
 		})
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
-		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, userRepo, sseHub)
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")

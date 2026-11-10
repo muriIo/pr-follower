@@ -46,6 +46,23 @@ type GitHubUserAPI interface {
 	GetRepositoryFile(ctx context.Context, accessToken, owner, name, path string) ([]byte, error)
 	// ListPullRequestFiles lists a PR's changed files; entity.ErrNotFound for an unknown PR.
 	ListPullRequestFiles(ctx context.Context, accessToken, owner, name string, number int) ([]entity.ChangedFile, error)
+	// ListOpenPullRequests lists a repository's open PRs; entity.ErrNotFound for an unknown repository.
+	ListOpenPullRequests(ctx context.Context, accessToken, owner, name string) ([]entity.RemotePullRequest, error)
+	// ListCommitCheckRuns lists the CI check runs GitHub reported for a commit (none when there is no CI).
+	ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error)
+}
+
+// PullRequestSnapshotStore stores the PRs read from GitHub when a repository is imported.
+type PullRequestSnapshotStore interface {
+	GetByRepoAndNumber(ctx context.Context, repoID uint64, number int) (*entity.PullRequest, error)
+	Upsert(ctx context.Context, pr *entity.PullRequest) error
+}
+
+// CheckRunRecorder keeps the check runs read at import so later check_run webhooks converge.
+type CheckRunRecorder interface {
+	UpsertCheckRun(ctx context.Context, run entity.CheckRun) error
+	GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error)
+	ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error)
 }
 
 // RepositoryAccessStore updates repository access from installation webhooks (ADR-0010).

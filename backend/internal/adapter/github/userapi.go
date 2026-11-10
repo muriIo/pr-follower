@@ -183,6 +183,84 @@ func (c *UserClient) ListPullRequestFiles(ctx context.Context, accessToken, owne
 	return out, nil
 }
 
+// openPRsMaxPages bounds the backfill of a repository's open PRs (1,000 PRs).
+const openPRsMaxPages = 10
+
+// ListOpenPullRequests lists a repository's open PRs with the user's token. The list endpoint
+// reports no merge state, so none is returned (it stays unknown until GitHub sends a webhook).
+func (c *UserClient) ListOpenPullRequests(ctx context.Context, accessToken, owner, name string) ([]entity.RemotePullRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var out []entity.RemotePullRequest
+	for page := 1; page <= openPRsMaxPages; page++ {
+		var raw []struct {
+			ID      int64  `json:"id"`
+			Number  int    `json:"number"`
+			Title   string `json:"title"`
+			HTMLURL string `json:"html_url"`
+			Draft   bool   `json:"draft"`
+			User    struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Head struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+			Base struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		}
+		target := fmt.Sprintf("/repos/%s/%s/pulls?state=open&per_page=%d&page=%d", owner, name, userAPIPerPage, page)
+		if err := getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, target, &raw); err != nil {
+			return nil, err
+		}
+		for _, p := range raw {
+			out = append(out, entity.RemotePullRequest{
+				GitHubPRID: p.ID, Number: p.Number, Title: p.Title, AuthorLogin: p.User.Login,
+				HTMLURL: p.HTMLURL, IsDraft: p.Draft, HeadSHA: p.Head.SHA, BaseRef: p.Base.Ref,
+			})
+		}
+		if len(raw) < userAPIPerPage {
+			break
+		}
+	}
+	return out, nil
+}
+
+// ListCommitCheckRuns lists the check runs GitHub reported for a commit; a repository without CI
+// returns none, never an invented run.
+func (c *UserClient) ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var out []entity.CheckRun
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, name, sha)
+	err := c.paginate(ctx, accessToken, path, func(raw json.RawMessage) (int, int, error) {
+		var page struct {
+			TotalCount int `json:"total_count"`
+			CheckRuns  []struct {
+				ID         int64   `json:"id"`
+				Name       string  `json:"name"`
+				Status     string  `json:"status"`
+				Conclusion *string `json:"conclusion"`
+				HeadSHA    string  `json:"head_sha"`
+			} `json:"check_runs"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return 0, 0, err
+		}
+		for _, r := range page.CheckRuns {
+			run := entity.CheckRun{ID: r.ID, HeadSHA: r.HeadSHA, Name: r.Name, Status: r.Status}
+			if r.Conclusion != nil {
+				run.Conclusion = *r.Conclusion
+			}
+			out = append(out, run)
+		}
+		return page.TotalCount, len(page.CheckRuns), nil
+	})
+	return out, err
+}
+
 // paginate fetches ?per_page=100&page=N until total_count items were seen or a page is short.
 // consume decodes one page and returns (total_count, items on this page).
 func (c *UserClient) paginate(ctx context.Context, accessToken, path string, consume func(json.RawMessage) (int, int, error)) error {

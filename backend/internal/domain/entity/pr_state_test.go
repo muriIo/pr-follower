@@ -93,3 +93,20 @@ func TestRepository_CodeownersStatus(t *testing.T) {
 		t.Fatal("absent is a known state")
 	}
 }
+
+func TestIsDependabotAuthor(t *testing.T) {
+	t.Parallel()
+	for login, want := range map[string]bool{
+		"dependabot[bot]":  true,
+		"Dependabot":       true,
+		"app/dependabot":   true,
+		"octocat":          false,
+		"":                 false,
+		"renovate[bot]":    false,
+		"not-a-dependabo7": false,
+	} {
+		if got := entity.IsDependabotAuthor(login); got != want {
+			t.Errorf("IsDependabotAuthor(%q) = %v, want %v", login, got, want)
+		}
+	}
+}

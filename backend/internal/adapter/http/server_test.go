@@ -107,6 +107,22 @@ func (fakeGitHubUserAPI) ListPullRequestFiles(_ context.Context, _ string, owner
 	}, nil
 }
 
+// ListOpenPullRequests / ListCommitCheckRuns: the fake GitHub has nothing open to backfill.
+func (fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
+	if owner+"/"+name != "acme/web" {
+		return nil, nil
+	}
+	return []entity.RemotePullRequest{{GitHubPRID: 4200, Number: 42, Title: "feat: already open", AuthorLogin: "bia",
+		HTMLURL: "https://github.com/acme/web/pull/42", HeadSHA: "sha42", BaseRef: "main"}}, nil
+}
+
+func (fakeGitHubUserAPI) ListCommitCheckRuns(_ context.Context, _ string, _, _, sha string) ([]entity.CheckRun, error) {
+	if sha != "sha42" {
+		return nil, nil
+	}
+	return []entity.CheckRun{{ID: 4201, HeadSHA: sha, Name: "build", Status: "completed", Conclusion: "success"}}, nil
+}
+
 // GetRepositoryFile: acme/web has CODEOWNERS, acme/api has none.
 func (fakeGitHubUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
 	if owner+"/"+name == "acme/web" && path == ".github/CODEOWNERS" {
@@ -225,7 +241,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
-	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, userRepo, sseHub)
+	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
 
@@ -1103,5 +1119,20 @@ func TestWorkspaceTimeline_OnlyFollowedRepositoriesNewestFirst(t *testing.T) {
 	}
 	if prEvents[0].ActorLogin != "octocat" || prEvents[1].ActorLogin != "bianca" {
 		t.Fatalf("the actor is the webhook sender: %+v", prEvents)
+	}
+}
+
+func TestRepositoryImport_ShowsAlreadyOpenPullRequestsWithoutAWebhook(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+
+	_, pr := seatPR(t, ts, session, "acme/web", 42)
+	if pr.Title != "feat: already open" || pr.State != entity.PRStateOpen || pr.CIStatus != entity.CIStatusSuccess ||
+		pr.MergeableState != entity.MergeableStateUnknown || pr.HeadSHA != "sha42" {
+		t.Fatalf("the PR open at import time must appear with GitHub's CI and an honest unknown merge state: %+v", pr)
 	}
 }

@@ -26,6 +26,28 @@ type fakeUserAPI struct {
 	fileErr       error
 	err           error
 	gotToken      string
+	openPRs       map[string][]entity.RemotePullRequest // "owner/name" -> open PRs
+	prsErr        error
+	checkRuns     map[string][]entity.CheckRun // head SHA -> runs
+	checksErr     error
+	onCheckRuns   func() // called before each check-run read, to cancel mid-backfill
+}
+
+func (f *fakeUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
+	if f.prsErr != nil {
+		return nil, f.prsErr
+	}
+	return f.openPRs[owner+"/"+name], nil
+}
+
+func (f *fakeUserAPI) ListCommitCheckRuns(_ context.Context, _ string, _, _, sha string) ([]entity.CheckRun, error) {
+	if f.onCheckRuns != nil {
+		f.onCheckRuns()
+	}
+	if f.checksErr != nil {
+		return nil, f.checksErr
+	}
+	return f.checkRuns[sha], nil
 }
 
 func (f *fakeUserAPI) ListPullRequestFiles(context.Context, string, string, string, int) ([]entity.ChangedFile, error) {
@@ -171,9 +193,82 @@ func (f *fakeEvents) Publish(_ context.Context, e entity.ActivityEvent) error {
 	return nil
 }
 
+type fakePRs struct {
+	mu   sync.Mutex
+	prs  map[[2]uint64]entity.PullRequest // repository id + number
+	next uint64
+}
+
+func newFakePRs() *fakePRs { return &fakePRs{prs: map[[2]uint64]entity.PullRequest{}} }
+
+func (f *fakePRs) GetByRepoAndNumber(_ context.Context, repoID uint64, number int) (*entity.PullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	pr, ok := f.prs[[2]uint64{repoID, uint64(number)}]
+	if !ok {
+		return nil, entity.ErrNotFound
+	}
+	return &pr, nil
+}
+
+func (f *fakePRs) Upsert(_ context.Context, pr *entity.PullRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := [2]uint64{pr.RepositoryID, uint64(pr.Number)}
+	if existing, ok := f.prs[key]; ok {
+		pr.ID = existing.ID
+	} else {
+		f.next++
+		pr.ID = f.next
+	}
+	f.prs[key] = *pr
+	return nil
+}
+
+type fakeChecks struct {
+	mu   sync.Mutex
+	runs map[int64]entity.CheckRun
+}
+
+func newFakeChecks() *fakeChecks { return &fakeChecks{runs: map[int64]entity.CheckRun{}} }
+
+func (f *fakeChecks) UpsertCheckRun(_ context.Context, run entity.CheckRun) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.runs[run.ID] = run
+	return nil
+}
+
+func (f *fakeChecks) GetCheckRun(_ context.Context, id int64) (*entity.CheckRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	run, ok := f.runs[id]
+	if !ok {
+		return nil, entity.ErrNotFound
+	}
+	return &run, nil
+}
+
+func (f *fakeChecks) ListCheckRuns(_ context.Context, repoID uint64, sha string) ([]entity.CheckRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []entity.CheckRun
+	for _, r := range f.runs {
+		if r.RepositoryID == repoID && r.HeadSHA == sha {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 const userID = 1
 
 func setup() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents) {
+	uc, api, repos, events, _, _ := setupBackfill()
+	return uc, api, repos, events
+}
+
+func setupBackfill() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents, *fakePRs, *fakeChecks) {
 	api := &fakeUserAPI{
 		installations: []entity.Installation{{ID: 10, AccountLogin: "octocat", AccountType: "User"}, {ID: 20, AccountLogin: "acme", AccountType: "Organization"}},
 		repos: map[int64][]entity.InstallationRepository{
@@ -186,8 +281,9 @@ func setup() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents) {
 	}
 	repos := newFakeRepos()
 	events := &fakeEvents{}
-	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, fakeUsers{}, events)
-	return uc, api, repos, events
+	prs, checks := newFakePRs(), newFakeChecks()
+	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, prs, checks, fakeUsers{}, events)
+	return uc, api, repos, events, prs, checks
 }
 
 func TestListAccounts_UsesTheUsersToken(t *testing.T) {
@@ -318,7 +414,7 @@ func TestUseCase_PropagatesFailures(t *testing.T) {
 	ctx := context.Background()
 
 	_, api, repos, events := setup()
-	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, fakeUsers{}, events)
+	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, newFakePRs(), newFakeChecks(), fakeUsers{}, events)
 	if _, err := expired.ListAccounts(ctx, userID); !errors.Is(err, entity.ErrUnauthorized) {
 		t.Errorf("ListAccounts with expired token: got %v", err)
 	}
@@ -425,5 +521,169 @@ func TestImport_KeepsCodeownersUnknownWhenGitHubCannotSay(t *testing.T) {
 	fresh, _ := uc.Import(ctx, userID, 20, 201)
 	if fresh.CodeownersStatus != entity.CodeownersUnknown {
 		t.Fatalf("never checked successfully: expected unknown, got %q", fresh.CodeownersStatus)
+	}
+}
+
+func twoOpenPRs(api *fakeUserAPI) {
+	api.openPRs = map[string][]entity.RemotePullRequest{"acme/web": {
+		{GitHubPRID: 7001, Number: 7, Title: "feat: cart", AuthorLogin: "bia", HTMLURL: "https://github.com/acme/web/pull/7", HeadSHA: "sha7", BaseRef: "main"},
+		{GitHubPRID: 8001, Number: 8, Title: "chore(deps): bump axios from 1.7.7 to 2.0.0", AuthorLogin: "dependabot[bot]", HeadSHA: "sha8", BaseRef: "main"},
+		{GitHubPRID: 9001, Number: 9, Title: "wip", AuthorLogin: "bia", IsDraft: true, HeadSHA: "sha9", BaseRef: "main"},
+	}}
+	api.checkRuns = map[string][]entity.CheckRun{
+		"sha7": {{ID: 71, HeadSHA: "sha7", Name: "build", Status: "completed", Conclusion: "success"}},
+		"sha9": {{ID: 91, HeadSHA: "sha9", Name: "build", Status: "in_progress"}},
+	}
+}
+
+func TestImport_BackfillsOpenPullRequestsWithTheirCI(t *testing.T) {
+	t.Parallel()
+	uc, api, _, events, prs, checks := setupBackfill()
+	twoOpenPRs(api)
+
+	repo, err := uc.Import(context.Background(), userID, 20, 200)
+	if err != nil {
+		t.Fatalf("Import() error: %v", err)
+	}
+	if len(prs.prs) != 3 {
+		t.Fatalf("expected the 3 open PRs to be stored, got %d", len(prs.prs))
+	}
+	get := func(n int) entity.PullRequest { return prs.prs[[2]uint64{repo.ID, uint64(n)}] }
+
+	web := get(7)
+	if web.RepositoryID != repo.ID || web.RepositoryName != "acme/web" || web.GitHubPRID != 7001 || web.Title != "feat: cart" ||
+		web.AuthorLogin != "bia" || web.State != entity.PRStateOpen || web.HeadSHA != "sha7" || web.BaseRef != "main" || web.IsDependabot || web.IsDraft {
+		t.Fatalf("PR #7 stored wrongly: %+v", web)
+	}
+	if web.CIStatus != entity.CIStatusSuccess {
+		t.Fatalf("PR #7 CI comes from GitHub's check runs, got %q", web.CIStatus)
+	}
+	if web.MergeableState != entity.MergeableStateUnknown {
+		t.Fatalf("the PR list carries no merge state, so it must stay unknown, got %q", web.MergeableState)
+	}
+	if bump := get(8); !bump.IsDependabot || bump.CIStatus != entity.CIStatusNone {
+		t.Fatalf("a Dependabot PR without check runs has no CI: %+v", bump)
+	}
+	if draft := get(9); !draft.IsDraft || draft.CIStatus != entity.CIStatusPending {
+		t.Fatalf("a draft PR with a running check is pending: %+v", draft)
+	}
+	if run, err := checks.GetCheckRun(context.Background(), 71); err != nil || run.RepositoryID != repo.ID {
+		t.Fatalf("check runs are kept for the repository so later webhooks converge: %+v, %v", run, err)
+	}
+	if len(events.events) != 1 || events.events[0].Type != "repository.followed" {
+		t.Fatalf("backfill must not flood the timeline, only the follow is announced: %+v", events.events)
+	}
+}
+
+func TestImport_BackfillRedeliverIsIdempotentAndKeepsLiveState(t *testing.T) {
+	t.Parallel()
+	uc, api, _, _, prs, checks := setupBackfill()
+	twoOpenPRs(api)
+	ctx := context.Background()
+
+	repo, err := uc.Import(ctx, userID, 20, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A webhook has since moved PR #7 on; re-importing must not rewind it to the older listing.
+	live := prs.prs[[2]uint64{repo.ID, 7}]
+	live.Title, live.HeadSHA, live.CIStatus = "feat: cart (renamed)", "sha7b", entity.CIStatusFailure
+	prs.prs[[2]uint64{repo.ID, 7}] = live
+
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil {
+		t.Fatalf("second Import() error: %v", err)
+	}
+	if len(prs.prs) != 3 || len(checks.runs) != 2 {
+		t.Fatalf("a repeated import changes nothing: %d PRs, %d check runs", len(prs.prs), len(checks.runs))
+	}
+	if got := prs.prs[[2]uint64{repo.ID, 7}]; got.Title != "feat: cart (renamed)" || got.HeadSHA != "sha7b" || got.CIStatus != entity.CIStatusFailure {
+		t.Fatalf("a PR already kept live by webhooks must not be overwritten: %+v", got)
+	}
+}
+
+func TestImport_BackfillNeverMovesAReportedCheckRunBackwards(t *testing.T) {
+	t.Parallel()
+	uc, api, repos, _, prs, checks := setupBackfill()
+	twoOpenPRs(api)
+	ctx := context.Background()
+	// The repository exists already (e.g. unfollowed earlier) and a check_run webhook finished first.
+	existing, _ := uc.Import(ctx, userID, 20, 200)
+	_ = repos.SetUserFollow(ctx, userID, existing.ID, false)
+	delete(prs.prs, [2]uint64{existing.ID, 7})
+	checks.runs[71] = entity.CheckRun{ID: 71, RepositoryID: existing.ID, HeadSHA: "sha7", Name: "build", Status: "completed", Conclusion: "failure"}
+	api.checkRuns["sha7"] = []entity.CheckRun{{ID: 71, HeadSHA: "sha7", Name: "build", Status: "in_progress"}}
+
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil {
+		t.Fatal(err)
+	}
+	if run := checks.runs[71]; run.Status != "completed" || run.Conclusion != "failure" {
+		t.Fatalf("a run already completed must not go back to in_progress: %+v", run)
+	}
+	if got := prs.prs[[2]uint64{existing.ID, 7}]; got.CIStatus != entity.CIStatusFailure {
+		t.Fatalf("CI is derived from the newest known runs, got %q", got.CIStatus)
+	}
+}
+
+func TestImport_BackfillFailureLeavesTheRepositoryUnfollowedSoItCanBeRetried(t *testing.T) {
+	t.Parallel()
+	for name, fail := range map[string]func(*fakeUserAPI) error{
+		"listing the PRs":      func(a *fakeUserAPI) error { a.prsErr = errors.New("github is down"); return a.prsErr },
+		"reading check runs":   func(a *fakeUserAPI) error { a.checksErr = errors.New("github is down"); return a.checksErr },
+		"a revoked user token": func(a *fakeUserAPI) error { a.prsErr = entity.ErrUnauthorized; return a.prsErr },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			uc, api, repos, events, _, _ := setupBackfill()
+			twoOpenPRs(api)
+			want := fail(api)
+
+			if _, err := uc.Import(context.Background(), userID, 20, 200); !errors.Is(err, want) {
+				t.Fatalf("expected %v, got %v", want, err)
+			}
+			for key, on := range repos.follows {
+				if on {
+					t.Fatalf("the follow is recorded only after the PRs were read, got %v", key)
+				}
+			}
+			if len(events.events) != 0 {
+				t.Fatalf("nothing is announced for a failed import: %+v", events.events)
+			}
+
+			api.prsErr, api.checksErr = nil, nil
+			if _, err := uc.Import(context.Background(), userID, 20, 200); err != nil {
+				t.Fatalf("retrying converges: %v", err)
+			}
+		})
+	}
+}
+
+func TestImport_BackfillStopsWhenCanceled(t *testing.T) {
+	t.Parallel()
+	uc, api, repos, _, prs, _ := setupBackfill()
+	twoOpenPRs(api)
+	ctx, cancel := context.WithCancel(context.Background())
+	api.onCheckRuns = cancel
+
+	if _, err := uc.Import(ctx, userID, 20, 200); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if len(prs.prs) != 0 {
+		t.Fatalf("no PR is stored after cancellation, got %d", len(prs.prs))
+	}
+	for key, on := range repos.follows {
+		if on {
+			t.Fatalf("a canceled import follows nothing, got %v", key)
+		}
+	}
+}
+
+func TestImport_RepositoryWithoutOpenPullRequestsStoresNone(t *testing.T) {
+	t.Parallel()
+	uc, _, _, _, prs, _ := setupBackfill()
+	if _, err := uc.Import(context.Background(), userID, 20, 201); err != nil {
+		t.Fatal(err)
+	}
+	if len(prs.prs) != 0 {
+		t.Fatalf("nothing to backfill, got %d PRs", len(prs.prs))
 	}
 }
