@@ -206,6 +206,44 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 		}
 	})
 
+	t.Run("ADR-0008: detects template translation keys missing from a dictionary", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+
+		fe := filepath.Join(root, "frontend")
+		files := map[string]string{
+			"package.json":           `{"name":"frontend"}`,
+			".mcp.json":              `{"mcpServers":{"angular-cli":{"command":"npx","args":["-y","@angular/cli","mcp"]}}}`,
+			"public/i18n/pt-BR.json": `{"app.brand":"PR Follower","only.pt":"x"}`,
+			"public/i18n/en-US.json": `{"app.brand":"PR Follower","only.pt":"x"}`,
+			"src/app/presentation/common/card/card.component.html": "<strong>{{ 'app.title' | t }}</strong>\n" +
+				"<span>{{ 'app.brand' | t }}</span>\n" +
+				"<button [title]=\"'card.hint' | t\">{{ (busy() ? 'card.busy' : 'card.idle') | t }}</button>\n",
+		}
+		for rel, content := range files {
+			path := filepath.Join(fe, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", rel, err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", rel, err)
+			}
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected missing translation keys to be reported")
+		}
+		for _, key := range []string{"app.title", "card.hint", "card.busy", "card.idle"} {
+			if !containsViolation(report.Violations, "ADR-0008: translation key \""+key+"\"") {
+				t.Errorf("expected missing key %q to be reported, got: %v", key, report.Violations)
+			}
+		}
+		if containsViolation(report.Violations, "\"app.brand\"") {
+			t.Errorf("app.brand exists in both dictionaries and must not be reported: %v", report.Violations)
+		}
+	})
+
 	t.Run("ADR-0010: detects identity taken from a client header", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)

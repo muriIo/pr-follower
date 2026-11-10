@@ -20,3 +20,4 @@ To maintain a clean, globally consistent engineering standard while delivering a
 
 ## Compliance & Automated Gate
 - `adrcheck.ValidateRepository` checks that when `frontend/` is present, `frontend/public/i18n/pt-BR.json` and `frontend/public/i18n/en-US.json` both exist and contain valid JSON with matching top-level translation keys.
+- It also scans every template under `frontend/src/app/` for literal keys passed to the `t` pipe (including both branches of a ternary) and fails if any key is missing from `pt-BR.json` or `en-US.json`, since a missing key renders as the raw key on screen.

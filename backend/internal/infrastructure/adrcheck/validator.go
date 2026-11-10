@@ -1,6 +1,7 @@
 package adrcheck
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -8,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -361,6 +363,8 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 		return
 	}
 
+	validateADR0008TemplateTranslationKeys(repoRoot, appDir, report)
+
 	// ADR-0001 Frontend Clean Architecture check
 	feDomainDir := filepath.Join(appDir, "domain")
 	_ = filepath.WalkDir(feDomainDir, func(path string, d fs.DirEntry, err error) error {
@@ -460,6 +464,67 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 		}
 		return nil
 	})
+}
+
+var (
+	translatePipePattern  = regexp.MustCompile(`\|\s*t\b`)
+	translationKeyLiteral = regexp.MustCompile(`'([A-Za-z][\w-]*(?:\.[\w-]+)+)'`)
+)
+
+// validateADR0008TemplateTranslationKeys reports literal keys passed to the `t` pipe in any
+// template that are missing from pt-BR.json or en-US.json (an untranslated key renders raw).
+func validateADR0008TemplateTranslationKeys(repoRoot, appDir string, report *ValidationReport) {
+	dictionaries := map[string]map[string]any{}
+	for _, locale := range []string{"pt-BR", "en-US"} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "frontend", "public", "i18n", locale+".json"))
+		if err != nil {
+			return
+		}
+		dict := map[string]any{}
+		if err := json.Unmarshal(raw, &dict); err != nil {
+			report.Violations = append(report.Violations, fmt.Sprintf("ADR-0008: %s.json is not valid JSON: %v", locale, err))
+			return
+		}
+		dictionaries[locale] = dict
+	}
+
+	_ = filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".html") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, key := range templateTranslationKeys(string(raw)) {
+			for _, locale := range []string{"pt-BR", "en-US"} {
+				if _, ok := dictionaries[locale][key]; !ok {
+					report.Violations = append(report.Violations,
+						fmt.Sprintf("ADR-0008: translation key %q used in %s is missing from %s.json", key, relPath(repoRoot, path), locale))
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// templateTranslationKeys returns the quoted keys in the expression before each `| t`, back to
+// the start of its interpolation ({{) or attribute value ("), so `(a ? 'x' : 'y') | t` yields both.
+func templateTranslationKeys(template string) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for _, loc := range translatePipePattern.FindAllStringIndex(template, -1) {
+		before := template[:loc[0]]
+		start := max(strings.LastIndex(before, "{{"), strings.LastIndex(before, `"`))
+		expr := before[start+1:]
+		for _, m := range translationKeyLiteral.FindAllStringSubmatch(expr, -1) {
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				keys = append(keys, m[1])
+			}
+		}
+	}
+	return keys
 }
 
 // forbiddenIdentityHeader is assembled so this package does not trip its own scan.
