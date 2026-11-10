@@ -1,17 +1,25 @@
 import { TestBed } from '@angular/core/testing';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SseConnectionState } from '../../domain/models/workspace.models';
 import { SseLiveEventGateway } from './sse-live-event.gateway';
 
 class FakeEventSource {
-  static lastInstance: FakeEventSource | null = null;
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+  static instances: FakeEventSource[] = [];
   onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  readyState = FakeEventSource.CONNECTING;
   closed = false;
   private readonly listeners = new Map<string, ((ev: MessageEvent) => void)[]>();
 
   constructor(readonly url: string) {
-    FakeEventSource.lastInstance = this;
+    FakeEventSource.instances.push(this);
+  }
+
+  static get last(): FakeEventSource {
+    return FakeEventSource.instances[FakeEventSource.instances.length - 1];
   }
 
   addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
@@ -21,14 +29,52 @@ class FakeEventSource {
   }
 
   emit(type: string, data: unknown): void {
-    const list = this.listeners.get(type) ?? [];
-    const ev = { data: JSON.stringify(data) } as MessageEvent;
-    list.forEach((fn) => fn(ev));
+    (this.listeners.get(type) ?? []).forEach((fn) => fn({ data: JSON.stringify(data) } as MessageEvent));
+  }
+
+  open(): void {
+    this.readyState = FakeEventSource.OPEN;
+    this.onopen?.();
+  }
+
+  /** The browser gave up on this connection (non-200 response, e.g. 502 or 401). */
+  fail(): void {
+    this.readyState = FakeEventSource.CLOSED;
+    this.onerror?.();
+  }
+
+  /** Network blip: the browser is retrying on its own. */
+  blip(): void {
+    this.readyState = FakeEventSource.CONNECTING;
+    this.onerror?.();
   }
 
   close(): void {
     this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
   }
+}
+
+const activity = (type: string, summary: string) => ({
+  id: `ev-${type}`,
+  type,
+  repository_name: 'acme/web',
+  pr_number: 7,
+  summary,
+  occurred_at: '2026-11-10T12:00:00Z',
+});
+
+function connect() {
+  (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+  TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
+  const gateway = TestBed.inject(SseLiveEventGateway);
+  const states: SseConnectionState[] = [];
+  const texts: string[] = [];
+  const disconnect = gateway.connect(
+    (ev) => texts.push(ev.text),
+    (state) => states.push(state),
+  );
+  return { states, texts, disconnect };
 }
 
 describe('SseLiveEventGateway', () => {
@@ -36,60 +82,78 @@ describe('SseLiveEventGateway', () => {
 
   afterEach(() => {
     (globalThis as { EventSource?: unknown }).EventSource = originalEventSource;
-    FakeEventSource.lastInstance = null;
+    FakeEventSource.instances = [];
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it('connects to /api/v1/events/stream via EventSource, parses SSE events, and closes on disconnect', () => {
-    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
-
-    TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
-    const gateway = TestBed.inject(SseLiveEventGateway);
-
-    const states: SseConnectionState[] = [];
-    const events: string[] = [];
-
-    const disconnect = gateway.connect(
-      (ev) => events.push(ev.text),
-      (state) => states.push(state),
-    );
-
-    const es = FakeEventSource.lastInstance!;
+  it('reports connected only once the stream opens, and delivers every activity type', () => {
+    const { states, texts, disconnect } = connect();
+    const es = FakeEventSource.last;
     expect(es.url).toBe('/api/v1/events/stream');
+    expect(states).not.toContain('conectado');
 
-    es.onopen?.();
-    expect(states).toContain('conectado');
+    es.open();
+    expect(states[states.length - 1]).toBe('conectado');
 
-    es.emit('pr.approved', {
-      id: 'ev-10',
-      type: 'pr.approved',
-      repository_name: 'arvore/hive-web',
-      pr_number: 142,
-      summary: 'Approved PR #142',
-      occurred_at: '2026-11-09T19:00:00Z',
-    });
-    expect(events).toEqual(['Approved PR #142']);
-
-    es.onerror?.();
-    expect(states).toContain('reconectando');
+    // The backend sends every type as one "activity" event; types never listed before now arrive.
+    es.emit('activity', activity('pr.synchronize', 'New commit on #7'));
+    es.emit('activity', activity('dependabot.analyzed', 'Analyzed #7'));
+    es.emit('message', activity('pr.opened', 'Opened #8'));
+    expect(texts).toEqual(['New commit on #7', 'Analyzed #7', 'Opened #8']);
 
     disconnect();
     expect(es.closed).toBe(true);
   });
 
-  it('listens for repository access events from installation webhooks', () => {
-    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
-    TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
-    const gateway = TestBed.inject(SseLiveEventGateway);
+  it('reconnects with full-jitter backoff after the browser gives up, resetting once open', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(1); // take the full backoff window
+    const { states } = connect();
+    const first = FakeEventSource.last;
+    first.open();
 
-    const received: string[] = [];
-    gateway.connect(
-      (ev) => received.push(ev.text),
-      () => undefined,
-    );
-    const es = FakeEventSource.lastInstance!;
-    for (const type of ['repository.access_lost', 'repository.access_suspended', 'repository.access_restored']) {
-      es.emit(type, { id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
-    }
-    expect(received).toEqual(['repository.access_lost', 'repository.access_suspended', 'repository.access_restored']);
+    first.fail();
+    expect(first.closed).toBe(true);
+    expect(states[states.length - 1]).toBe('reconectando');
+    expect(FakeEventSource.instances.length).toBe(1);
+
+    vi.advanceTimersByTime(999);
+    expect(FakeEventSource.instances.length).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(FakeEventSource.instances.length).toBe(2); // 1s after the first failure
+
+    FakeEventSource.last.fail();
+    vi.advanceTimersByTime(1999);
+    expect(FakeEventSource.instances.length).toBe(2);
+    vi.advanceTimersByTime(1);
+    expect(FakeEventSource.instances.length).toBe(3); // 2s after the second
+
+    FakeEventSource.last.open();
+    expect(states[states.length - 1]).toBe('conectado');
+    FakeEventSource.last.fail();
+    vi.advanceTimersByTime(1000);
+    expect(FakeEventSource.instances.length).toBe(4); // back to 1s after a successful open
+  });
+
+  it('lets the browser retry on its own after a network blip', () => {
+    vi.useFakeTimers();
+    const { states } = connect();
+    FakeEventSource.last.open();
+    FakeEventSource.last.blip();
+
+    expect(states[states.length - 1]).toBe('reconectando');
+    vi.advanceTimersByTime(60_000);
+    expect(FakeEventSource.instances.length).toBe(1);
+    expect(FakeEventSource.last.closed).toBe(false);
+  });
+
+  it('cancels a pending reconnect on disconnect', () => {
+    vi.useFakeTimers();
+    const { disconnect } = connect();
+    FakeEventSource.last.fail();
+    disconnect();
+    vi.advanceTimersByTime(60_000);
+    expect(FakeEventSource.instances.length).toBe(1);
   });
 });

@@ -51,6 +51,11 @@ type RepositoryAccessStore interface {
 	SaveAccess(ctx context.Context, repo *entity.Repository) error
 }
 
+// FollowChecker scopes live events to the repositories a user follows.
+type FollowChecker interface {
+	IsFollowing(ctx context.Context, userID, repositoryID uint64) (bool, error)
+}
+
 type RepositoryRepository interface {
 	Upsert(ctx context.Context, repo *entity.Repository) error
 	GetByID(ctx context.Context, id uint64) (*entity.Repository, error)

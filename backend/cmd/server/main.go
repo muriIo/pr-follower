@@ -123,6 +123,7 @@ func main() {
 		ImportUC:       importUC,
 		InstallURL:     cfg.GitHubAppInstallURL(),
 		InstallationUC: installationUC,
+		Follows:        repoRepo,
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)

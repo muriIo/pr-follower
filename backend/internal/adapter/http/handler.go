@@ -44,6 +44,8 @@ type HandlerDeps struct {
 	InstallURL    string
 	// InstallationUC syncs repository access from installation webhooks (ADR-0010).
 	InstallationUC *webhook.InstallationUseCase
+	// Follows scopes the live event stream to followed repositories. Nil sends nothing.
+	Follows port.FollowChecker
 }
 
 type Handler struct {
@@ -61,8 +63,17 @@ func (h *Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// ServeSSE streams live activity, scoped to the repositories the signed-in user follows:
+// with open GitHub sign-in, no user may see another account's repository or PR activity.
 func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
-	h.deps.SSEHub.ServeHTTP(w, r)
+	userID := currentUserID(r)
+	h.deps.SSEHub.Stream(w, r, func(ctx context.Context, ev entity.ActivityEvent) bool {
+		if h.deps.Follows == nil || ev.RepositoryID == 0 {
+			return false
+		}
+		ok, err := h.deps.Follows.IsFollowing(ctx, userID, ev.RepositoryID)
+		return err == nil && ok
+	})
 }
 
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {

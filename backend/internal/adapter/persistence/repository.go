@@ -234,6 +234,21 @@ func (r *RepositoryRepository) ListByInstallation(ctx context.Context, installat
 	return out, nil
 }
 
+// IsFollowing reports whether the user follows the repository; live events are scoped by it.
+func (r *RepositoryRepository) IsFollowing(ctx context.Context, userID, repositoryID uint64) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, context.Cause(ctx)
+	}
+	n, err := r.q.CountUserRepositoryFollow(ctx, sqlcgen.CountUserRepositoryFollowParams{
+		UserID:       int64(userID),
+		RepositoryID: int64(repositoryID),
+	})
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // SaveAccess persists a repository's access state and installation (ADR-0010).
 func (r *RepositoryRepository) SaveAccess(ctx context.Context, repo *entity.Repository) error {
 	if err := ctx.Err(); err != nil {

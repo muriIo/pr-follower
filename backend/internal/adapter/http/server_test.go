@@ -1,12 +1,14 @@
 package httpadapter_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -63,14 +65,22 @@ func (fakeGitHubOAuth) ExchangeCode(_ context.Context, code, _ string) (entity.O
 	if code == "bad" {
 		return entity.OAuthToken{}, io.ErrUnexpectedEOF
 	}
-	return entity.OAuthToken{AccessToken: "ghu_test", RefreshToken: "ghr_test", AccessTokenExpiresAt: time.Now().Add(8 * time.Hour)}, nil
+	token := "ghu_test"
+	if code == "other" {
+		token = "ghu_other"
+	}
+	return entity.OAuthToken{AccessToken: token, RefreshToken: "ghr_test", AccessTokenExpiresAt: time.Now().Add(8 * time.Hour)}, nil
 }
 
 func (fakeGitHubOAuth) RefreshToken(context.Context, string) (entity.OAuthToken, error) {
 	return entity.OAuthToken{AccessToken: "ghu_refreshed"}, nil
 }
 
-func (fakeGitHubOAuth) FetchProfile(context.Context, string) (entity.GitHubProfile, error) {
+// FetchProfile: code "other" signs in as hubot, anything else as octocat.
+func (fakeGitHubOAuth) FetchProfile(_ context.Context, token string) (entity.GitHubProfile, error) {
+	if token == "ghu_other" {
+		return entity.GitHubProfile{ID: 9919, Login: "hubot", Name: "Hubot"}, nil
+	}
 	return entity.GitHubProfile{ID: 583231, Login: "octocat", Name: "The Octocat", Teams: []string{"@acme/web"}}, nil
 }
 
@@ -99,6 +109,7 @@ type testServer struct {
 	router http.Handler
 	opReg  *operation.Registry
 	authUC *auth.UseCase
+	repos  *persistence.RepositoryRepository
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -129,6 +140,12 @@ func cookieNamed(rec *httptest.ResponseRecorder, name string) *http.Cookie {
 // signIn runs the real GitHub login + callback round trip and returns the session cookie.
 func (ts testServer) signIn(t *testing.T) *http.Cookie {
 	t.Helper()
+	return ts.signInAs(t, "ok")
+}
+
+// signInAs completes the GitHub callback with the given code (see fakeGitHubOAuth).
+func (ts testServer) signInAs(t *testing.T, code string) *http.Cookie {
+	t.Helper()
 	start := ts.do(t, http.MethodGet, "/api/v1/auth/github/login", "", nil)
 	if start.Code != http.StatusFound {
 		t.Fatalf("expected 302 from login start, got %d: %s", start.Code, start.Body.String())
@@ -140,7 +157,7 @@ func (ts testServer) signIn(t *testing.T) *http.Cookie {
 		t.Fatalf("login start must set state and the pf_oauth cookie, got %s", start.Header())
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/callback?code=ok&state="+url.QueryEscape(state), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/callback?code="+code+"&state="+url.QueryEscape(state), nil)
 	req.AddCookie(flow)
 	rec := httptest.NewRecorder()
 	ts.router.ServeHTTP(rec, req)
@@ -204,9 +221,10 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		ImportUC:       importUC,
 		InstallURL:     "https://github.com/apps/pr-follower/installations/new",
 		InstallationUC: installationUC,
+		Follows:        repoRepo,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -626,5 +644,100 @@ func TestInstallationWebhooks_FlagAndRestoreRepositoryAccess(t *testing.T) {
 	}
 	if rec := ts.postWebhook(t, "installation_repositories", `[`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("malformed installation_repositories payload: expected 400, got %d", rec.Code)
+	}
+}
+
+// openStream connects to the live event stream with a session and returns the JSON payloads
+// of its "activity" frames. It returns once the stream is open (and therefore subscribed).
+func openStream(t *testing.T, baseURL string, session *http.Cookie) <-chan string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/events/stream", nil)
+	req.AddCookie(session)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("open stream: %v %v", resp, err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	reader := bufio.NewReader(resp.Body)
+	if first, err := reader.ReadString('\n'); err != nil || !strings.HasPrefix(first, "retry:") {
+		t.Fatalf("expected the stream to open with a retry hint, got %q, %v", first, err)
+	}
+	out := make(chan string, 16)
+	go func() {
+		defer close(out)
+		named := false
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimRight(line, "\n")
+			switch {
+			case line == "event: activity":
+				named = true
+			case strings.HasPrefix(line, "data: ") && named:
+				out <- strings.TrimPrefix(line, "data: ")
+				named = false
+			}
+		}
+	}()
+	return out
+}
+
+func nextEvent(t *testing.T, events <-chan string) string {
+	t.Helper()
+	select {
+	case ev := <-events:
+		return ev
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for a live event")
+		return ""
+	}
+}
+
+func TestLiveEvents_OnlyReachUsersWhoFollowTheRepository(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat := ts.signIn(t)
+	hubot := ts.signInAs(t, "other")
+
+	for _, body := range []string{`{"installation_id":20,"github_repo_id":900}`, `{"installation_id":20,"github_repo_id":901}`} {
+		if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", body, octocat); rec.Code != http.StatusOK {
+			t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	var me struct {
+		User entity.User `json:"user"`
+	}
+	_ = json.NewDecoder(ts.do(t, http.MethodGet, "/api/v1/auth/me", "", hubot).Body).Decode(&me)
+	api, _ := ts.repos.GetByGitHubRepoID(context.Background(), 901)
+	if err := ts.repos.SetUserFollow(context.Background(), me.User.ID, api.ID, true); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+
+	srv := httptest.NewServer(ts.router)
+	t.Cleanup(srv.Close) // runs after the streams' own cleanups cancel them
+	octocatEvents := openStream(t, srv.URL, octocat)
+	hubotEvents := openStream(t, srv.URL, hubot)
+
+	prOpened := func(repoID, number int) string {
+		return fmt.Sprintf(`{"action":"opened","number":%d,"pull_request":{"id":%d,"number":%d,"title":"t","state":"open",`+
+			`"user":{"login":"bianca"},"head":{"sha":"s"},"base":{"ref":"main"}},"repository":{"id":%d}}`, number, 7000+number, number, repoID)
+	}
+	for _, payload := range []string{prOpened(900, 1), prOpened(901, 2)} {
+		if rec := ts.postWebhook(t, "pull_request", payload); rec.Code != http.StatusAccepted {
+			t.Fatalf("webhook: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	first, second := nextEvent(t, octocatEvents), nextEvent(t, octocatEvents)
+	if !strings.Contains(first, `"type":"pr.opened"`) || !strings.Contains(first, "acme/web") || !strings.Contains(second, "acme/api") {
+		t.Fatalf("octocat follows both repositories and must see both PRs:\n%s\n%s", first, second)
+	}
+	if got := nextEvent(t, hubotEvents); !strings.Contains(got, "acme/api") {
+		t.Fatalf("hubot follows only acme/api; acme/web activity leaked:\n%s", got)
 	}
 }

@@ -179,3 +179,7 @@ ORDER BY full_name ASC;
 UPDATE repositories
 SET installation_id = $2, access = $3, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1;
+
+-- name: CountUserRepositoryFollow :one
+SELECT COUNT(*) FROM user_repo_follows
+WHERE user_id = $1 AND repository_id = $2;

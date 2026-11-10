@@ -6,15 +6,30 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 )
+
+const (
+	// streamEventName is the single SSE event name for every activity; the activity type
+	// travels in the JSON payload. Browsers only deliver named events that have a listener,
+	// so per-type names silently dropped every type the SPA did not list.
+	streamEventName  = "activity"
+	defaultHeartbeat = 25 * time.Second
+	reconnectHintMs  = 3000
+)
+
+// AllowFunc decides whether one subscriber may see an event (e.g. only repositories the
+// signed-in user follows).
+type AllowFunc func(ctx context.Context, event entity.ActivityEvent) bool
 
 type Hub struct {
 	mu          sync.RWMutex
 	subscribers map[chan entity.ActivityEvent]struct{}
 	history     []entity.ActivityEvent
 	maxHistory  int
+	heartbeat   time.Duration
 }
 
 func NewHub(maxHistory int) *Hub {
@@ -25,6 +40,15 @@ func NewHub(maxHistory int) *Hub {
 		subscribers: make(map[chan entity.ActivityEvent]struct{}),
 		history:     make([]entity.ActivityEvent, 0, maxHistory),
 		maxHistory:  maxHistory,
+		heartbeat:   defaultHeartbeat,
+	}
+}
+
+// SetHeartbeat sets how often an idle stream sends a comment so proxies and load balancers
+// keep the connection open.
+func (h *Hub) SetHeartbeat(d time.Duration) {
+	if d > 0 {
+		h.heartbeat = d
 	}
 }
 
@@ -86,36 +110,48 @@ func (h *Hub) SubscriberCount() int {
 	return len(h.subscribers)
 }
 
-func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// Stream serves one Server-Sent Events connection, delivering only events allow accepts.
+// The subscription is registered before anything is written, so nothing published once the
+// client sees the stream open is lost.
+func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
+	ctx := r.Context()
+	events := h.Subscribe(ctx)
+
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	rc := http.NewResponseController(w)
-	_, _ = fmt.Fprint(w, ": connected\n\n")
+	_, _ = fmt.Fprintf(w, "retry: %d\n: connected\n\n", reconnectHintMs)
 	_ = rc.Flush()
 
-	ctx := r.Context()
-	events := h.Subscribe(ctx)
+	heartbeat := time.NewTicker(h.heartbeat)
+	defer heartbeat.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			_ = rc.Flush()
 		case ev, ok := <-events:
 			if !ok {
 				return
+			}
+			if !allow(ctx, ev) {
+				continue
 			}
 			payload, err := json.Marshal(ev)
 			if err != nil {
 				continue
 			}
-			evType := ev.Type
-			if evType == "" {
-				evType = "message"
+			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, streamEventName, payload); err != nil {
+				return
 			}
-			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", evType, payload)
 			_ = rc.Flush()
 		}
 	}
