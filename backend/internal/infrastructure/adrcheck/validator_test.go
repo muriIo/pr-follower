@@ -244,6 +244,91 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 		}
 	})
 
+	t.Run("ADR-0011: detects non-idempotent writes, schema, retries and missing redelivery tests", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		backend := filepath.Join(root, "backend", "internal")
+		files := map[string]string{
+			"adapter/persistence/queries/queries.sql": "-- name: UpsertThing :exec\nINSERT INTO things (id) VALUES ($1)\nON CONFLICT (id) DO NOTHING;\n\n" +
+				"-- name: CreateToken :exec\n-- idempotent: random 256-bit key, cannot collide\nINSERT INTO tokens (id) VALUES ($1);\n\n" +
+				"-- name: CreateDuplicate :exec\nINSERT INTO events (id) VALUES ($1);\n",
+			"infrastructure/database/migrations/00002_more.sql": "-- +goose Up\nCREATE TABLE things (id BIGINT);\nCREATE INDEX idx_things ON things (id);\n",
+			"adapter/notify/notify.go": `package notify
+
+import (
+	"context"
+	"net/http"
+
+	"example/resilience"
+)
+
+func Send(ctx context.Context) error {
+	_, err := resilience.Retry(ctx, resilience.BackoffConfig{}, func(c context.Context) (bool, error) {
+		_, err := http.NewRequestWithContext(c, http.MethodPost, "https://x", nil)
+		return true, err
+	})
+	return err
+}
+`,
+			"adapter/notify/notify_test.go": "package notify\nimport \"testing\"\nfunc TestSend(t *testing.T) {}\n",
+			"usecase/webhook/ingest.go": `package webhook
+
+import "context"
+
+type UseCase struct{}
+
+func (uc *UseCase) IngestPushEvent(ctx context.Context) error { return nil }
+func (uc *UseCase) IngestStarEvent(ctx context.Context) error { return nil }
+`,
+			"usecase/webhook/ingest_test.go": `package webhook
+
+import (
+	"context"
+	"testing"
+)
+
+func TestIngestPushEvent_RedeliveryIsIdempotent(t *testing.T) {
+	_ = (&UseCase{}).IngestPushEvent(context.Background())
+}
+
+func TestIngestStarEvent_Works(t *testing.T) {
+	_ = (&UseCase{}).IngestStarEvent(context.Background())
+}
+`,
+		}
+		for rel, content := range files {
+			path := filepath.Join(backend, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", rel, err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", rel, err)
+			}
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected ADR-0011 violations")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{
+			"ADR-0011: query CreateDuplicate",
+			"ADR-0011: 00002_more.sql: CREATE TABLE",
+			"ADR-0011: 00002_more.sql: CREATE INDEX",
+			"ADR-0011: backend/internal/adapter/notify/notify.go retries an http.MethodPost",
+			"ADR-0011: webhook ingest method IngestStarEvent",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected violation %q, got:\n%s", want, joined)
+			}
+		}
+		for _, unwanted := range []string{"UpsertThing", "CreateToken", "IngestPushEvent"} {
+			if strings.Contains(joined, unwanted) {
+				t.Errorf("%s is compliant and must not be reported:\n%s", unwanted, joined)
+			}
+		}
+	})
+
 	t.Run("ADR-0010: detects identity taken from a client header", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)
@@ -342,7 +427,7 @@ require (
 	if err := os.MkdirAll(migDir, 0o755); err != nil {
 		t.Fatalf("mkdir migrations: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(migDir, "00001_init.sql"), []byte("-- +goose Up\nCREATE TABLE users (id BIGSERIAL PRIMARY KEY);\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(migDir, "00001_init.sql"), []byte("-- +goose Up\nCREATE TABLE IF NOT EXISTS users (id BIGSERIAL PRIMARY KEY);\n"), 0o644); err != nil {
 		t.Fatalf("write migration: %v", err)
 	}
 

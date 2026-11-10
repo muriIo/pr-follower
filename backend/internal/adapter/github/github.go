@@ -178,7 +178,7 @@ func (g *Gateway) ApprovePullRequest(ctx context.Context, repo entity.Repository
 		"event": "APPROVE",
 		"body":  body,
 	})
-	_, err := resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
+	_, err := resilience.RetryNonIdempotent(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			return false, resilience.Permanent(err)
@@ -230,7 +230,7 @@ func (g *Gateway) CreatePRComment(ctx context.Context, repo entity.Repository, p
 	payload, _ := json.Marshal(map[string]string{
 		"body": comment,
 	})
-	_, err := resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
+	_, err := resilience.RetryNonIdempotent(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			return false, resilience.Permanent(err)
