@@ -64,14 +64,15 @@ func main() {
 	repoRepo := persistence.NewRepositoryRepository(db)
 	prRepo := persistence.NewPullRequestRepository(db)
 
-	sseHub := sse.NewHub(100)
+	// Recent activity is in memory (see roadmap): keep enough for every user's followed repositories.
+	sseHub := sse.NewHub(1000)
 	opReg := operation.NewRegistry()
 	ghGateway := github.NewGateway(github.GatewayConfig{
 		Backoff: resilience.DefaultBackoffConfig(),
 	})
 
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub)
-	actionUC := action.NewUseCase(prRepo, repoRepo, ghGateway, sseHub)
+	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGateway, sseHub)
 	analyzeUC := dependabot.NewAnalyzeUseCase(
 		prRepo,
 		repoRepo,
@@ -100,7 +101,7 @@ func main() {
 			Sessions: sessionRepo,
 		})
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
-		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, sseHub)
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, userRepo, sseHub)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")

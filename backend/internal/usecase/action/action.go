@@ -13,6 +13,7 @@ import (
 type UseCase struct {
 	prRepo    port.PullRequestRepository
 	repoRepo  port.RepositoryRepository
+	users     port.UserRepository
 	ghGateway port.GitHubGateway
 	pub       port.EventPublisher
 }
@@ -20,12 +21,14 @@ type UseCase struct {
 func NewUseCase(
 	prRepo port.PullRequestRepository,
 	repoRepo port.RepositoryRepository,
+	users port.UserRepository,
 	ghGateway port.GitHubGateway,
 	pub port.EventPublisher,
 ) *UseCase {
 	return &UseCase{
 		prRepo:    prRepo,
 		repoRepo:  repoRepo,
+		users:     users,
 		ghGateway: ghGateway,
 		pub:       pub,
 	}
@@ -69,6 +72,7 @@ func (uc *UseCase) ApprovePR(ctx context.Context, userID, prID uint64, body stri
 		RepositoryName: repo.FullName,
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
+		ActorLogin:     uc.actorLogin(ctx, userID),
 		Summary:        fmt.Sprintf("Approved PR #%d", pr.Number),
 		OccurredAt:     time.Now().UTC(),
 	})
@@ -115,6 +119,7 @@ func (uc *UseCase) MergePR(ctx context.Context, userID, prID uint64, method stri
 		RepositoryName: repo.FullName,
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
+		ActorLogin:     uc.actorLogin(ctx, userID),
 		Summary:        fmt.Sprintf("Merged PR #%d (%s)", pr.Number, method),
 		OccurredAt:     time.Now().UTC(),
 	})
@@ -137,7 +142,7 @@ func (uc *UseCase) BatchApproveAndMerge(ctx context.Context, userID uint64, prID
 	return completed, nil
 }
 
-func (uc *UseCase) RunDependabotCommand(ctx context.Context, _ uint64, prID uint64, command string) error {
+func (uc *UseCase) RunDependabotCommand(ctx context.Context, userID uint64, prID uint64, command string) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
@@ -167,7 +172,17 @@ func (uc *UseCase) RunDependabotCommand(ctx context.Context, _ uint64, prID uint
 		RepositoryName: repo.FullName,
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
+		ActorLogin:     uc.actorLogin(ctx, userID),
 		Summary:        fmt.Sprintf("Triggered '%s' on PR #%d", body, pr.Number),
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// actorLogin names who acted, for the "my activity" timeline. An unknown user leaves it empty.
+func (uc *UseCase) actorLogin(ctx context.Context, userID uint64) string {
+	user, err := uc.users.GetByID(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	return user.Login
 }

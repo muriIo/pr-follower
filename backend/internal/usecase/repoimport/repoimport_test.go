@@ -146,6 +146,19 @@ func (f *fakeRepos) SetUserFollow(_ context.Context, userID, repoID uint64, foll
 	return nil
 }
 
+type fakeUsers struct{}
+
+func (fakeUsers) Upsert(context.Context, *entity.User) error { return nil }
+func (fakeUsers) GetByID(_ context.Context, id uint64) (*entity.User, error) {
+	if id == userID {
+		return &entity.User{ID: userID, Login: "octocat"}, nil
+	}
+	return nil, entity.ErrNotFound
+}
+func (fakeUsers) GetByGitHubID(context.Context, int64) (*entity.User, error) {
+	return nil, entity.ErrNotFound
+}
+
 type fakeEvents struct {
 	mu     sync.Mutex
 	events []entity.ActivityEvent
@@ -173,7 +186,7 @@ func setup() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents) {
 	}
 	repos := newFakeRepos()
 	events := &fakeEvents{}
-	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, events)
+	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, fakeUsers{}, events)
 	return uc, api, repos, events
 }
 
@@ -241,7 +254,8 @@ func TestImport_PersistsFollowsAndAnnounces(t *testing.T) {
 	if !repos.follows[[2]uint64{userID, repo.ID}] {
 		t.Fatal("expected the user to follow the imported repository")
 	}
-	if len(events.events) != 1 || events.events[0].Type != "repository.followed" || events.events[0].RepositoryName != "acme/api" {
+	if len(events.events) != 1 || events.events[0].Type != "repository.followed" || events.events[0].RepositoryName != "acme/api" ||
+		events.events[0].ActorLogin != "octocat" {
 		t.Fatalf("expected a repository.followed event, got %+v", events.events)
 	}
 }
@@ -304,7 +318,7 @@ func TestUseCase_PropagatesFailures(t *testing.T) {
 	ctx := context.Background()
 
 	_, api, repos, events := setup()
-	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, events)
+	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, fakeUsers{}, events)
 	if _, err := expired.ListAccounts(ctx, userID); !errors.Is(err, entity.ErrUnauthorized) {
 		t.Errorf("ListAccounts with expired token: got %v", err)
 	}
