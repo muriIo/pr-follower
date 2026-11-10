@@ -1,0 +1,9 @@
+.git
+bin
+tmp
+coverage.out
+coverage.html
+*.test
+.env*
+*.log
+Dockerfile

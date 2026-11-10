@@ -1,9 +1,12 @@
-.PHONY: help db-up db-down adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check
+.PHONY: help db-up db-down dev dev-down docker-build adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check
 
 help:
 	@echo "PR Follower — Quality Gate & Development Commands"
 	@echo "  make db-up                    Start PostgreSQL container via Docker Compose"
 	@echo "  make db-down                  Stop PostgreSQL container"
+	@echo "  make dev                      Run the full dev stack (postgres + api + panel) via docker-compose.local.yml"
+	@echo "  make dev-down                 Stop the dev stack"
+	@echo "  make docker-build             Build production images (pr-follower-api, pr-follower-panel)"
 	@echo "  make adr-check                Validate all Architecture Decision Records (docs/adr/) against the codebase"
 	@echo "  make backend-fmt              Check Go formatting (gofmt -s)"
 	@echo "  make backend-vet              Run go vet static analysis"
@@ -19,6 +22,16 @@ db-up:
 
 db-down:
 	docker compose down
+
+dev:
+	docker compose -f docker-compose.local.yml up -d
+
+dev-down:
+	docker compose -f docker-compose.local.yml down
+
+docker-build:
+	docker build -t pr-follower-api backend
+	docker build -t pr-follower-panel frontend
 
 adr-check:
 	@echo "==> Validating Architecture Decision Records (docs/adr/) compliance..."
