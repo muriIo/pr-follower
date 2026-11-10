@@ -111,6 +111,25 @@ func Retry[T any](ctx context.Context, cfg BackoffConfig, fn func(ctx context.Co
 	return zero, lastErr
 }
 
+// RetryNonIdempotent runs a call that must not be repeated blindly, such as a POST that creates
+// a review or a comment (ADR-0011). It retries only when the server explicitly said the request
+// was not processed (an error built with RetryAfter). Any other failure is an ambiguous outcome:
+// the call may have been applied, so it is returned to the caller instead of being repeated.
+func RetryNonIdempotent[T any](ctx context.Context, cfg BackoffConfig, fn func(ctx context.Context) (T, error)) (T, error) {
+	return Retry(ctx, cfg, func(callCtx context.Context) (T, error) {
+		res, err := fn(callCtx)
+		if err == nil {
+			return res, nil
+		}
+		var raErr retryAfterError
+		var permErr permanentError
+		if errors.As(err, &raErr) || errors.As(err, &permErr) {
+			return res, err
+		}
+		return res, Permanent(err)
+	})
+}
+
 func computeFullJitterDelay(attempt int, base, maxDelay time.Duration, randFn func() float64) time.Duration {
 	shift := min(attempt, 20)
 	exp := base * time.Duration(1<<shift)

@@ -10,7 +10,6 @@ Production readiness depends on open items in the Status list of [`implementatio
 
 - [ ] **Demo seed endpoint.** `POST /api/v1/demo/seed` writes fake repositories and PRs for whoever calls it. Remove it or gate it to non-production before going public.
 - [ ] **Acting on GitHub.** Approve / merge / comment do not yet use the user's token, and installation tokens (App ID + private key) are not wired. Until then those actions do not reach GitHub.
-- [ ] **Installation webhooks.** Uninstalling the app or removing repositories from it does not yet update followed repositories (the user can still unfollow them on the import screen).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
@@ -145,6 +144,7 @@ TLS proxy requirements:
 5. In the browser dev tools, the `pf_session` cookie is `HttpOnly`, `Secure`, `SameSite=Lax`.
 6. In the app, open **Seats → + Importar repositório**, follow **+ Adicionar conta do GitHub**, install the app on a test repository, and check that GitHub returns you to the import screen with that account selected. Follow the repository. In the app's **Advanced → Recent Deliveries**, the `installation` delivery shows a `2xx` response. A `401` means `GITHUB_WEBHOOK_SECRET` differs from the app's webhook secret.
 7. Open a PR on the test repository: the delivery succeeds and the event appears in **Linha do Tempo**.
+8. On GitHub, remove the test repository from the installation (**Configure** on the app's installation page). Its Seat shows "Sem acesso" within seconds; add it back and the warning clears.
 
 ## 8. Operate
 

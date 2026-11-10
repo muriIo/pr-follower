@@ -161,7 +161,7 @@ describe('workspace-api.mapper', () => {
 
     const dataset = mapApiWorkspaceResponseToDataset(dto);
     expect(dataset).not.toBeNull();
-    expect(dataset!.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main' }]);
+    expect(dataset!.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main', access: 'active' }]);
     expect(dataset!.prs.length).toBe(3);
 
     const codePr = dataset!.prs.find((p) => p.id === 142)!;
@@ -201,5 +201,36 @@ describe('workspace-api.mapper', () => {
     expect(item.repo).toBe('arvore/checkout-api');
     expect(item.pr).toBe(412);
     expect(item.text).toBe('@murilo claimed PR #412');
+  });
+
+  it('maps repository access from installation webhooks onto seats', () => {
+    const seat = (id: number, fullName: string, access?: 'active' | 'removed' | 'suspended') => ({
+      repository: { id, owner: 'acme', name: fullName.split('/')[1], full_name: fullName, default_branch: 'main', access },
+      open_pr_count: 0,
+      waiting_on_me_count: 0,
+      dependabot_pr_count: 0,
+      failing_ci_count: 0,
+      pull_requests: [],
+    });
+    const dataset = mapApiWorkspaceResponseToDataset({
+      snapshot: {
+        seats: [seat(1, 'acme/web', 'removed'), seat(2, 'acme/api', 'suspended'), seat(3, 'acme/legacy')],
+        inbox_waiting_on_me: [],
+        inbox_dimmed: [],
+        dependabot_prs: [],
+      },
+      timeline: [],
+    });
+    expect(dataset!.repos.map((r) => r.access)).toEqual(['removed', 'suspended', 'active']);
+  });
+
+  it('marks repository access events as failures or recoveries that refresh the workspace', () => {
+    const event = (type: string) =>
+      mapActivityEventToTimelineItem({ id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
+
+    expect(event('repository.access_lost')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
+    expect(event('repository.access_suspended')).toMatchObject({ kind: 'fail', refreshWorkspace: true });
+    expect(event('repository.access_restored')).toMatchObject({ kind: 'ok', refreshWorkspace: true });
+    expect(event('pr.approved').refreshWorkspace).toBeUndefined();
   });
 });

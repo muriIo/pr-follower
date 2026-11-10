@@ -44,6 +44,13 @@ type GitHubUserAPI interface {
 	ListInstallationRepositories(ctx context.Context, accessToken string, installationID int64) ([]entity.InstallationRepository, error)
 }
 
+// RepositoryAccessStore updates repository access from installation webhooks (ADR-0010).
+type RepositoryAccessStore interface {
+	GetByGitHubRepoID(ctx context.Context, ghRepoID int64) (*entity.Repository, error)
+	ListByInstallation(ctx context.Context, installationID int64) ([]entity.Repository, error)
+	SaveAccess(ctx context.Context, repo *entity.Repository) error
+}
+
 type RepositoryRepository interface {
 	Upsert(ctx context.Context, repo *entity.Repository) error
 	GetByID(ctx context.Context, id uint64) (*entity.Repository, error)

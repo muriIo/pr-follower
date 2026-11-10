@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -72,6 +73,22 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		UpdatedAt:      time.Now().UTC(),
 	}
 
+	// ADR-0011: a redelivered webhook converges to the same state and publishes nothing.
+	existing, err := uc.prRepo.GetByRepoAndNumber(ctx, repo.ID, p.Number)
+	switch {
+	case err == nil:
+		if sameWebhookState(existing, pr) {
+			return nil
+		}
+		if existing.HeadSHA == pr.HeadSHA {
+			// Same commit: CI and mergeability are still the stored ones.
+			pr.CIStatus = existing.CIStatus
+			pr.MergeableState = existing.MergeableState
+		}
+	case !errors.Is(err, entity.ErrNotFound):
+		return err
+	}
+
 	if err := uc.prRepo.Upsert(ctx, pr); err != nil {
 		return err
 	}
@@ -87,4 +104,16 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		Summary:        fmt.Sprintf("%s #%d (%s): %s", repo.FullName, pr.Number, p.Action, pr.Title),
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// sameWebhookState reports whether a pull_request webhook carries nothing new for a stored PR.
+func sameWebhookState(stored, incoming *entity.PullRequest) bool {
+	return stored.GitHubPRID == incoming.GitHubPRID &&
+		stored.Title == incoming.Title &&
+		stored.State == incoming.State &&
+		stored.IsDraft == incoming.IsDraft &&
+		stored.HeadSHA == incoming.HeadSHA &&
+		stored.BaseRef == incoming.BaseRef &&
+		stored.AuthorLogin == incoming.AuthorLogin &&
+		stored.HTMLURL == incoming.HTMLURL
 }

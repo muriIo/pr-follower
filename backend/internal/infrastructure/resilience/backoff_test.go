@@ -175,3 +175,39 @@ func TestSingleFlightGroup_DeduplicatesConcurrentCalls(t *testing.T) {
 		t.Fatalf("expected underlying function to execute once, got %d", got)
 	}
 }
+
+func TestRetryNonIdempotent_RetriesOnlyWhenTheServerSaysNotProcessed(t *testing.T) {
+	t.Parallel()
+	cfg := resilience.BackoffConfig{MaxAttempts: 4, SleepFunc: func(context.Context, time.Duration) error { return nil }}
+
+	// Ambiguous failure (the request may have been applied): returned, never repeated.
+	var calls atomic.Int32
+	ambiguous := errors.New("github server error (502)")
+	_, err := resilience.RetryNonIdempotent(context.Background(), cfg, func(context.Context) (string, error) {
+		calls.Add(1)
+		return "", ambiguous
+	})
+	if !errors.Is(err, ambiguous) || calls.Load() != 1 {
+		t.Fatalf("ambiguous failure: err=%v calls=%d, want the error after 1 call", err, calls.Load())
+	}
+
+	// Explicit Retry-After (rate limited, not processed): retried.
+	calls.Store(0)
+	got, err := resilience.RetryNonIdempotent(context.Background(), cfg, func(context.Context) (string, error) {
+		if calls.Add(1) == 1 {
+			return "", resilience.RetryAfter(errors.New("rate limited"), time.Second)
+		}
+		return "created", nil
+	})
+	if err != nil || got != "created" || calls.Load() != 2 {
+		t.Fatalf("retry-after: got=%q err=%v calls=%d", got, err, calls.Load())
+	}
+
+	// Permanent errors keep their meaning.
+	_, err = resilience.RetryNonIdempotent(context.Background(), cfg, func(context.Context) (string, error) {
+		return "", resilience.Permanent(entity.ErrNotFound)
+	})
+	if !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("permanent: got %v", err)
+	}
+}

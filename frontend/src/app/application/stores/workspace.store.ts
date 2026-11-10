@@ -71,6 +71,8 @@ export interface SeatCardViewModel {
   readonly depCls: string;
   readonly openLabel: string;
   readonly isEmpty: boolean;
+  /** i18n key explaining lost GitHub App access, or null when the repository is reachable. */
+  readonly accessKey: string | null;
   readonly stream: readonly SeatStreamRowViewModel[];
 }
 
@@ -226,6 +228,9 @@ export class WorkspaceStore {
           if (!this.pausedTimeline()) {
             this.appendTimelineEvent(evt.kind, evt.text, evt.repo, evt.pr);
           }
+          if (evt.refreshWorkspace) {
+            void this.loadWorkspace();
+          }
         },
         (state) => this.connectionState.set(state),
       ) ?? (() => undefined);
@@ -348,10 +353,13 @@ export class WorkspaceStore {
           };
         });
 
+      const accessKey =
+        r.access === 'removed' ? 'seats.access.removed' : r.access === 'suspended' ? 'seats.access.suspended' : null;
+
       return {
         name: r.name,
         branch: r.branch,
-        cls: fresh === r.name ? 'is-fresh' : '',
+        cls: [fresh === r.name ? 'is-fresh' : '', accessKey ? 'pf-seat-no-access' : ''].filter(Boolean).join(' '),
         ciDot: {
           fail: 'pf-dot pf-dot-fail pf-dot-pulse',
           run: 'pf-dot pf-dot-warn pf-dot-pulse',
@@ -370,6 +378,7 @@ export class WorkspaceStore {
         depCls: deps.length === 0 ? 'pf-badge-zero' : risky ? 'pf-badge-medio' : 'pf-badge-baixo',
         openLabel: this.plural(repoPrs.length, 'PR Aberto', 'PRs Abertos'),
         isEmpty: repoPrs.length === 0,
+        accessKey,
         stream,
       };
     });

@@ -21,6 +21,7 @@ The apps talk only over HTTP under `/api/v1`. The frontend calls relative `/api/
 - **Retry with full-jitter backoff** (ADR-0006) via `internal/infrastructure/resilience`; wrap 400/401/404/422 in `resilience.Permanent`.
 - **Cancellable end to end** (ADR-0007). Every exported use-case method takes `ctx context.Context` first and checks `ctx.Err()` before each batch item or expensive I/O. Long frontend actions carry an `AbortSignal` and an `X-Operation-ID` header.
 - **English code, pt-BR UI** (ADR-0008). Identifiers, comments, tests, JSON fields and commits are English. Every visible string is a key added to **both** `frontend/public/i18n/pt-BR.json` and `en-US.json` (matching keys), rendered through `LocaleStore` / the translate pipe.
+- **Idempotent integrations** (ADR-0011). Webhooks, retries and user actions are at-least-once: converge to a target state, publish events only when state changed, upsert by the provider's id, `IF NOT EXISTS` in schema, `resilience.RetryNonIdempotent` for `POST`/`PATCH`, and a `*Redeliver*` test for every webhook ingest method.
 - **Angular shape** (ADR-0009). OnPush, `input()`/`output()`, `inject()`, `@if`/`@for`, Signals in `application/stores`. Components live in `presentation/common` (primitives), `features` (views) or `layout` (shell); keep each `.component.html` under 220 lines by extracting sub-components.
 
 A new architectural decision is a new ADR (`NNNN-slug.md` with the six headings listed in `docs/adr/README.md`, added to its index table) plus its gate in `adrcheck`.

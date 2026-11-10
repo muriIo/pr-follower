@@ -188,20 +188,22 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, sseHub)
+	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
-		UserRepo:      userRepo,
-		RepoRepo:      repoRepo,
-		PRRepo:        prRepo,
-		TriageUC:      triageUC,
-		ActionUC:      actionUC,
-		WebhookUC:     webhookUC,
-		SSEHub:        sseHub,
-		OpRegistry:    opReg,
-		WebhookSecret: "test-secret",
-		AuthUC:        authUC,
-		ImportUC:      importUC,
-		InstallURL:    "https://github.com/apps/pr-follower/installations/new",
+		UserRepo:       userRepo,
+		RepoRepo:       repoRepo,
+		PRRepo:         prRepo,
+		TriageUC:       triageUC,
+		ActionUC:       actionUC,
+		WebhookUC:      webhookUC,
+		SSEHub:         sseHub,
+		OpRegistry:     opReg,
+		WebhookSecret:  "test-secret",
+		AuthUC:         authUC,
+		ImportUC:       importUC,
+		InstallURL:     "https://github.com/apps/pr-follower/installations/new",
+		InstallationUC: installationUC,
 	})
 
 	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC}
@@ -558,5 +560,71 @@ func TestRepositoryImport_NotConfigured(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 when GitHub import is not configured, got %d", rec.Code)
+	}
+}
+
+// postWebhook sends a GitHub webhook signed with the test secret.
+func (ts testServer) postWebhook(t *testing.T, event, payload string) *httptest.ResponseRecorder {
+	t.Helper()
+	mac := hmac.New(sha256.New, []byte("test-secret"))
+	mac.Write([]byte(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/github", bytes.NewBufferString(payload))
+	req.Header.Set("X-GitHub-Event", event)
+	req.Header.Set("X-Hub-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+	rec := httptest.NewRecorder()
+	ts.router.ServeHTTP(rec, req)
+	return rec
+}
+
+func seatAccess(t *testing.T, ts testServer, session *http.Cookie, fullName string) string {
+	t.Helper()
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	var body struct {
+		Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode workspace: %v", err)
+	}
+	for _, seat := range body.Snapshot.Seats {
+		if seat.Repository.FullName == fullName {
+			return string(seat.Repository.Access)
+		}
+	}
+	t.Fatalf("seat %s not found in workspace", fullName)
+	return ""
+}
+
+func TestInstallationWebhooks_FlagAndRestoreRepositoryAccess(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := seatAccess(t, ts, session, "acme/web"); got != "active" {
+		t.Fatalf("imported repository starts active, got %q", got)
+	}
+
+	if rec := ts.postWebhook(t, "installation", `{"action":"deleted","installation":{"id":20,"account":{"login":"acme"}}}`); rec.Code != http.StatusAccepted {
+		t.Fatalf("installation webhook: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := seatAccess(t, ts, session, "acme/web"); got != "removed" {
+		t.Fatalf("after uninstall expected removed, got %q", got)
+	}
+
+	payload := `{"action":"added","installation":{"id":21},"repositories_added":[{"id":900,"full_name":"acme/web"}],"repositories_removed":[]}`
+	if rec := ts.postWebhook(t, "installation_repositories", payload); rec.Code != http.StatusAccepted {
+		t.Fatalf("installation_repositories webhook: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := seatAccess(t, ts, session, "acme/web"); got != "active" {
+		t.Fatalf("after re-adding expected active, got %q", got)
+	}
+
+	if rec := ts.postWebhook(t, "installation", `{"action":`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed installation payload: expected 400, got %d", rec.Code)
+	}
+	if rec := ts.postWebhook(t, "installation_repositories", `[`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed installation_repositories payload: expected 400, got %d", rec.Code)
 	}
 }

@@ -125,3 +125,55 @@ func TestGateway_AllEndpointsWithBackoffAndCancellation(t *testing.T) {
 		t.Fatalf("expected ErrOperationCanceled, got %v", err)
 	}
 }
+
+func TestGateway_NonIdempotentWritesAreNotRepeatedOnAmbiguousFailures(t *testing.T) {
+	t.Parallel()
+	var reviews, comments, merges atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/pulls/1/reviews"):
+			reviews.Add(1)
+			w.WriteHeader(http.StatusBadGateway) // the review may or may not exist now
+		case strings.HasSuffix(r.URL.Path, "/issues/1/comments"):
+			comments.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case strings.HasSuffix(r.URL.Path, "/pulls/2/reviews"):
+			if reviews.Add(1) == 2 { // after the /pulls/1 attempt
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusTooManyRequests) // explicitly not processed
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/merge"):
+			if merges.Add(1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK) // PUT merge is idempotent: retried
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	gw := github.NewGateway(github.GatewayConfig{
+		BaseURL:    srv.URL,
+		HTTPClient: srv.Client(),
+		Backoff:    resilience.BackoffConfig{MaxAttempts: 3, SleepFunc: func(context.Context, time.Duration) error { return nil }},
+	})
+	repo := entity.Repository{ID: 1, Owner: "acme", Name: "web"}
+	ctx := context.Background()
+
+	if err := gw.ApprovePullRequest(ctx, repo, 1, "LGTM"); err == nil || reviews.Load() != 1 {
+		t.Fatalf("approve on 502: err=%v attempts=%d, want an error after exactly 1 attempt", err, reviews.Load())
+	}
+	if err := gw.CreatePRComment(ctx, repo, 1, "@dependabot rebase"); err == nil || comments.Load() != 1 {
+		t.Fatalf("comment on 502: err=%v attempts=%d, want an error after exactly 1 attempt", err, comments.Load())
+	}
+	if err := gw.ApprovePullRequest(ctx, repo, 2, "LGTM"); err != nil || reviews.Load() != 3 {
+		t.Fatalf("approve after Retry-After: err=%v attempts=%d, want success on the retry", err, reviews.Load())
+	}
+	if err := gw.MergePullRequest(ctx, repo, 3, "squash"); err != nil || merges.Load() != 2 {
+		t.Fatalf("merge on 502: err=%v attempts=%d, want success on the retry", err, merges.Load())
+	}
+}

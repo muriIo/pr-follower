@@ -15,4 +15,6 @@ import { StatusDotComponent } from '../../../common/status-dot/status-dot.compon
 export class SeatCardComponent {
   readonly seat = input.required<SeatCardViewModel>();
   readonly openRadar = output<void>();
+  /** The user wants to restore the GitHub App's access to this repository. */
+  readonly fixAccess = output<void>();
 }

@@ -21,6 +21,7 @@ type CreateSessionParams struct {
 	ExpiresAt int64  `json:"expires_at"`
 }
 
+// idempotent: token_hash is the SHA-256 of a random 256-bit token, so a retry cannot collide.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
 	_, err := q.db.ExecContext(ctx, createSession, arg.TokenHash, arg.UserID, arg.ExpiresAt)
 	return err
@@ -164,7 +165,7 @@ func (q *Queries) GetPullRequestByRepoAndNumber(ctx context.Context, arg GetPull
 }
 
 const getRepositoryByGitHubRepoID = `-- name: GetRepositoryByGitHubRepoID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
 FROM repositories
 WHERE github_repo_id = $1
 `
@@ -183,12 +184,13 @@ func (q *Queries) GetRepositoryByGitHubRepoID(ctx context.Context, githubRepoID 
 		&i.CodeownersJson,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Access,
 	)
 	return i, err
 }
 
 const getRepositoryByID = `-- name: GetRepositoryByID :one
-SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
 FROM repositories
 WHERE id = $1
 `
@@ -207,6 +209,7 @@ func (q *Queries) GetRepositoryByID(ctx context.Context, id int64) (Repository, 
 		&i.CodeownersJson,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Access,
 	)
 	return i, err
 }
@@ -312,7 +315,7 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 }
 
 const listFollowedRepositoriesByUser = `-- name: ListFollowedRepositoriesByUser :many
-SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at
+SELECT r.id, r.github_repo_id, r.installation_id, r.owner, r.name, r.full_name, r.default_branch, r.codeowners_json, r.created_at, r.updated_at, r.access
 FROM repositories r
 JOIN user_repo_follows urf ON urf.repository_id = r.id
 WHERE urf.user_id = $1
@@ -339,6 +342,49 @@ func (q *Queries) ListFollowedRepositoriesByUser(ctx context.Context, userID int
 			&i.CodeownersJson,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Access,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepositoriesByInstallation = `-- name: ListRepositoriesByInstallation :many
+SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
+FROM repositories
+WHERE installation_id = $1
+ORDER BY full_name ASC
+`
+
+func (q *Queries) ListRepositoriesByInstallation(ctx context.Context, installationID int64) ([]Repository, error) {
+	rows, err := q.db.QueryContext(ctx, listRepositoriesByInstallation, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Repository{}
+	for rows.Next() {
+		var i Repository
+		if err := rows.Scan(
+			&i.ID,
+			&i.GithubRepoID,
+			&i.InstallationID,
+			&i.Owner,
+			&i.Name,
+			&i.FullName,
+			&i.DefaultBranch,
+			&i.CodeownersJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Access,
 		); err != nil {
 			return nil, err
 		}
@@ -365,6 +411,23 @@ type UnfollowRepositoryParams struct {
 
 func (q *Queries) UnfollowRepository(ctx context.Context, arg UnfollowRepositoryParams) error {
 	_, err := q.db.ExecContext(ctx, unfollowRepository, arg.UserID, arg.RepositoryID)
+	return err
+}
+
+const updateRepositoryAccess = `-- name: UpdateRepositoryAccess :exec
+UPDATE repositories
+SET installation_id = $2, access = $3, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+`
+
+type UpdateRepositoryAccessParams struct {
+	ID             int64  `json:"id"`
+	InstallationID int64  `json:"installation_id"`
+	Access         string `json:"access"`
+}
+
+func (q *Queries) UpdateRepositoryAccess(ctx context.Context, arg UpdateRepositoryAccessParams) error {
+	_, err := q.db.ExecContext(ctx, updateRepositoryAccess, arg.ID, arg.InstallationID, arg.Access)
 	return err
 }
 
@@ -538,17 +601,18 @@ func (q *Queries) UpsertPullRequest(ctx context.Context, arg UpsertPullRequestPa
 }
 
 const upsertRepository = `-- name: UpsertRepository :one
-INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+INSERT INTO repositories (github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, access, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 ON CONFLICT (github_repo_id) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
+    access = EXCLUDED.access,
     owner = EXCLUDED.owner,
     name = EXCLUDED.name,
     full_name = EXCLUDED.full_name,
     default_branch = EXCLUDED.default_branch,
     codeowners_json = EXCLUDED.codeowners_json,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at
+RETURNING id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access
 `
 
 type UpsertRepositoryParams struct {
@@ -559,6 +623,7 @@ type UpsertRepositoryParams struct {
 	FullName       string `json:"full_name"`
 	DefaultBranch  string `json:"default_branch"`
 	CodeownersJson string `json:"codeowners_json"`
+	Access         string `json:"access"`
 }
 
 func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryParams) (Repository, error) {
@@ -570,6 +635,7 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 		arg.FullName,
 		arg.DefaultBranch,
 		arg.CodeownersJson,
+		arg.Access,
 	)
 	var i Repository
 	err := row.Scan(
@@ -583,6 +649,7 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 		&i.CodeownersJson,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Access,
 	)
 	return i, err
 }

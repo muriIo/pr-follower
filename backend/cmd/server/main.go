@@ -80,6 +80,7 @@ func main() {
 		sseHub,
 	)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, sseHub)
+	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
 	// login endpoint redirects with auth_error=not_configured and every API route is 401.
@@ -107,20 +108,21 @@ func main() {
 	}
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
-		UserRepo:      userRepo,
-		RepoRepo:      repoRepo,
-		PRRepo:        prRepo,
-		TriageUC:      triageUC,
-		ActionUC:      actionUC,
-		AnalyzeUC:     analyzeUC,
-		WebhookUC:     webhookUC,
-		SSEHub:        sseHub,
-		OpRegistry:    opReg,
-		WebhookSecret: cfg.GitHubWebhookSecret,
-		AuthUC:        authUC,
-		SecureCookies: cfg.SecureCookies(),
-		ImportUC:      importUC,
-		InstallURL:    cfg.GitHubAppInstallURL(),
+		UserRepo:       userRepo,
+		RepoRepo:       repoRepo,
+		PRRepo:         prRepo,
+		TriageUC:       triageUC,
+		ActionUC:       actionUC,
+		AnalyzeUC:      analyzeUC,
+		WebhookUC:      webhookUC,
+		SSEHub:         sseHub,
+		OpRegistry:     opReg,
+		WebhookSecret:  cfg.GitHubWebhookSecret,
+		AuthUC:         authUC,
+		SecureCookies:  cfg.SecureCookies(),
+		ImportUC:       importUC,
+		InstallURL:     cfg.GitHubAppInstallURL(),
+		InstallationUC: installationUC,
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)

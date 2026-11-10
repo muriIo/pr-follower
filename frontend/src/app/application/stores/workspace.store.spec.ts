@@ -6,6 +6,7 @@ import {
   PULL_REQUEST_GATEWAY,
   PullRequestGateway,
 } from '../../domain/gateways/workspace.gateways';
+import { TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
 import { WorkspaceStore } from './workspace.store';
 
@@ -185,5 +186,54 @@ describe('WorkspaceStore live session lifecycle (ADR-0010)', () => {
 
     store.startLiveSession();
     expect(connect).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('WorkspaceStore repository access (ADR-0010)', () => {
+  it('flags seats the GitHub App no longer reaches and reloads when access changes live', async () => {
+    const { prGateway } = createFakeGateways();
+    let emit: ((evt: Omit<TimelineEventItem, 'key' | 't'>) => void) | null = null;
+    const fetchWorkspace = vi.fn(async () => ({
+      repos: [
+        { name: 'acme/web', branch: 'main', access: 'removed' as const },
+        { name: 'acme/api', branch: 'main', access: 'suspended' as const },
+        { name: 'acme/ok', branch: 'main', access: 'active' as const },
+      ],
+      prs: [],
+      events: [],
+    }));
+
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: { ...prGateway, fetchWorkspace } },
+        {
+          provide: LIVE_EVENT_GATEWAY,
+          useValue: {
+            connect: (onEvent: (evt: Omit<TimelineEventItem, 'key' | 't'>) => void) => {
+              emit = onEvent;
+              return () => undefined;
+            },
+          },
+        },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.startLiveSession();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const byName = Object.fromEntries(store.allSeats().map((s) => [s.name, s]));
+    expect(byName['acme/web'].accessKey).toBe('seats.access.removed');
+    expect(byName['acme/web'].cls).toContain('pf-seat-no-access');
+    expect(byName['acme/api'].accessKey).toBe('seats.access.suspended');
+    expect(byName['acme/ok'].accessKey).toBeNull();
+
+    expect(fetchWorkspace).toHaveBeenCalledTimes(1);
+    emit!({ kind: 'fail', text: 'Lost access to acme/web', repo: 'acme/web', refreshWorkspace: true });
+    expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+    emit!({ kind: 'ok', text: 'CI passou', repo: 'acme/ok' });
+    expect(fetchWorkspace).toHaveBeenCalledTimes(2);
   });
 });

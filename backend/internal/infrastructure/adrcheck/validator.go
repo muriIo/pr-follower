@@ -42,6 +42,7 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0007CooperativeCancellation(repoRoot, report)
 	validateADR0008And0009FrontendIfPresent(repoRoot, report)
 	validateADR0010GitHubOnlyIdentity(repoRoot, report)
+	validateADR0011IdempotentIntegrations(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",
@@ -525,6 +526,155 @@ func templateTranslationKeys(template string) []string {
 		}
 	}
 	return keys
+}
+
+var (
+	createStatementPattern = regexp.MustCompile(`(?i)CREATE\s+(TABLE|(?:UNIQUE\s+)?INDEX)\s+(IF\s+NOT\s+EXISTS)?`)
+	queryNamePattern       = regexp.MustCompile(`--\s*name:\s*(\w+)`)
+)
+
+// validateADR0011IdempotentIntegrations checks the mechanical parts of ADR-0011.
+func validateADR0011IdempotentIntegrations(repoRoot string, report *ValidationReport) {
+	internal := filepath.Join(repoRoot, "backend", "internal")
+
+	// 1. Inserts are upserts, or explain why a duplicate cannot happen.
+	if raw, err := os.ReadFile(filepath.Join(internal, "adapter", "persistence", "queries", "queries.sql")); err == nil {
+		blocks := strings.Split(string(raw), "-- name:")
+		for _, block := range blocks[1:] {
+			block = "-- name:" + block
+			upper := strings.ToUpper(block)
+			if !strings.Contains(upper, "INSERT INTO") || strings.Contains(upper, "ON CONFLICT") || strings.Contains(block, "-- idempotent:") {
+				continue
+			}
+			name := "?"
+			if m := queryNamePattern.FindStringSubmatch(block); m != nil {
+				name = m[1]
+			}
+			report.Violations = append(report.Violations,
+				fmt.Sprintf("ADR-0011: query %s inserts without ON CONFLICT or an \"-- idempotent:\" note", name))
+		}
+	}
+
+	// 2. Schema statements are re-runnable.
+	migDir := filepath.Join(internal, "infrastructure", "database", "migrations")
+	if entries, err := os.ReadDir(migDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+				continue
+			}
+			raw, readErr := os.ReadFile(filepath.Join(migDir, entry.Name()))
+			if readErr != nil {
+				continue
+			}
+			for _, m := range createStatementPattern.FindAllStringSubmatch(string(raw), -1) {
+				if strings.TrimSpace(m[2]) == "" {
+					kind := "CREATE TABLE"
+					if !strings.EqualFold(m[1], "TABLE") {
+						kind = "CREATE INDEX"
+					}
+					report.Violations = append(report.Violations,
+						fmt.Sprintf("ADR-0011: %s: %s without IF NOT EXISTS", entry.Name(), kind))
+				}
+			}
+		}
+	}
+
+	// 3. Non-idempotent HTTP calls are not retried blindly.
+	fset := token.NewFileSet()
+	_ = filepath.WalkDir(filepath.Join(internal, "adapter"), func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return nil
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || !isSelector(unwrapIndex(call.Fun), "resilience", "Retry") {
+				return true
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.FuncLit)
+				if !ok {
+					continue
+				}
+				ast.Inspect(lit, func(inner ast.Node) bool {
+					for _, method := range []string{"MethodPost", "MethodPatch"} {
+						if isSelector(inner, "http", method) {
+							report.Violations = append(report.Violations,
+								fmt.Sprintf("ADR-0011: %s retries an http.%s request with resilience.Retry; use resilience.RetryNonIdempotent", relPath(repoRoot, path), method))
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+		return nil
+	})
+
+	// 4. Every webhook ingest method has a redelivery test.
+	webhookDir := filepath.Join(internal, "usecase", "webhook")
+	entries, err := os.ReadDir(webhookDir)
+	if err != nil {
+		return
+	}
+	var ingestMethods []string
+	covered := map[string]bool{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, filepath.Join(webhookDir, entry.Name()), nil, 0)
+		if parseErr != nil {
+			continue
+		}
+		isTest := strings.HasSuffix(entry.Name(), "_test.go")
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if !isTest && fn.Recv != nil && fn.Name.IsExported() && strings.HasPrefix(fn.Name.Name, "Ingest") {
+				ingestMethods = append(ingestMethods, fn.Name.Name)
+			}
+			if isTest && strings.HasPrefix(fn.Name.Name, "Test") && strings.Contains(fn.Name.Name, "Redeliver") && fn.Body != nil {
+				ast.Inspect(fn.Body, func(n ast.Node) bool {
+					if sel, ok := n.(*ast.SelectorExpr); ok {
+						covered[sel.Sel.Name] = true
+					}
+					return true
+				})
+			}
+		}
+	}
+	sort.Strings(ingestMethods)
+	for _, method := range ingestMethods {
+		if !covered[method] {
+			report.Violations = append(report.Violations,
+				fmt.Sprintf("ADR-0011: webhook ingest method %s has no test named *Redeliver* proving a repeated delivery is a no-op", method))
+		}
+	}
+}
+
+func unwrapIndex(expr ast.Expr) ast.Expr {
+	switch e := expr.(type) {
+	case *ast.IndexExpr:
+		return e.X
+	case *ast.IndexListExpr:
+		return e.X
+	}
+	return expr
+}
+
+func isSelector(node ast.Node, pkg, name string) bool {
+	sel, ok := node.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != name {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && ident.Name == pkg
 }
 
 // forbiddenIdentityHeader is assembled so this package does not trip its own scan.

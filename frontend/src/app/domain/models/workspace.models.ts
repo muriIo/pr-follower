@@ -77,9 +77,13 @@ export interface PullRequestItem {
   readonly noteWarn?: boolean;
 }
 
+/** Whether the GitHub App still reaches a followed repository (ADR-0010). */
+export type RepositoryAccessState = 'active' | 'removed' | 'suspended';
+
 export interface RepoInfo {
   readonly name: string;
   readonly branch: string;
+  readonly access?: RepositoryAccessState;
 }
 
 export interface TimelineEventItem {
@@ -90,6 +94,8 @@ export interface TimelineEventItem {
   readonly repo: string;
   readonly pr?: number;
   readonly fresh?: boolean;
+  /** The event changed what the workspace shows (e.g. repository access), so reload it. */
+  readonly refreshWorkspace?: boolean;
 }
 
 export interface WorkspaceDataset {

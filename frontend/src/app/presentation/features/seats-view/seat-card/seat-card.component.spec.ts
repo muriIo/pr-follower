@@ -21,6 +21,7 @@ describe('SeatCardComponent', () => {
       depCls: 'pf-badge-baixo',
       openLabel: '4 PRs Abertos',
       isEmpty: false,
+      accessKey: null,
       stream: [
         {
           id: 142,
@@ -74,5 +75,15 @@ describe('SeatCardComponent', () => {
     const depBtn = el.querySelector('.pf-kpis button.pf-badge') as HTMLButtonElement;
     depBtn.click();
     expect(radarSpy).toHaveBeenCalledTimes(1);
+    expect(el.querySelector('.pf-seat-access')).toBeNull();
+
+    // A repository the GitHub App no longer reaches is flagged with a way to fix it.
+    fixture.componentRef.setInput('seat', { ...seatVm, accessKey: 'seats.access.removed' });
+    const fixSpy = vi.fn();
+    fixture.componentInstance.fixAccess.subscribe(fixSpy);
+    fixture.detectChanges();
+    expect(el.querySelector('.pf-seat-access')).toBeTruthy();
+    (el.querySelector('.pf-seat-access-fix') as HTMLButtonElement).click();
+    expect(fixSpy).toHaveBeenCalledTimes(1);
   });
 });

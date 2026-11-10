@@ -206,14 +206,51 @@ func (r *RepositoryRepository) Upsert(ctx context.Context, repo *entity.Reposito
 		FullName:       repo.FullName,
 		DefaultBranch:  repo.DefaultBranch,
 		CodeownersJson: string(rulesBytes),
+		Access:         string(accessOrActive(repo.Access)),
 	})
 	if err != nil {
 		return err
 	}
 	repo.ID = uint64(row.ID)
+	repo.Access = entity.RepositoryAccess(row.Access)
 	repo.CreatedAt = row.CreatedAt
 	repo.UpdatedAt = row.UpdatedAt
 	return nil
+}
+
+// ListByInstallation returns every repository attached to a GitHub App installation.
+func (r *RepositoryRepository) ListByInstallation(ctx context.Context, installationID int64) ([]entity.Repository, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	rows, err := r.q.ListRepositoriesByInstallation(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]entity.Repository, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, *toDomainRepo(row))
+	}
+	return out, nil
+}
+
+// SaveAccess persists a repository's access state and installation (ADR-0010).
+func (r *RepositoryRepository) SaveAccess(ctx context.Context, repo *entity.Repository) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.UpdateRepositoryAccess(ctx, sqlcgen.UpdateRepositoryAccessParams{
+		ID:             int64(repo.ID),
+		InstallationID: repo.InstallationID,
+		Access:         string(accessOrActive(repo.Access)),
+	})
+}
+
+func accessOrActive(access entity.RepositoryAccess) entity.RepositoryAccess {
+	if access == "" {
+		return entity.RepositoryAccessActive
+	}
+	return access
 }
 
 func (r *RepositoryRepository) GetByID(ctx context.Context, id uint64) (*entity.Repository, error) {
@@ -289,6 +326,7 @@ func toDomainRepo(m sqlcgen.Repository) *entity.Repository {
 		FullName:              m.FullName,
 		DefaultBranch:         m.DefaultBranch,
 		CachedCodeownersRules: rules,
+		Access:                entity.RepositoryAccess(m.Access),
 		CreatedAt:             m.CreatedAt,
 		UpdatedAt:             m.UpdatedAt,
 	}

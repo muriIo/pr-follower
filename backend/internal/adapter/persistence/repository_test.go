@@ -316,3 +316,62 @@ func TestSessionRepository_Lifecycle(t *testing.T) {
 		t.Fatal("expected canceled context to abort Delete")
 	}
 }
+
+func TestRepositoryRepository_AccessTracking(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+
+	web := &entity.Repository{GitHubRepoID: 900, InstallationID: 20, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	api := &entity.Repository{GitHubRepoID: 901, InstallationID: 20, Owner: "acme", Name: "api", FullName: "acme/api", DefaultBranch: "main"}
+	other := &entity.Repository{GitHubRepoID: 100, InstallationID: 10, Owner: "octo", Name: "x", FullName: "octo/x", DefaultBranch: "main"}
+	for _, r := range []*entity.Repository{web, api, other} {
+		if err := repos.Upsert(ctx, r); err != nil {
+			t.Fatalf("Upsert(%s) error: %v", r.FullName, err)
+		}
+	}
+
+	got, _ := repos.GetByID(ctx, web.ID)
+	if got.Access != entity.RepositoryAccessActive {
+		t.Fatalf("new repositories start active, got %q", got.Access)
+	}
+
+	byInstallation, err := repos.ListByInstallation(ctx, 20)
+	if err != nil || len(byInstallation) != 2 {
+		t.Fatalf("ListByInstallation(20) = %+v, %v", byInstallation, err)
+	}
+
+	web.ApplyAccess(entity.RepositoryAccessRemoved, 0)
+	if err := repos.SaveAccess(ctx, web); err != nil {
+		t.Fatalf("SaveAccess() error: %v", err)
+	}
+	got, _ = repos.GetByGitHubRepoID(ctx, 900)
+	if got.Access != entity.RepositoryAccessRemoved || got.InstallationID != 20 {
+		t.Fatalf("expected removed under installation 20, got %+v", got)
+	}
+
+	web.ApplyAccess(entity.RepositoryAccessActive, 30)
+	_ = repos.SaveAccess(ctx, web)
+	if moved, _ := repos.ListByInstallation(ctx, 30); len(moved) != 1 || moved[0].Access != entity.RepositoryAccessActive {
+		t.Fatalf("expected acme/web active under installation 30, got %+v", moved)
+	}
+
+	// Importing again (Upsert) restores access.
+	api.ApplyAccess(entity.RepositoryAccessSuspended, 0)
+	_ = repos.SaveAccess(ctx, api)
+	api.Access = ""
+	_ = repos.Upsert(ctx, api)
+	if got, _ := repos.GetByID(ctx, api.ID); got.Access != entity.RepositoryAccessActive {
+		t.Fatalf("re-import must restore access, got %q", got.Access)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := repos.ListByInstallation(canceled, 20); err == nil {
+		t.Error("ListByInstallation: expected cancellation error")
+	}
+	if err := repos.SaveAccess(canceled, web); err == nil {
+		t.Error("SaveAccess: expected cancellation error")
+	}
+}

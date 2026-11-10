@@ -7,6 +7,15 @@
     </span>
   </header>
 
+  @if (seat().accessKey; as accessKey) {
+    <div class="pf-seat-access" role="status">
+      <span>{{ accessKey | t }}</span>
+      <button type="button" class="pf-btn pf-btn-sm pf-seat-access-fix" (click)="fixAccess.emit()">
+        {{ 'seats.access.fix' | t }}
+      </button>
+    </div>
+  }
+
   <div class="pf-kpis">
     <app-risk-badge [badgeClass]="seat().turnCls" [label]="seat().turn + ' ' + ('seats.kpi.yourTurn' | t)" />
     <button type="button" [class]="'pf-badge ' + seat().depCls" (click)="openRadar.emit()">

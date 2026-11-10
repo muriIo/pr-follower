@@ -6,6 +6,7 @@ import {
   OwnersState,
   PullRequestItem,
   RepoInfo,
+  RepositoryAccessState,
   RiskVerdictTier,
   TimelineEventItem,
   WorkspaceDataset,
@@ -18,6 +19,7 @@ export interface ApiRepositoryDto {
   readonly full_name: string;
   readonly default_branch: string;
   readonly cached_codeowners_rules?: readonly { pattern: string; owners: readonly string[] }[];
+  readonly access?: RepositoryAccessState;
 }
 
 export interface ApiPullRequestDto {
@@ -125,6 +127,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   const repos: RepoInfo[] = snapshot.seats.map((s) => ({
     name: s.repository.full_name,
     branch: s.repository.default_branch || 'main',
+    access: s.repository.access ?? 'active',
   }));
 
   const repoRulesMap = new Map<string, string>();
@@ -175,9 +178,9 @@ export function mapActivityEventToTimelineItem(
   ev: ApiActivityEventDto,
 ): Omit<TimelineEventItem, 'key' | 't'> {
   const kind: TimelineEventItem['kind'] =
-    ev.type === 'pr.approved' || ev.type === 'pr.merged' || ev.type === 'ci.passed'
+    ev.type === 'pr.approved' || ev.type === 'pr.merged' || ev.type === 'ci.passed' || ev.type === 'repository.access_restored'
       ? 'ok'
-      : ev.type === 'ci.failed'
+      : ev.type === 'ci.failed' || ev.type === 'repository.access_lost' || ev.type === 'repository.access_suspended'
         ? 'fail'
         : ev.type === 'pr.claimed' || ev.type === 'codeowners.turn'
           ? 'turn'
@@ -189,6 +192,7 @@ export function mapActivityEventToTimelineItem(
     repo: ev.repository_name,
     pr: ev.pr_number || ev.pull_request_id,
     fresh: true,
+    ...(ev.type.startsWith('repository.access_') ? { refreshWorkspace: true } : {}),
   };
 }
 
