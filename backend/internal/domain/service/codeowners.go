@@ -103,27 +103,69 @@ func EvaluateCodeownersForUser(
 	}
 }
 
+// matchCodeownerPattern applies GitHub's CODEOWNERS pattern rules, which follow gitignore:
+//   - a leading slash, or a slash in the middle, anchors the pattern at the repository root;
+//     otherwise it matches at any depth ("*.js", "apps/", "Makefile");
+//   - a trailing slash matches a directory and everything under it, never a file of that name;
+//   - a pattern that matches a directory owns everything under it, except when it ends in "/*",
+//     which owns only the files directly in that directory;
+//   - "**" matches any number of directories.
 func matchCodeownerPattern(pattern, filePath string) bool {
-	cleanPath := strings.TrimPrefix(filePath, "/")
-	if pattern == "*" {
-		return true
+	dirOnly := strings.HasSuffix(pattern, "/")
+	trimmed := strings.TrimSuffix(pattern, "/")
+	anchored := strings.Contains(trimmed, "/")
+	trimmed = strings.TrimPrefix(trimmed, "/")
+	if trimmed == "" {
+		return false
 	}
+	patternSegs := strings.Split(trimmed, "/")
+	pathSegs := strings.Split(strings.TrimPrefix(filePath, "/"), "/")
+	directFilesOnly := patternSegs[len(patternSegs)-1] == "*"
 
-	if strings.HasSuffix(pattern, "/") {
-		dirPrefix := strings.TrimPrefix(pattern, "/")
-		return strings.HasPrefix(cleanPath, dirPrefix) || strings.Contains("/"+cleanPath, "/"+dirPrefix)
+	lastStart := 0
+	if !anchored {
+		lastStart = len(pathSegs) - 1
 	}
+	for start := 0; start <= lastStart; start++ {
+		rest := pathSegs[start:]
+		for n := 1; n <= len(rest); n++ {
+			if !matchPathSegments(patternSegs, rest[:n]) {
+				continue
+			}
+			if n == len(rest) { // the pattern matched the file itself
+				if !dirOnly {
+					return true
+				}
+				continue
+			}
+			if !directFilesOnly { // the pattern matched a directory above the file
+				return true
+			}
+		}
+	}
+	return false
+}
 
-	if strings.HasPrefix(pattern, "*.") {
-		matched, _ := path.Match(pattern, path.Base(cleanPath))
-		return matched
+// matchPathSegments matches whole path segments; "**" stands for zero or more of them.
+func matchPathSegments(pattern, segs []string) bool {
+	if len(pattern) == 0 {
+		return len(segs) == 0
 	}
-
-	cleanPattern := strings.TrimPrefix(pattern, "/")
-	if matched, _ := path.Match(cleanPattern, cleanPath); matched {
-		return true
+	if pattern[0] == "**" {
+		for skip := 0; skip <= len(segs); skip++ {
+			if matchPathSegments(pattern[1:], segs[skip:]) {
+				return true
+			}
+		}
+		return false
 	}
-	return cleanPath == cleanPattern || strings.HasPrefix(cleanPath, cleanPattern+"/")
+	if len(segs) == 0 {
+		return false
+	}
+	if ok, _ := path.Match(pattern[0], segs[0]); !ok {
+		return false
+	}
+	return matchPathSegments(pattern[1:], segs[1:])
 }
 
 func normalizeHandle(handle string) string {
