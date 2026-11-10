@@ -10,6 +10,23 @@ import (
 	"database/sql"
 )
 
+const countUserRepositoryFollow = `-- name: CountUserRepositoryFollow :one
+SELECT COUNT(*) FROM user_repo_follows
+WHERE user_id = $1 AND repository_id = $2
+`
+
+type CountUserRepositoryFollowParams struct {
+	UserID       int64 `json:"user_id"`
+	RepositoryID int64 `json:"repository_id"`
+}
+
+func (q *Queries) CountUserRepositoryFollow(ctx context.Context, arg CountUserRepositoryFollowParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUserRepositoryFollow, arg.UserID, arg.RepositoryID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSession = `-- name: CreateSession :exec
 INSERT INTO sessions (token_hash, user_id, expires_at)
 VALUES ($1, $2, $3)

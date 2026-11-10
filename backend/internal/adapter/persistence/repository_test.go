@@ -375,3 +375,31 @@ func TestRepositoryRepository_AccessTracking(t *testing.T) {
 		t.Error("SaveAccess: expected cancellation error")
 	}
 }
+
+func TestRepositoryRepository_IsFollowing(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	users := persistence.NewUserRepository(db, testCipher(t))
+	repos := persistence.NewRepositoryRepository(db)
+
+	alice := &entity.User{GitHubID: 1, Login: "alice"}
+	bob := &entity.User{GitHubID: 2, Login: "bob"}
+	_ = users.Upsert(ctx, alice)
+	_ = users.Upsert(ctx, bob)
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	_ = repos.SetUserFollow(ctx, alice.ID, repo.ID, true)
+
+	if ok, err := repos.IsFollowing(ctx, alice.ID, repo.ID); err != nil || !ok {
+		t.Fatalf("alice follows acme/web: got %v, %v", ok, err)
+	}
+	if ok, err := repos.IsFollowing(ctx, bob.ID, repo.ID); err != nil || ok {
+		t.Fatalf("bob does not follow acme/web: got %v, %v", ok, err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := repos.IsFollowing(canceled, alice.ID, repo.ID); err == nil {
+		t.Fatal("expected cancellation error")
+	}
+}
