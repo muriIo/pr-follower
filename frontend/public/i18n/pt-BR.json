@@ -113,5 +113,11 @@
   "drawer.files.noDiff": "Sem diff disponível para este arquivo.",
   "drawer.files.loading": "Carregando arquivos do GitHub...",
   "drawer.files.error": "Não foi possível carregar os arquivos do GitHub.",
-  "drawer.files.owned": "Seu"
+  "drawer.files.owned": "Seu",
+  "timeline.scope.label": "Escopo da atividade",
+  "timeline.scope.all": "Toda a atividade",
+  "timeline.scope.mine": "Minha atividade",
+  "timeline.repo": "Repositório",
+  "timeline.repo.all": "Todos os repositórios",
+  "timeline.empty": "Nenhuma atividade para este filtro."
 }

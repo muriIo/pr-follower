@@ -180,6 +180,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
 
   const events: TimelineEventItem[] = (dto.timeline ?? []).map((ev, index) => ({
     ...mapActivityEventToTimelineItem(ev),
+    fresh: false, // loaded history; only live activity is highlighted
     key: index + 1,
     t: Date.parse(ev.occurred_at) || Date.now(),
   }));
@@ -201,6 +202,9 @@ export function mapActivityEventToTimelineItem(
 
   return {
     kind,
+    id: ev.id,
+    type: ev.type,
+    actor: ev.actor_login || undefined,
     text: ev.summary,
     repo: ev.repository_name,
     pr: ev.pr_number || ev.pull_request_id,

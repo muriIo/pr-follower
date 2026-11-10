@@ -22,6 +22,7 @@ import {
   isSafeBatchCandidate,
 } from '../../domain/models/workspace.models';
 import { ActionCancellationManager, ActionViewModel } from '../use-cases/action-cancellation.manager';
+import { ActivityIconName, ActivityTone, activityIconFor } from '../../domain/models/activity.models';
 import { LocaleStore } from './locale.store';
 
 /** i18n keys for the GitHub mergeable states that stop a merge; the others do not block. */
@@ -31,6 +32,19 @@ const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   blocked: 'drawer.blocked.protection',
   draft: 'drawer.blocked.draft',
 };
+
+export interface TimelineItemViewModel extends TimelineEventItem {
+  readonly time: string;
+  readonly icon: ActivityIconName;
+  readonly tone: ActivityTone;
+  readonly cls: string;
+  readonly noPr: boolean;
+}
+
+export interface TimelineGroupViewModel {
+  readonly label: string;
+  readonly items: TimelineItemViewModel[];
+}
 
 export type ChangedFilesState = 'loading' | 'ready' | 'error';
 
@@ -259,7 +273,10 @@ export class WorkspaceStore {
    * Loads the workspace and opens the live event stream for the signed-in user.
    * Nothing is fetched before sign-in, so signed-out visitors never hit the API (ADR-0006, ADR-0010).
    */
-  startLiveSession(): void {
+  startLiveSession(viewerLogin?: string): void {
+    if (viewerLogin !== undefined) {
+      this.viewerLogin.set(viewerLogin);
+    }
     if (this.disconnectLive) {
       return;
     }
@@ -267,8 +284,12 @@ export class WorkspaceStore {
     this.disconnectLive =
       this.sseGateway?.connect(
         (evt) => {
+          if (evt.id) {
+            const id = evt.id;
+            this.liveEventIds.update((ids) => new Set(ids).add(id));
+          }
           if (!this.pausedTimeline()) {
-            this.appendTimelineEvent(evt.kind, evt.text, evt.repo, evt.pr);
+            this.appendTimelineEvent(evt);
           }
           if (evt.refreshWorkspace) {
             this.scheduleWorkspaceRefresh();
@@ -576,31 +597,68 @@ export class WorkspaceStore {
     };
   });
 
+  /** "all": every followed repository's activity; "mine": only what the signed-in user did. */
+  readonly timelineScope = signal<'all' | 'mine'>('all');
+  /** Limit the timeline to one repository of the Seats, or null for all. */
+  readonly timelineRepo = signal<string | null>(null);
+  readonly timelineRepoOptions = computed(() => this.repos().map((r) => r.name).sort());
+  private readonly viewerLogin = signal('');
+  /** Ids of activity received live, still highlighted after the workspace reloads. */
+  private readonly liveEventIds = signal<ReadonlySet<string>>(new Set());
+
+  setTimelineScope(scope: 'all' | 'mine'): void {
+    this.timelineScope.set(scope);
+  }
+
+  setTimelineRepo(repo: string | null): void {
+    this.timelineRepo.set(repo || null);
+  }
+
   readonly timelineGroups = computed(() => {
     const merged = this.mergedMap();
-    const groups: {
-      label: string;
-      items: (TimelineEventItem & { time: string; dot: string; cls: string; noPr: boolean })[];
-    }[] = [];
-    const dots = { ok: 'pf-dot pf-dot-ok', fail: 'pf-dot pf-dot-fail', turn: 'pf-dot pf-dot-turn', info: 'pf-dot' };
+    const scope = this.timelineScope();
+    const repo = this.timelineRepo();
+    const viewer = this.viewerLogin().toLowerCase();
+    const liveIds = this.liveEventIds();
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfYesterday = startOfToday - 24 * 60 * 60_000;
 
-    for (const ev of this.events()) {
-      const mins = (Date.now() - ev.t) / 60_000;
-      const label = mins <= 5 ? 'Agora' : mins <= 60 ? 'Última hora' : 'Hoje cedo';
+    const visible = this.events()
+      .filter((ev) => !repo || ev.repo === repo)
+      .filter((ev) => scope === 'all' || (viewer !== '' && (ev.actor ?? '').toLowerCase() === viewer))
+      .slice()
+      .sort((a, b) => b.t - a.t);
+
+    const groups: TimelineGroupViewModel[] = [];
+    for (const ev of visible) {
+      const mins = (now.getTime() - ev.t) / 60_000;
+      const label =
+        mins <= 5
+          ? 'Agora'
+          : mins <= 60
+            ? 'Última hora'
+            : ev.t >= startOfToday
+              ? 'Hoje'
+              : ev.t >= startOfYesterday
+                ? 'Ontem'
+                : 'Mais antigas';
       let group = groups.find((g) => g.label === label);
       if (!group) {
         group = { label, items: [] };
         groups.push(group);
       }
       const d = new Date(ev.t);
-      const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      const noPr = Boolean(!ev.pr || merged[ev.pr]);
+      const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      const time = ev.t >= startOfYesterday ? hhmm : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${hhmm}`;
+      const { icon, tone } = activityIconFor(ev.type, ev.kind);
       group.items.push({
         ...ev,
         time,
-        dot: dots[ev.kind],
-        cls: ev.fresh ? 'is-new' : '',
-        noPr,
+        icon,
+        tone,
+        cls: ev.fresh || (ev.id !== undefined && liveIds.has(ev.id)) ? 'is-new' : '',
+        noPr: Boolean(!ev.pr || merged[ev.pr]),
       });
     }
     return groups;
@@ -1043,21 +1101,16 @@ export class WorkspaceStore {
 
   private markApproved(pr: PullRequestItem): void {
     this.approvedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent('ok', `Você aprovou #${pr.id}`, pr.repo, pr.id);
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: `Você aprovou #${pr.id}`, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private markMerged(pr: PullRequestItem): void {
     this.mergedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent('ok', `Você mesclou #${pr.id} via squash`, pr.repo, pr.id);
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: `Você mesclou #${pr.id} via squash`, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
-  private appendTimelineEvent(
-    kind: TimelineEventItem['kind'],
-    text: string,
-    repo: string,
-    pr?: number,
-  ): void {
-    this.events.update((curr) => [{ key: Date.now() + Math.random(), t: Date.now(), kind, text, repo, pr, fresh: true }, ...curr]);
+  private appendTimelineEvent(item: Omit<TimelineEventItem, 'key' | 't'>): void {
+    this.events.update((curr) => [{ ...item, key: Date.now() + Math.random(), t: Date.now(), fresh: true }, ...curr]);
     if (this.view() !== 'timeline') {
       this.unreadEvents.update((n) => n + 1);
     }

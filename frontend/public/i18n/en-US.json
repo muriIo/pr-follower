@@ -113,5 +113,11 @@
   "drawer.files.noDiff": "No diff available for this file.",
   "drawer.files.loading": "Loading files from GitHub...",
   "drawer.files.error": "Could not load the files from GitHub.",
-  "drawer.files.owned": "Yours"
+  "drawer.files.owned": "Yours",
+  "timeline.scope.label": "Activity scope",
+  "timeline.scope.all": "All activity",
+  "timeline.scope.mine": "My activity",
+  "timeline.repo": "Repository",
+  "timeline.repo.all": "All repositories",
+  "timeline.empty": "No activity for this filter."
 }
