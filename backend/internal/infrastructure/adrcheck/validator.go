@@ -39,6 +39,7 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0005ZeroClone(repoRoot, report)
 	validateADR0007CooperativeCancellation(repoRoot, report)
 	validateADR0008And0009FrontendIfPresent(repoRoot, report)
+	validateADR0010GitHubOnlyIdentity(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",
@@ -459,6 +460,57 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 		}
 		return nil
 	})
+}
+
+// forbiddenIdentityHeader is assembled so this package does not trip its own scan.
+var forbiddenIdentityHeader = "X-User-" + "ID"
+
+func validateADR0010GitHubOnlyIdentity(repoRoot string, report *ValidationReport) {
+	scanRoots := []string{
+		filepath.Join(repoRoot, "backend", "internal"),
+		filepath.Join(repoRoot, "frontend", "src", "app"),
+	}
+	for _, scanRoot := range scanRoots {
+		_ = filepath.WalkDir(scanRoot, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if d.Name() == "adrcheck" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := d.Name()
+			isGo := strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+			isTS := strings.HasSuffix(name, ".ts") && !strings.HasSuffix(name, ".spec.ts")
+			if !isGo && !isTS {
+				return nil
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr == nil && strings.Contains(string(raw), forbiddenIdentityHeader) {
+				report.Violations = append(report.Violations,
+					fmt.Sprintf("ADR-0010: %s references the %s header; identity must come from the session", relPath(repoRoot, path), forbiddenIdentityHeader))
+			}
+			return nil
+		})
+	}
+
+	migDir := filepath.Join(repoRoot, "backend", "internal", "infrastructure", "database", "migrations")
+	entries, err := os.ReadDir(migDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join(migDir, entry.Name()))
+		if readErr == nil && strings.Contains(strings.ToLower(string(raw)), "password") {
+			report.Violations = append(report.Violations,
+				fmt.Sprintf("ADR-0010: migration %s defines a password column; GitHub is the only identity provider", entry.Name()))
+		}
+	}
 }
 
 func relPath(root, target string) string {

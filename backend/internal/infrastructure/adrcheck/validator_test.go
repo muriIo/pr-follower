@@ -205,6 +205,41 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 			}
 		}
 	})
+
+	t.Run("ADR-0010: detects identity taken from a client header", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+
+		handlerDir := filepath.Join(root, "backend", "internal", "adapter", "http")
+		if err := os.MkdirAll(handlerDir, 0o755); err != nil {
+			t.Fatalf("mkdir handler: %v", err)
+		}
+		content := "package httpadapter\nconst userHeader = \"X-User-" + "ID\"\n"
+		if err := os.WriteFile(filepath.Join(handlerDir, "handler.go"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write handler.go: %v", err)
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil || !containsViolation(report.Violations, "ADR-0010") {
+			t.Fatalf("expected ADR-0010 header violation, got err=%v violations=%v", err, report.Violations)
+		}
+	})
+
+	t.Run("ADR-0010: detects a password column in a migration", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+
+		migDir := filepath.Join(root, "backend", "internal", "infrastructure", "database", "migrations")
+		migration := "-- +goose Up\nALTER TABLE users ADD COLUMN password_hash TEXT;\n"
+		if err := os.WriteFile(filepath.Join(migDir, "00002_password.sql"), []byte(migration), 0o644); err != nil {
+			t.Fatalf("write migration: %v", err)
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil || !containsViolation(report.Violations, "ADR-0010") {
+			t.Fatalf("expected ADR-0010 password violation, got err=%v violations=%v", err, report.Violations)
+		}
+	})
 }
 
 func containsViolation(violations []string, prefix string) bool {

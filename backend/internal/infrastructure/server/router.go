@@ -19,24 +19,31 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 	r.Get("/healthz", h.Healthz)
 
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Post("/auth/login", h.AuthLogin)
-		api.Get("/auth/me", h.AuthMe)
+		// Public: GitHub sign-in flow, logout, and HMAC-verified GitHub webhooks (ADR-0010).
+		api.Get("/auth/github/login", h.AuthGitHubLogin)
+		api.Get("/auth/github/callback", h.AuthGitHubCallback)
 		api.Post("/auth/logout", h.AuthLogout)
-
-		api.Get("/workspace", h.GetWorkspace)
-		api.Get("/events/stream", h.ServeSSE)
-		api.Post("/demo/seed", h.SeedDemoData)
-		api.Post("/repositories/follow", h.FollowRepository)
 		api.Post("/webhooks/github", h.GitHubWebhook)
 
-		api.Post("/prs/batch-merge", h.BatchMergePRs)
-		api.Post("/prs/{id}/approve", h.ApprovePR)
-		api.Post("/prs/{id}/merge", h.MergePR)
-		api.Post("/prs/{id}/snooze", h.SnoozePR)
-		api.Post("/prs/{id}/claim", h.ClaimPR)
-		api.Post("/prs/{id}/dependabot-command", h.DependabotCommand)
+		// Everything else requires a session; the user comes from the session only.
+		api.Group(func(private chi.Router) {
+			private.Use(h.RequireSession)
 
-		api.Delete("/operations/{id}", h.CancelOperation)
+			private.Get("/auth/me", h.AuthMe)
+			private.Get("/workspace", h.GetWorkspace)
+			private.Get("/events/stream", h.ServeSSE)
+			private.Post("/demo/seed", h.SeedDemoData)
+			private.Post("/repositories/follow", h.FollowRepository)
+
+			private.Post("/prs/batch-merge", h.BatchMergePRs)
+			private.Post("/prs/{id}/approve", h.ApprovePR)
+			private.Post("/prs/{id}/merge", h.MergePR)
+			private.Post("/prs/{id}/snooze", h.SnoozePR)
+			private.Post("/prs/{id}/claim", h.ClaimPR)
+			private.Post("/prs/{id}/dependabot-command", h.DependabotCommand)
+
+			private.Delete("/operations/{id}", h.CancelOperation)
+		})
 	})
 
 	return r
@@ -50,7 +57,7 @@ func corsMiddleware(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Operation-ID, X-User-ID")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Operation-ID")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return

@@ -1,22 +1,25 @@
 -- name: UpsertUser :one
-INSERT INTO users (github_id, login, name, avatar_url, teams_json, encrypted_token, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+INSERT INTO users (github_id, login, name, avatar_url, teams_json, encrypted_token, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
 ON CONFLICT (github_id) DO UPDATE SET
     login = EXCLUDED.login,
     name = EXCLUDED.name,
     avatar_url = EXCLUDED.avatar_url,
     teams_json = EXCLUDED.teams_json,
     encrypted_token = EXCLUDED.encrypted_token,
+    encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+    access_token_expires_at = EXCLUDED.access_token_expires_at,
+    refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at;
+RETURNING id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at;
 
 -- name: GetUserByID :one
-SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 FROM users
 WHERE id = $1;
 
 -- name: GetUserByGitHubID :one
-SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 FROM users
 WHERE github_id = $1;
 
@@ -150,3 +153,16 @@ SELECT id, pull_request_id, user_id, turn_state, team_already_approved, approved
        snoozed_until_condition, snoozed_at_sha, owned_files_json, updated_at
 FROM pr_user_states
 WHERE pull_request_id = $1 AND user_id = $2;
+
+-- name: CreateSession :exec
+INSERT INTO sessions (token_hash, user_id, expires_at)
+VALUES ($1, $2, $3);
+
+-- name: GetSessionByTokenHash :one
+SELECT token_hash, user_id, expires_at, created_at
+FROM sessions
+WHERE token_hash = $1;
+
+-- name: DeleteSession :exec
+DELETE FROM sessions
+WHERE token_hash = $1;

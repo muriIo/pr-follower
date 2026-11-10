@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/murilo/pr-follower/backend/internal/adapter/crypto"
 	"github.com/murilo/pr-follower/backend/internal/adapter/persistence"
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/database"
@@ -25,13 +28,26 @@ func openInMemoryTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func testCipher(t *testing.T) *crypto.AESGCMCipher {
+	t.Helper()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	c, err := crypto.NewAESGCMCipher(key)
+	if err != nil {
+		t.Fatalf("NewAESGCMCipher() error: %v", err)
+	}
+	return c
+}
+
 func TestSqlcRepositories_FullLifecycleAndMappings(t *testing.T) {
 	t.Parallel()
 
 	db := openInMemoryTestDB(t)
 	ctx := context.Background()
 
-	userRepo := persistence.NewUserRepository(db)
+	userRepo := persistence.NewUserRepository(db, testCipher(t))
 	repoRepo := persistence.NewRepositoryRepository(db)
 	prRepo := persistence.NewPullRequestRepository(db)
 
@@ -179,5 +195,124 @@ func TestSqlcRepositories_FullLifecycleAndMappings(t *testing.T) {
 
 	if err := repoRepo.SetUserFollow(ctx, user.ID, repo.ID, false); err != nil {
 		t.Fatalf("SetUserFollow(false) error: %v", err)
+	}
+}
+
+func TestUserRepository_EncryptsGitHubTokensAtRest(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repo := persistence.NewUserRepository(db, testCipher(t))
+
+	accessExp := time.Unix(1_800_000_000, 0).UTC()
+	refreshExp := time.Unix(1_810_000_000, 0).UTC()
+	user := &entity.User{
+		GitHubID: 42,
+		Login:    "octo",
+		GitHubToken: entity.OAuthToken{
+			AccessToken:           "ghu_access",
+			RefreshToken:          "ghr_refresh",
+			AccessTokenExpiresAt:  accessExp,
+			RefreshTokenExpiresAt: refreshExp,
+		},
+	}
+	if err := repo.Upsert(ctx, user); err != nil {
+		t.Fatalf("Upsert() error: %v", err)
+	}
+
+	var storedAccess, storedRefresh string
+	if err := db.QueryRowContext(ctx, "SELECT encrypted_token, encrypted_refresh_token FROM users WHERE id = $1", user.ID).
+		Scan(&storedAccess, &storedRefresh); err != nil {
+		t.Fatalf("raw select error: %v", err)
+	}
+	if storedAccess == "" || strings.Contains(storedAccess, "ghu_access") || strings.Contains(storedRefresh, "ghr_refresh") {
+		t.Fatalf("tokens not encrypted at rest: access=%q refresh=%q", storedAccess, storedRefresh)
+	}
+
+	got, err := repo.GetByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetByID() error: %v", err)
+	}
+	if got.GitHubToken.AccessToken != "ghu_access" || got.GitHubToken.RefreshToken != "ghr_refresh" ||
+		!got.GitHubToken.AccessTokenExpiresAt.Equal(accessExp) || !got.GitHubToken.RefreshTokenExpiresAt.Equal(refreshExp) {
+		t.Fatalf("token round trip mismatch: %#v", got.GitHubToken)
+	}
+
+	noExpiry := &entity.User{GitHubID: 43, Login: "plain"}
+	if err := repo.Upsert(ctx, noExpiry); err != nil {
+		t.Fatalf("Upsert() error: %v", err)
+	}
+	gotPlain, _ := repo.GetByGitHubID(ctx, 43)
+	if !gotPlain.GitHubToken.AccessTokenExpiresAt.IsZero() || gotPlain.GitHubToken.AccessToken != "" {
+		t.Fatalf("expected zero token, got %#v", gotPlain.GitHubToken)
+	}
+}
+
+func TestUserRepository_UndecryptableTokenIsDropped(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+
+	if err := persistence.NewUserRepository(db, testCipher(t)).Upsert(ctx, &entity.User{
+		GitHubID: 7, Login: "rotated", GitHubToken: entity.OAuthToken{AccessToken: "ghu_old", RefreshToken: "ghr_old"},
+	}); err != nil {
+		t.Fatalf("Upsert() error: %v", err)
+	}
+
+	// A new key (e.g. TOKEN_ENCRYPTION_KEY rotated) cannot read old tokens: the user must sign in again.
+	got, err := persistence.NewUserRepository(db, testCipher(t)).GetByGitHubID(ctx, 7)
+	if err != nil {
+		t.Fatalf("GetByGitHubID() error: %v", err)
+	}
+	if got.GitHubToken.AccessToken != "" || got.GitHubToken.RefreshToken != "" {
+		t.Fatalf("expected undecryptable tokens to be dropped, got %#v", got.GitHubToken)
+	}
+}
+
+func TestSessionRepository_Lifecycle(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+
+	user := &entity.User{GitHubID: 99, Login: "sess"}
+	if err := persistence.NewUserRepository(db, testCipher(t)).Upsert(ctx, user); err != nil {
+		t.Fatalf("Upsert() error: %v", err)
+	}
+
+	sessions := persistence.NewSessionRepository(db)
+	expires := time.Unix(1_800_000_000, 0).UTC()
+	if err := sessions.Create(ctx, &entity.Session{TokenHash: "hash-1", UserID: user.ID, ExpiresAt: expires}); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+
+	got, err := sessions.GetByTokenHash(ctx, "hash-1")
+	if err != nil {
+		t.Fatalf("GetByTokenHash() error: %v", err)
+	}
+	if got.UserID != user.ID || !got.ExpiresAt.Equal(expires) {
+		t.Fatalf("unexpected session: %#v", got)
+	}
+
+	if _, err := sessions.GetByTokenHash(ctx, "missing"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	if err := sessions.Delete(ctx, "hash-1"); err != nil {
+		t.Fatalf("Delete() error: %v", err)
+	}
+	if _, err := sessions.GetByTokenHash(ctx, "hash-1"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := sessions.Create(canceled, &entity.Session{TokenHash: "h", UserID: user.ID, ExpiresAt: expires}); err == nil {
+		t.Fatal("expected canceled context to abort Create")
+	}
+	if _, err := sessions.GetByTokenHash(canceled, "h"); err == nil {
+		t.Fatal("expected canceled context to abort GetByTokenHash")
+	}
+	if err := sessions.Delete(canceled, "h"); err == nil {
+		t.Fatal("expected canceled context to abort Delete")
 	}
 }

@@ -10,6 +10,32 @@ import (
 	"database/sql"
 )
 
+const createSession = `-- name: CreateSession :exec
+INSERT INTO sessions (token_hash, user_id, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateSessionParams struct {
+	TokenHash string `json:"token_hash"`
+	UserID    int64  `json:"user_id"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
+	_, err := q.db.ExecContext(ctx, createSession, arg.TokenHash, arg.UserID, arg.ExpiresAt)
+	return err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions
+WHERE token_hash = $1
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := q.db.ExecContext(ctx, deleteSession, tokenHash)
+	return err
+}
+
 const followRepository = `-- name: FollowRepository :exec
 INSERT INTO user_repo_follows (user_id, repository_id)
 VALUES ($1, $2)
@@ -185,8 +211,26 @@ func (q *Queries) GetRepositoryByID(ctx context.Context, id int64) (Repository, 
 	return i, err
 }
 
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
+SELECT token_hash, user_id, expires_at, created_at
+FROM sessions
+WHERE token_hash = $1
+`
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, tokenHash)
+	var i Session
+	err := row.Scan(
+		&i.TokenHash,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUserByGitHubID = `-- name: GetUserByGitHubID :one
-SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 FROM users
 WHERE github_id = $1
 `
@@ -204,12 +248,15 @@ func (q *Queries) GetUserByGitHubID(ctx context.Context, githubID int64) (User, 
 		&i.EncryptedToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EncryptedRefreshToken,
+		&i.AccessTokenExpiresAt,
+		&i.RefreshTokenExpiresAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 FROM users
 WHERE id = $1
 `
@@ -227,6 +274,9 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.EncryptedToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EncryptedRefreshToken,
+		&i.AccessTokenExpiresAt,
+		&i.RefreshTokenExpiresAt,
 	)
 	return i, err
 }
@@ -538,25 +588,31 @@ func (q *Queries) UpsertRepository(ctx context.Context, arg UpsertRepositoryPara
 }
 
 const upsertUser = `-- name: UpsertUser :one
-INSERT INTO users (github_id, login, name, avatar_url, teams_json, encrypted_token, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+INSERT INTO users (github_id, login, name, avatar_url, teams_json, encrypted_token, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
 ON CONFLICT (github_id) DO UPDATE SET
     login = EXCLUDED.login,
     name = EXCLUDED.name,
     avatar_url = EXCLUDED.avatar_url,
     teams_json = EXCLUDED.teams_json,
     encrypted_token = EXCLUDED.encrypted_token,
+    encrypted_refresh_token = EXCLUDED.encrypted_refresh_token,
+    access_token_expires_at = EXCLUDED.access_token_expires_at,
+    refresh_token_expires_at = EXCLUDED.refresh_token_expires_at,
     updated_at = CURRENT_TIMESTAMP
-RETURNING id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at
+RETURNING id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 `
 
 type UpsertUserParams struct {
-	GithubID       int64  `json:"github_id"`
-	Login          string `json:"login"`
-	Name           string `json:"name"`
-	AvatarUrl      string `json:"avatar_url"`
-	TeamsJson      string `json:"teams_json"`
-	EncryptedToken string `json:"encrypted_token"`
+	GithubID              int64  `json:"github_id"`
+	Login                 string `json:"login"`
+	Name                  string `json:"name"`
+	AvatarUrl             string `json:"avatar_url"`
+	TeamsJson             string `json:"teams_json"`
+	EncryptedToken        string `json:"encrypted_token"`
+	EncryptedRefreshToken string `json:"encrypted_refresh_token"`
+	AccessTokenExpiresAt  int64  `json:"access_token_expires_at"`
+	RefreshTokenExpiresAt int64  `json:"refresh_token_expires_at"`
 }
 
 func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, error) {
@@ -567,6 +623,9 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		arg.AvatarUrl,
 		arg.TeamsJson,
 		arg.EncryptedToken,
+		arg.EncryptedRefreshToken,
+		arg.AccessTokenExpiresAt,
+		arg.RefreshTokenExpiresAt,
 	)
 	var i User
 	err := row.Scan(
@@ -579,6 +638,9 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) (User, e
 		&i.EncryptedToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EncryptedRefreshToken,
+		&i.AccessTokenExpiresAt,
+		&i.RefreshTokenExpiresAt,
 	)
 	return i, err
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 	"github.com/murilo/pr-follower/backend/internal/domain/port"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
+	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
@@ -36,6 +37,8 @@ type HandlerDeps struct {
 	SSEHub        *sse.Hub
 	OpRegistry    *operation.Registry
 	WebhookSecret string
+	AuthUC        *auth.UseCase
+	SecureCookies bool
 }
 
 type Handler struct {
@@ -57,76 +60,11 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	h.deps.SSEHub.ServeHTTP(w, r)
 }
 
-func (h *Handler) AuthLogin(w http.ResponseWriter, r *http.Request) {
-	ctx, release := h.beginOperation(r)
-	defer release()
-
-	var req struct {
-		Login       string `json:"login"`
-		Name        string `json:"name"`
-		Team        string `json:"team"`
-		GitHubToken string `json:"github_token"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeDomainError(w, entity.ErrInvalidInput)
-		return
-	}
-	login := strings.TrimPrefix(strings.TrimSpace(req.Login), "@")
-	if login == "" {
-		writeDomainError(w, entity.ErrInvalidInput)
-		return
-	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = strings.ToUpper(login[:1]) + login[1:]
-	}
-	team := strings.TrimSpace(req.Team)
-	if team == "" {
-		team = "@arvore/frontend"
-	} else if !strings.HasPrefix(team, "@") {
-		team = "@" + team
-	}
-
-	user := &entity.User{
-		GitHubID:       1001,
-		Login:          login,
-		Name:           name,
-		AvatarURL:      "https://avatars.githubusercontent.com/u/1001",
-		Teams:          []string{team, "@arvore/core-architects"},
-		EncryptedToken: req.GitHubToken,
-	}
-	if err := h.deps.UserRepo.Upsert(ctx, user); err != nil {
-		writeDomainError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"token": "pf_sess_" + strconv.FormatUint(user.ID, 10) + "_" + strconv.FormatInt(time.Now().Unix(), 10),
-		"user":  user,
-	})
-}
-
-func (h *Handler) AuthMe(w http.ResponseWriter, r *http.Request) {
-	ctx, release := h.beginOperation(r)
-	defer release()
-
-	user, err := h.deps.UserRepo.GetByID(ctx, resolveUserID(r))
-	if err != nil {
-		writeDomainError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"user": user})
-}
-
-func (h *Handler) AuthLogout(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "logged_out": true})
-}
-
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx, release := h.beginOperation(r)
 	defer release()
 
-	userID := resolveUserID(r)
+	userID := currentUserID(r)
 	snapshot, err := h.deps.TriageUC.GetWorkspaceSnapshot(ctx, userID)
 	if err != nil {
 		writeDomainError(w, err)
@@ -175,7 +113,7 @@ func (h *Handler) FollowRepository(w http.ResponseWriter, r *http.Request) {
 		writeDomainError(w, err)
 		return
 	}
-	if err := h.deps.RepoRepo.SetUserFollow(ctx, resolveUserID(r), repo.ID, true); err != nil {
+	if err := h.deps.RepoRepo.SetUserFollow(ctx, currentUserID(r), repo.ID, true); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -206,7 +144,7 @@ func (h *Handler) ApprovePR(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	if err := h.deps.ActionUC.ApprovePR(ctx, resolveUserID(r), prID, req.Body); err != nil {
+	if err := h.deps.ActionUC.ApprovePR(ctx, currentUserID(r), prID, req.Body); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -228,7 +166,7 @@ func (h *Handler) MergePR(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	if err := h.deps.ActionUC.MergePR(ctx, resolveUserID(r), prID, req.Method); err != nil {
+	if err := h.deps.ActionUC.MergePR(ctx, currentUserID(r), prID, req.Method); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -248,7 +186,7 @@ func (h *Handler) BatchMergePRs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	completed, err := h.deps.ActionUC.BatchApproveAndMerge(ctx, resolveUserID(r), req.PRIDs, req.Method)
+	completed, err := h.deps.ActionUC.BatchApproveAndMerge(ctx, currentUserID(r), req.PRIDs, req.Method)
 	if err != nil {
 		writeDomainError(w, err)
 		return
@@ -275,7 +213,7 @@ func (h *Handler) SnoozePR(w http.ResponseWriter, r *http.Request) {
 		cond = entity.SnoozeConditionNextCommit
 	}
 
-	if err := h.deps.TriageUC.SnoozePR(ctx, resolveUserID(r), prID, cond); err != nil {
+	if err := h.deps.TriageUC.SnoozePR(ctx, currentUserID(r), prID, cond); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -292,7 +230,7 @@ func (h *Handler) ClaimPR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.deps.TriageUC.ClaimPR(ctx, resolveUserID(r), prID); err != nil {
+	if err := h.deps.TriageUC.ClaimPR(ctx, currentUserID(r), prID); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -317,7 +255,7 @@ func (h *Handler) DependabotCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.deps.ActionUC.RunDependabotCommand(ctx, resolveUserID(r), prID, req.Command); err != nil {
+	if err := h.deps.ActionUC.RunDependabotCommand(ctx, currentUserID(r), prID, req.Command); err != nil {
 		writeDomainError(w, err)
 		return
 	}
@@ -406,17 +344,8 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) SeedDemoData(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	user := &entity.User{
-		GitHubID:  1001,
-		Login:     "murilo",
-		Name:      "Murilo",
-		AvatarURL: "https://avatars.githubusercontent.com/u/1001",
-		Teams:     []string{"@arvore/frontend", "@arvore/core-architects"},
-	}
-	if err := h.deps.UserRepo.Upsert(ctx, user); err != nil {
-		writeDomainError(w, err)
-		return
-	}
+	// Demo data is seeded for the signed-in user, who owns the demo CODEOWNERS paths.
+	user := currentUser(r)
 
 	repos := []entity.Repository{
 		{
@@ -426,7 +355,7 @@ func (h *Handler) SeedDemoData(w http.ResponseWriter, r *http.Request) {
 			FullName:      "arvore/hive-web",
 			DefaultBranch: "main",
 			CachedCodeownersRules: []entity.CodeownerRule{
-				{Pattern: "/src/app/", Owners: []string{"@murilo", "@arvore/frontend"}},
+				{Pattern: "/src/app/", Owners: []string{"@" + user.Login, "@arvore/frontend"}},
 			},
 		},
 		{
@@ -570,7 +499,7 @@ func (h *Handler) SeedDemoData(w http.ResponseWriter, r *http.Request) {
 		Type:           "workspace.seeded",
 		RepositoryID:   repos[0].ID,
 		RepositoryName: repos[0].FullName,
-		ActorLogin:     "murilo",
+		ActorLogin:     user.Login,
 		Summary:        "Workspace demo data initialized",
 		OccurredAt:     time.Now().UTC(),
 	})
@@ -581,15 +510,6 @@ func (h *Handler) SeedDemoData(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) beginOperation(r *http.Request) (context.Context, func()) {
 	opID := strings.TrimSpace(r.Header.Get("X-Operation-ID"))
 	return h.deps.OpRegistry.Begin(r.Context(), opID)
-}
-
-func resolveUserID(r *http.Request) uint64 {
-	if raw := strings.TrimSpace(r.Header.Get("X-User-ID")); raw != "" {
-		if id, err := strconv.ParseUint(raw, 10, 64); err == nil && id > 0 {
-			return id
-		}
-	}
-	return 1
 }
 
 func parseUintParam(r *http.Request, key string) (uint64, error) {
