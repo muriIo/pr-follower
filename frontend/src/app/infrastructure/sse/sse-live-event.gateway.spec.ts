@@ -75,4 +75,21 @@ describe('SseLiveEventGateway', () => {
     disconnect();
     expect(es.closed).toBe(true);
   });
+
+  it('listens for repository access events from installation webhooks', () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
+    const gateway = TestBed.inject(SseLiveEventGateway);
+
+    const received: string[] = [];
+    gateway.connect(
+      (ev) => received.push(ev.text),
+      () => undefined,
+    );
+    const es = FakeEventSource.lastInstance!;
+    for (const type of ['repository.access_lost', 'repository.access_suspended', 'repository.access_restored']) {
+      es.emit(type, { id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
+    }
+    expect(received).toEqual(['repository.access_lost', 'repository.access_suspended', 'repository.access_restored']);
+  });
 });

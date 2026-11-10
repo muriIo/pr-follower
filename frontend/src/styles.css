@@ -306,3 +306,8 @@ app-sidebar-nav, app-inspection-drawer { display: contents; }
 .pf-import-empty .pf-import-error { margin: 0; }
 .pf-import-empty-title { font-size: 15px; font-weight: 600; color: var(--text); }
 a.pf-btn { text-decoration: none; }
+
+/* Repository access lost (installation webhooks, ADR-0010) */
+.pf-seat-no-access { border-color: rgba(244, 63, 94, .35); }
+.pf-seat-access { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid rgba(244, 63, 94, .35); border-radius: 6px; background: rgba(244, 63, 94, .10); color: #FB7185; font-size: 12px; line-height: 1.4; }
+.pf-seat-access-fix { flex: none; }

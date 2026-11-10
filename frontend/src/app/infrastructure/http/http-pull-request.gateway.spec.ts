@@ -51,7 +51,7 @@ describe('HttpPullRequestGateway', () => {
     const ctrl = new AbortController();
 
     const ws = await gateway.fetchWorkspace({ signal: ctrl.signal, operationId: 'op-ws-1' });
-    expect(ws?.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main' }]);
+    expect(ws?.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main', access: 'active' }]);
 
     await gateway.approvePullRequest(142, { signal: ctrl.signal, operationId: 'op-approve-142' });
     expect(fetchSpy).toHaveBeenCalledWith(

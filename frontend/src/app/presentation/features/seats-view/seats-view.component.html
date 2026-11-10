@@ -31,6 +31,6 @@
 
 <div class="pf-seats">
   @for (s of store.seats(); track s.name) {
-    <app-seat-card [seat]="s" (openRadar)="store.setPerspective('radar')" />
+    <app-seat-card [seat]="s" (openRadar)="store.setPerspective('radar')" (fixAccess)="store.setPerspective('import')" />
   }
 </div>

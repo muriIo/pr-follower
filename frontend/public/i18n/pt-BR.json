@@ -94,5 +94,8 @@
   "import.error.unauthorized": "Sua sessão do GitHub expirou. Entre novamente.",
   "import.error.not_found": "O GitHub não confirmou o acesso a esse repositório. Ajuste as permissões do app.",
   "import.error.not_configured": "A importação de repositórios não está configurada neste servidor.",
-  "import.error.failed": "Não foi possível falar com o GitHub. Tente novamente."
+  "import.error.failed": "Não foi possível falar com o GitHub. Tente novamente.",
+  "seats.access.removed": "Sem acesso: o GitHub App foi desinstalado ou o repositório foi removido dele.",
+  "seats.access.suspended": "Acesso suspenso: a instalação do GitHub App foi suspensa.",
+  "seats.access.fix": "Corrigir acesso"
 }
