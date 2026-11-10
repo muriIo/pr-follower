@@ -422,4 +422,73 @@ describe('workspace-api.mapper', () => {
     expect(loaded).toMatchObject({ id: 'ev-1', type: 'pr.merged', actor: 'octocat', fresh: false });
     expect(loaded.t).toBe(Date.parse('2026-11-10T12:00:00Z'));
   });
+
+  describe('turn engine: my inbox holds only PRs that touch my files', () => {
+    const pr = (number: number, extra: Record<string, unknown> = {}) => ({
+      id: 1000 + number, repository_id: 1, repository_name: 'acme/web', number, title: `PR ${number}`, author_login: 'bia', html_url: '',
+      is_dependabot: false, is_draft: false, state: 'OPEN', mergeable_state: 'CLEAN', ci_status: 'SUCCESS', head_sha: 'h', base_ref: 'main', ...extra,
+    });
+    const seat = (prs: unknown[], codeowners: 'present' | 'absent' = 'present') => ({
+      repository: { id: 1, owner: 'acme', name: 'web', full_name: 'acme/web', default_branch: 'main', codeowners_status: codeowners },
+      open_pr_count: prs.length, waiting_on_me_count: 0, dependabot_pr_count: 0, failing_ci_count: 0, pull_requests: prs,
+    });
+    const state = (turn: string, owned: number, extra: Record<string, unknown> = {}) => ({
+      pull_request_id: 1, user_id: 1, turn_state: turn, team_already_approved: false,
+      owned_files_changed: Array.from({ length: owned }, (_, i) => ({ path: `src/f${i}.ts`, additions: 1, deletions: 0, patch: '' })), ...extra,
+    });
+    const map = (snapshot: Record<string, unknown>) => mapApiWorkspaceResponseToDataset({ snapshot: snapshot as never, timeline: [] })!.prs;
+
+    it('keeps a PR I do not own in its seat, outside the inbox, even when it is a draft', () => {
+      const [item, ...rest] = map({ seats: [seat([pr(5, { is_draft: true })])] });
+      expect(rest).toEqual([]);
+      expect(item).toMatchObject({ id: 5, repo: 'acme/web', turn: false, owners: 'others' });
+      expect(item.why).toEqual({ key: 'drawer.why.others' });
+      // No badge: a badge is what lists a PR under "muted" in Minha Vez.
+      expect(item.muteBadge).toBeUndefined();
+      expect(item.ownPill).toBeUndefined();
+    });
+
+    it('shows a PR whose files are not known yet as not evaluated, never as my turn', () => {
+      const [item] = map({ seats: [seat([pr(5)])], ownership_pending_pr_ids: [1005] });
+      expect(item).toMatchObject({ id: 5, turn: false, owners: 'unknown' });
+      expect(item.why).toEqual({ key: 'drawer.why.pending' });
+      expect(item.muteBadge).toBeUndefined();
+    });
+
+    it('says nobody is assigned when the repository has no CODEOWNERS', () => {
+      const [item] = map({ seats: [seat([pr(5)], 'absent')] });
+      expect(item).toMatchObject({ turn: false, owners: 'none' });
+    });
+
+    it('lists each PR once: inbox and radar PRs are not repeated from the seat', () => {
+      const mine = pr(1);
+      const gated = pr(2, { ci_status: 'FAILURE' });
+      const bump = pr(3, { is_dependabot: true, author_login: 'dependabot[bot]' });
+      const other = pr(4);
+      const prs = map({
+        seats: [seat([mine, gated, bump, other])],
+        inbox_waiting_on_me: [{ pull_request: mine, user_state: state('WAITING_ON_ME', 2) }],
+        inbox_dimmed: [{ pull_request: gated, user_state: state('HIDDEN_GATE', 1) }],
+        dependabot_prs: [{ pull_request: bump }],
+      });
+      expect(prs.map((p) => p.id).sort()).toEqual([1, 2, 3, 4]);
+      expect(prs.find((p) => p.id === 1)).toMatchObject({ turn: true, owners: 'voce', ownFiles: 2 });
+      expect(prs.find((p) => p.id === 4)).toMatchObject({ turn: false, owners: 'others' });
+    });
+
+    it('dims a PR of mine behind the gate and says why', () => {
+      const gate = (extra: Record<string, unknown>) =>
+        map({ seats: [seat([])], inbox_dimmed: [{ pull_request: pr(2, extra), user_state: state('HIDDEN_GATE', 1) }] })[0];
+
+      const failing = gate({ ci_status: 'FAILURE' });
+      expect(failing).toMatchObject({ turn: false, owners: 'voce', ownFiles: 1 });
+      expect(failing.why).toEqual({ key: 'drawer.why.voce' });
+      expect(failing.muteBadge).toEqual({ key: 'inbox.mute.ciFail' });
+      expect(failing.muteTip).toEqual({ key: 'inbox.mute.ciFailTip' });
+
+      expect(gate({ mergeable_state: 'CONFLICTING' }).muteBadge).toEqual({ key: 'inbox.mute.conflict' });
+      expect(gate({ ci_status: 'PENDING' }).muteBadge).toEqual({ key: 'inbox.mute.ci' });
+      expect(gate({ is_draft: true }).muteBadge).toEqual({ key: 'inbox.mute.draft' });
+    });
+  });
 });

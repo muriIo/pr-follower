@@ -292,6 +292,11 @@ const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
   "timeline.event.dependabot.analyzed.low": "Analisou {package} ({from} → {to}): baixo risco",
   "timeline.event.dependabot.analyzed.medium": "Analisou {package} ({from} → {to}): médio risco",
   "timeline.event.dependabot.analyzed.high": "Analisou {package} ({from} → {to}): alto risco",
+  "inbox.mute.ciFail": "🚧 CI falhando",
+  "inbox.mute.ciFailTip": "Entra na fila quando o CI passar.",
+  "inbox.mute.conflict": "🚧 Com conflitos",
+  "inbox.mute.conflictTip": "Entra na fila quando o autor resolver os conflitos.",
+  "drawer.why.pending": "Ainda não verificamos os arquivos alterados neste PR.",
 };
 
 @Injectable({ providedIn: 'root' })

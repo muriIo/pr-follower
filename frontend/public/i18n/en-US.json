@@ -287,5 +287,10 @@
   "timeline.event.other": "{type} on {repo}",
   "timeline.event.dependabot.analyzed.low": "Analysed {package} ({from} → {to}): low risk",
   "timeline.event.dependabot.analyzed.medium": "Analysed {package} ({from} → {to}): medium risk",
-  "timeline.event.dependabot.analyzed.high": "Analysed {package} ({from} → {to}): high risk"
+  "timeline.event.dependabot.analyzed.high": "Analysed {package} ({from} → {to}): high risk",
+  "inbox.mute.ciFail": "🚧 CI failing",
+  "inbox.mute.ciFailTip": "Joins the queue when CI passes.",
+  "inbox.mute.conflict": "🚧 Has conflicts",
+  "inbox.mute.conflictTip": "Joins the queue when the author resolves the conflicts.",
+  "drawer.why.pending": "We have not checked the files changed in this PR yet."
 }
