@@ -545,3 +545,107 @@ describe('WorkspaceStore changed-files preview', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('WorkspaceStore timeline views', () => {
+  const now = Date.now();
+  const ev = (id: string, minutesAgo: number, repo: string, actor: string, type = 'pr.opened'): TimelineEventItem => ({
+    key: minutesAgo,
+    id,
+    t: now - minutesAgo * 60_000,
+    kind: 'info',
+    type,
+    actor,
+    text: id,
+    repo,
+  });
+
+  function setup(events: readonly TimelineEventItem[], onEvent?: (emit: (e: Omit<TimelineEventItem, 'key' | 't'>) => void) => void) {
+    const { prGateway } = createFakeGateways();
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: { ...prGateway, fetchWorkspace: async () => ({ repos: [], prs: [], events }) } },
+        {
+          provide: LIVE_EVENT_GATEWAY,
+          useValue: {
+            connect: (emit: (e: Omit<TimelineEventItem, 'key' | 't'>) => void) => {
+              onEvent?.(emit);
+              return () => undefined;
+            },
+          },
+        },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.repos.set([
+      { name: 'acme/web', branch: 'main' },
+      { name: 'acme/api', branch: 'main' },
+    ]);
+    store.events.set(events);
+    return store;
+  }
+
+  const flat = (store: WorkspaceStore) => store.timelineGroups().flatMap((g) => g.items.map((i) => i.text));
+
+  it('lists the newest activity first, grouped from now to older', () => {
+    const store = setup([
+      ev('two-days', 60 * 50, 'acme/web', 'bia'),
+      ev('now', 1, 'acme/web', 'bia'),
+      ev('half-hour', 30, 'acme/api', 'bia'),
+    ]);
+    expect(flat(store)).toEqual(['now', 'half-hour', 'two-days']);
+    const labels = store.timelineGroups().map((g) => g.label);
+    expect(labels[0]).toBe('Agora');
+    expect(labels[1]).toBe('Última hora');
+    expect(labels[labels.length - 1]).toBe('Mais antigas');
+  });
+
+  it('filters to my activity or to one repository of my Seats', () => {
+    const store = setup([
+      ev('mine-web', 1, 'acme/web', 'octocat'),
+      ev('theirs-web', 2, 'acme/web', 'bia'),
+      ev('theirs-api', 3, 'acme/api', 'bia'),
+    ]);
+    store.startLiveSession('Octocat');
+
+    store.setTimelineScope('mine');
+    expect(flat(store)).toEqual(['mine-web']);
+
+    store.setTimelineScope('all');
+    store.setTimelineRepo('acme/web');
+    expect(flat(store)).toEqual(['mine-web', 'theirs-web']);
+    expect(store.timelineRepoOptions()).toEqual(['acme/api', 'acme/web']);
+
+    store.setTimelineRepo('acme/missing');
+    expect(store.timelineGroups()).toEqual([]);
+    store.setTimelineRepo(null);
+    expect(flat(store).length).toBe(3);
+  });
+
+  it('gives every item its activity icon', () => {
+    const store = setup([ev('merged', 1, 'acme/web', 'bia', 'pr.merged'), ev('opened', 2, 'acme/web', 'bia', 'pr.opened')]);
+    const items = store.timelineGroups()[0].items;
+    expect(items.map((i) => [i.icon, i.tone])).toEqual([
+      ['merge', 'merged'],
+      ['pr-open', 'open'],
+    ]);
+  });
+
+  it('keeps live activity highlighted after the workspace reloads, and attributes my own actions to me', async () => {
+    let emit: ((e: Omit<TimelineEventItem, 'key' | 't'>) => void) | null = null;
+    const store = setup([], (e) => (emit = e));
+    store.startLiveSession('octocat');
+    emit!({ id: 'live-1', type: 'pr.opened', kind: 'info', text: 'live', repo: 'acme/web', actor: 'bia', fresh: true });
+    expect(store.timelineGroups()[0].items[0].cls).toBe('is-new');
+
+    store.events.set([{ ...ev('live-1', 0, 'acme/web', 'bia'), fresh: false }]); // what a reload brings back
+    expect(store.timelineGroups()[0].items[0].cls).toBe('is-new');
+
+    const pr = { ...createInitialPrDataset()[0], id: 501, repo: 'acme/web' };
+    store.prs.set([pr]);
+    await store.approvePr(501, 0);
+    const mine = store.events().find((e) => e.type === 'pr.approved')!;
+    expect(mine.actor).toBe('octocat');
+  });
+});

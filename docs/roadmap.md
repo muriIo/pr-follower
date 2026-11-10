@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after PR #14).
+Last reviewed: 2026-11-10 (after the timeline fix).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,11 +12,10 @@ Last reviewed: 2026-11-10 (after PR #14).
 ## Next up
 
 In order:
-1. **P0** Timeline leaks other users' activity on workspace load ([Live updates](#7-live-updates--timeline)).
-2. **P1** Load a repository's open PRs at import ([PR state](#3-pr-state-from-github)).
-3. **P1** Compute turn state so "Minha Vez" fills with real PRs ([CODEOWNERS inbox](#4-codeowners-inbox--minha-vez)).
-4. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
-5. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
+1. **P1** Load a repository's open PRs at import ([PR state](#3-pr-state-from-github)).
+2. **P1** Compute turn state so "Minha Vez" fills with real PRs ([CODEOWNERS inbox](#4-codeowners-inbox--minha-vez)).
+3. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
+4. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
 
 ## 1. Identity & sessions
 
@@ -71,7 +70,9 @@ In order:
 
 - [x] SSE stream scoped to followed repositories, one `activity` event name, heartbeat, reconnect with jittered backoff, reload after reconnect (#9).
 - [x] Every live change refreshes the workspace (debounced) and the open PR's files (#10, #14).
-- [ ] **P0** Timeline leak: `GET /api/v1/workspace` returns the hub's recent events for **all** users; filter them by the user's follows like the stream.
+- [x] Timeline scoped to followed repositories on workspace load too (the P0 leak), newest first.
+- [x] Timeline views: all activity or only mine (who acted: the webhook sender, the user behind an app action), filtered by a repository of the Seats; one icon per activity type (merge, approval, open, close, commit, CI, claim, access...).
+- [x] Merged PRs are reported as merged (`pr.merged`, state `MERGED`), not as closed.
 - [ ] **P2** Activity is kept in memory only: it is lost on restart and limits the API to one replica (also the operation-cancellation registry). Persist activity, and fan out across replicas.
 
 ## 8. Inspection drawer

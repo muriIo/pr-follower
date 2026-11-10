@@ -1,0 +1,9 @@
+@if (icon() === 'dot') {
+  <span [class]="'pf-act pf-act-dot pf-act-' + tone()" aria-hidden="true"></span>
+} @else {
+  <span [class]="'pf-act pf-act-' + tone()" [attr.data-icon]="icon()" aria-hidden="true">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path [attr.d]="path()"></path>
+    </svg>
+  </span>
+}

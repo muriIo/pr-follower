@@ -391,4 +391,13 @@ describe('workspace-api.mapper', () => {
       expect(unparsed.owners).toBe('unknown');
     });
   });
+
+  it('keeps the activity type, actor and id, and marks only live activity as new', () => {
+    const ev = { id: 'ev-1', type: 'pr.merged', repository_name: 'acme/web', pr_number: 7, actor_login: 'octocat', summary: 'merged', occurred_at: '2026-11-10T12:00:00Z' };
+    expect(mapActivityEventToTimelineItem(ev)).toMatchObject({ id: 'ev-1', type: 'pr.merged', actor: 'octocat', fresh: true });
+
+    const loaded = mapApiWorkspaceResponseToDataset({ snapshot: { seats: [] }, timeline: [ev] })!.events[0];
+    expect(loaded).toMatchObject({ id: 'ev-1', type: 'pr.merged', actor: 'octocat', fresh: false });
+    expect(loaded.t).toBe(Date.parse('2026-11-10T12:00:00Z'));
+  });
 });

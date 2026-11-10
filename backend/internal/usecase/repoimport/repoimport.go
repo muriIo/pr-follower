@@ -25,12 +25,13 @@ type UseCase struct {
 	tokens  port.UserTokenSource
 	github  port.GitHubUserAPI
 	repos   port.RepositoryRepository
+	users   port.UserRepository
 	events  port.EventPublisher
 	nowFunc func() time.Time
 }
 
-func NewUseCase(tokens port.UserTokenSource, github port.GitHubUserAPI, repos port.RepositoryRepository, events port.EventPublisher) *UseCase {
-	return &UseCase{tokens: tokens, github: github, repos: repos, events: events, nowFunc: time.Now}
+func NewUseCase(tokens port.UserTokenSource, github port.GitHubUserAPI, repos port.RepositoryRepository, users port.UserRepository, events port.EventPublisher) *UseCase {
+	return &UseCase{tokens: tokens, github: github, repos: repos, users: users, events: events, nowFunc: time.Now}
 }
 
 // ListAccounts returns the installations (user and organization accounts) the user can reach.
@@ -130,6 +131,7 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 		Type:           "repository.followed",
 		RepositoryID:   repo.ID,
 		RepositoryName: repo.FullName,
+		ActorLogin:     uc.actorLogin(ctx, userID),
 		Summary:        "Followed repository " + repo.FullName,
 		OccurredAt:     uc.nowFunc().UTC(),
 	})
@@ -164,4 +166,13 @@ func (uc *UseCase) Unfollow(ctx context.Context, userID, repositoryID uint64) er
 		return entity.ErrInvalidInput
 	}
 	return uc.repos.SetUserFollow(ctx, userID, repositoryID, false)
+}
+
+// actorLogin names who followed, for the "my activity" timeline. An unknown user leaves it empty.
+func (uc *UseCase) actorLogin(ctx context.Context, userID uint64) string {
+	user, err := uc.users.GetByID(ctx, userID)
+	if err != nil {
+		return ""
+	}
+	return user.Login
 }

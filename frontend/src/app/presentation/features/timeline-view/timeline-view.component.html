@@ -6,6 +6,36 @@
   </div>
 </app-page-header>
 
+<div class="pf-filters pf-timeline-filters">
+  <div class="pf-timeline-scope" role="group" [attr.aria-label]="'timeline.scope.label' | t">
+    <button
+      type="button"
+      class="pf-filter"
+      [class.is-active]="store.timelineScope() === 'all'"
+      [attr.aria-pressed]="store.timelineScope() === 'all'"
+      (click)="store.setTimelineScope('all')"
+    >
+      {{ 'timeline.scope.all' | t }}
+    </button>
+    <button
+      type="button"
+      class="pf-filter"
+      [class.is-active]="store.timelineScope() === 'mine'"
+      [attr.aria-pressed]="store.timelineScope() === 'mine'"
+      (click)="store.setTimelineScope('mine')"
+    >
+      {{ 'timeline.scope.mine' | t }}
+    </button>
+  </div>
+  <label class="pf-sr-only" for="pf-timeline-repo">{{ 'timeline.repo' | t }}</label>
+  <select id="pf-timeline-repo" class="pf-import-select" (change)="onRepoChange($event)">
+    <option value="" [selected]="store.timelineRepo() === null">{{ 'timeline.repo.all' | t }}</option>
+    @for (repo of store.timelineRepoOptions(); track repo) {
+      <option [value]="repo" [selected]="store.timelineRepo() === repo">{{ repo }}</option>
+    }
+  </select>
+</div>
+
 @for (g of store.timelineGroups(); track g.label) {
   <section class="pf-group">
     <h2 class="pf-section">{{ g.label }}</h2>
@@ -17,12 +47,14 @@
           [attr.aria-disabled]="e.noPr ? 'true' : 'false'"
           (click)="!e.noPr && e.pr && store.openPr(e.pr)"
         >
-          <span class="pf-mono" style="color: #8791A5">{{ e.time }}</span>
-          <app-status-dot [dotClass]="e.dot" />
+          <span class="pf-mono pf-event-time">{{ e.time }}</span>
+          <app-activity-icon [icon]="e.icon" [tone]="e.tone" />
           <span class="pf-event-text">{{ e.text }}</span>
-          <span class="pf-mono" style="color: #8791A5">{{ e.repo }}</span>
+          <span class="pf-mono pf-event-repo">{{ e.repo }}</span>
         </button>
       }
     </div>
   </section>
+} @empty {
+  <p class="pf-timeline-empty">{{ 'timeline.empty' | t }}</p>
 }

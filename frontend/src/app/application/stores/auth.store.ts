@@ -24,7 +24,7 @@ export class AuthStore {
     this.user.set(user);
     if (user) {
       this.status.set('signed-in');
-      this.workspaceStore.startLiveSession();
+      this.workspaceStore.startLiveSession(user.login);
     } else {
       this.status.set('signed-out');
     }

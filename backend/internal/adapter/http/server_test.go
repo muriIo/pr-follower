@@ -222,10 +222,10 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	ghGw := &noopGHGateway{}
 
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub)
-	actionUC := action.NewUseCase(prRepo, repoRepo, ghGw, sseHub)
+	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
-	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, sseHub)
+	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, userRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
 
@@ -1045,5 +1045,63 @@ func TestPullRequestFiles_ListsChangedFilesWithOwnership(t *testing.T) {
 	unconfigured.ServeHTTP(rr, req)
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("without the files use case: expected 503, got %d", rr.Code)
+	}
+}
+
+func workspaceTimeline(t *testing.T, ts testServer, session *http.Cookie) []entity.ActivityEvent {
+	t.Helper()
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	var body struct {
+		Timeline []entity.ActivityEvent `json:"timeline"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode workspace: %v", err)
+	}
+	return body.Timeline
+}
+
+func TestWorkspaceTimeline_OnlyFollowedRepositoriesNewestFirst(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat := ts.signIn(t)
+	hubot := ts.signInAs(t, "other")
+	for _, body := range []string{`{"installation_id":20,"github_repo_id":900}`, `{"installation_id":20,"github_repo_id":901}`} {
+		if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", body, octocat); rec.Code != http.StatusOK {
+			t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	var me struct {
+		User entity.User `json:"user"`
+	}
+	_ = json.NewDecoder(ts.do(t, http.MethodGet, "/api/v1/auth/me", "", hubot).Body).Decode(&me)
+	api, _ := ts.repos.GetByGitHubRepoID(context.Background(), 901)
+	_ = ts.repos.SetUserFollow(context.Background(), me.User.ID, api.ID, true)
+
+	opened := func(repoID, number int, sender string) string {
+		return fmt.Sprintf(`{"action":"opened","number":%d,"pull_request":{"id":%d,"number":%d,"title":"t","state":"open",`+
+			`"user":{"login":"bianca"},"head":{"sha":"s"},"base":{"ref":"main"}},"repository":{"id":%d},"sender":{"login":%q}}`,
+			number, 8000+number, number, repoID, sender)
+	}
+	_ = ts.postWebhook(t, "pull_request", opened(900, 1, "bianca"))
+	_ = ts.postWebhook(t, "pull_request", opened(901, 2, "octocat"))
+
+	for _, ev := range workspaceTimeline(t, ts, hubot) {
+		if ev.RepositoryName == "acme/web" {
+			t.Fatalf("hubot does not follow acme/web but its activity leaked: %+v", ev)
+		}
+	}
+
+	timeline := workspaceTimeline(t, ts, octocat)
+	var prEvents []entity.ActivityEvent
+	for _, ev := range timeline {
+		if ev.Type == "pr.opened" {
+			prEvents = append(prEvents, ev)
+		}
+	}
+	if len(prEvents) != 2 || prEvents[0].PRNumber != 2 || prEvents[1].PRNumber != 1 {
+		t.Fatalf("expected newest first (#2 then #1), got %+v", prEvents)
+	}
+	if prEvents[0].ActorLogin != "octocat" || prEvents[1].ActorLogin != "bianca" {
+		t.Fatalf("the actor is the webhook sender: %+v", prEvents)
 	}
 }

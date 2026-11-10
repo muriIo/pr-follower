@@ -192,3 +192,42 @@ func TestIngestPullRequestEvent_PropagatesFailures(t *testing.T) {
 		t.Errorf("canceled: got %v", err)
 	}
 }
+
+func TestIngestPullRequestEvent_ActorIsWhoActedNotTheAuthor(t *testing.T) {
+	t.Parallel()
+	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
+	pub := &fakePub{}
+	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub)
+
+	payload := webhook.PullRequestEventPayload{Action: "closed", GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "t",
+		AuthorLogin: "bianca", SenderLogin: "murilo", State: entity.PRStateClosed, HeadSHA: "h"}
+	_ = uc.IngestPullRequestEvent(context.Background(), payload)
+	if len(pub.events) != 1 || pub.events[0].ActorLogin != "murilo" {
+		t.Fatalf("the merger, not the author, is the actor: %+v", pub.events)
+	}
+
+	pub.events = nil
+	noSender := payload
+	noSender.GitHubPRID, noSender.Number, noSender.SenderLogin = 2, 2, ""
+	_ = uc.IngestPullRequestEvent(context.Background(), noSender)
+	if len(pub.events) != 1 || pub.events[0].ActorLogin != "bianca" {
+		t.Fatalf("without a sender the author is the actor: %+v", pub.events)
+	}
+}
+
+func TestIngestPullRequestEvent_MergedIsNotJustClosed(t *testing.T) {
+	t.Parallel()
+	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
+	prRepo := &fakePRRepo{}
+	pub := &fakePub{}
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
+
+	_ = uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{Action: "closed", Merged: true,
+		GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "t", State: entity.PRStateClosed, HeadSHA: "h", SenderLogin: "murilo"})
+	if prRepo.upserted.State != entity.PRStateMerged {
+		t.Fatalf("a merged PR is MERGED, got %q", prRepo.upserted.State)
+	}
+	if len(pub.events) != 1 || pub.events[0].Type != "pr.merged" {
+		t.Fatalf("a merge is announced as pr.merged, got %+v", pub.events)
+	}
+}

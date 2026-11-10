@@ -105,9 +105,25 @@ func (f *fakeGHGateway) CreatePRComment(ctx context.Context, _ entity.Repository
 	return nil
 }
 
-type fakePub struct{}
+type fakePub struct{ events []entity.ActivityEvent }
 
-func (f *fakePub) Publish(_ context.Context, _ entity.ActivityEvent) error { return nil }
+func (f *fakePub) Publish(_ context.Context, ev entity.ActivityEvent) error {
+	f.events = append(f.events, ev)
+	return nil
+}
+
+type fakeUsers struct{}
+
+func (fakeUsers) Upsert(context.Context, *entity.User) error { return nil }
+func (fakeUsers) GetByID(_ context.Context, id uint64) (*entity.User, error) {
+	if id == 1 {
+		return &entity.User{ID: 1, Login: "octocat"}, nil
+	}
+	return nil, entity.ErrNotFound
+}
+func (fakeUsers) GetByGitHubID(context.Context, int64) (*entity.User, error) {
+	return nil, entity.ErrNotFound
+}
 
 func TestExecutePRActionUseCase_ApproveMergeAndBatchCancel(t *testing.T) {
 	t.Parallel()
@@ -130,7 +146,7 @@ func TestExecutePRActionUseCase_ApproveMergeAndBatchCancel(t *testing.T) {
 		},
 	}
 
-	uc := action.NewUseCase(prRepo, &fakeRepoRepo{}, gh, &fakePub{})
+	uc := action.NewUseCase(prRepo, &fakeRepoRepo{}, fakeUsers{}, gh, &fakePub{})
 
 	if err := uc.ApprovePR(context.Background(), 1, 1, "LGTM"); err != nil {
 		t.Fatalf("ApprovePR() error: %v", err)
@@ -153,5 +169,39 @@ func TestExecutePRActionUseCase_ApproveMergeAndBatchCancel(t *testing.T) {
 	}
 	if len(mergedIDs) != 1 || mergedIDs[0] != 2 {
 		t.Fatalf("expected only PR 2 to complete before cancellation, got %v", mergedIDs)
+	}
+}
+
+func TestActions_PublishWhoActed(t *testing.T) {
+	t.Parallel()
+	prRepo := &fakePRRepo{
+		prs: map[uint64]*entity.PullRequest{
+			1: {ID: 1, RepositoryID: 10, Number: 11, State: entity.PRStateOpen, HeadSHA: "sha-1"},
+			2: {ID: 2, RepositoryID: 10, Number: 12, State: entity.PRStateOpen, HeadSHA: "sha-2"},
+		},
+		states: make(map[uint64]*entity.UserPRState),
+	}
+	pub := &fakePub{}
+	uc := action.NewUseCase(prRepo, &fakeRepoRepo{}, fakeUsers{}, &fakeGHGateway{}, pub)
+	ctx := context.Background()
+
+	_ = uc.ApprovePR(ctx, 1, 1, "LGTM")
+	_ = uc.MergePR(ctx, 1, 1, "squash")
+	_ = uc.RunDependabotCommand(ctx, 1, 2, "rebase")
+
+	if len(pub.events) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(pub.events))
+	}
+	for _, ev := range pub.events {
+		if ev.ActorLogin != "octocat" {
+			t.Errorf("%s: expected actor octocat, got %q", ev.Type, ev.ActorLogin)
+		}
+	}
+
+	// An unknown user still acts; the event just has no actor.
+	pub.events = nil
+	_ = uc.ApprovePR(ctx, 99, 2, "LGTM")
+	if len(pub.events) != 1 || pub.events[0].ActorLogin != "" {
+		t.Fatalf("unknown user: expected an event without actor, got %+v", pub.events)
 	}
 }

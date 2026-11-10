@@ -318,3 +318,23 @@ a.pf-btn { text-decoration: none; }
 /* Changed files preview in the drawer (one card per file, like the Dependabot affected code) */
 .pf-changed-path { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-changed-nodiff { margin: 0; padding: 10px 12px; }
+
+/* Timeline: activity icons and filters */
+.pf-act { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: var(--text-3); background: rgba(135, 145, 165, .12); }
+.pf-act svg { display: block; }
+.pf-act-dot { width: 7px; height: 7px; margin: 0 6.5px; background: currentColor; }
+.pf-act-ok { color: var(--emerald); background: rgba(16, 185, 129, .14); }
+.pf-act-open { color: var(--emerald); background: rgba(16, 185, 129, .14); }
+.pf-act-fail { color: #FB7185; background: rgba(244, 63, 94, .14); }
+.pf-act-warn { color: var(--amber); background: rgba(245, 158, 11, .14); }
+.pf-act-turn { color: var(--indigo); background: rgba(99, 102, 241, .16); }
+.pf-act-merged { color: #A78BFA; background: rgba(167, 139, 250, .16); }
+.pf-act-info { color: var(--text-2); }
+.pf-act-dot.pf-act-ok, .pf-act-dot.pf-act-open { background: var(--emerald); }
+.pf-act-dot.pf-act-fail { background: var(--rose); }
+.pf-act-dot.pf-act-turn { background: var(--indigo); }
+.pf-act-dot.pf-act-info { background: var(--text-3); }
+.pf-timeline-filters { flex-wrap: wrap; align-items: center; gap: 8px; }
+.pf-timeline-scope { display: inline-flex; gap: 6px; }
+.pf-event-time, .pf-event-repo { color: var(--text-3); }
+.pf-timeline-empty { margin: 24px 0; color: var(--text-3); text-align: center; }

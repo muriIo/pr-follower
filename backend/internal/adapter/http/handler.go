@@ -78,6 +78,27 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// followedTimeline returns recent activity of the repositories the user follows, newest first.
+// Like the live stream, nobody sees another account's repositories (events without one go to nobody).
+func (h *Handler) followedTimeline(ctx context.Context, userID uint64) ([]entity.ActivityEvent, error) {
+	followed, err := h.deps.RepoRepo.ListFollowedByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[uint64]bool, len(followed))
+	for _, r := range followed {
+		ids[r.ID] = true
+	}
+	recent := h.deps.SSEHub.RecentEvents()
+	out := make([]entity.ActivityEvent, 0, len(recent))
+	for i := len(recent) - 1; i >= 0; i-- {
+		if ids[recent[i].RepositoryID] {
+			out = append(out, recent[i])
+		}
+	}
+	return out, nil
+}
+
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 	ctx, release := h.beginOperation(r)
 	defer release()
@@ -89,9 +110,14 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	timeline, err := h.followedTimeline(ctx, userID)
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"snapshot": snapshot,
-		"timeline": h.deps.SSEHub.RecentEvents(),
+		"timeline": timeline,
 	})
 }
 
@@ -296,6 +322,7 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 				Title          string `json:"title"`
 				State          string `json:"state"`
 				Draft          bool   `json:"draft"`
+				Merged         bool   `json:"merged"`
 				HTMLURL        string `json:"html_url"`
 				MergeableState string `json:"mergeable_state"`
 				User           struct {
@@ -312,6 +339,9 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 				ID       int64  `json:"id"`
 				FullName string `json:"full_name"`
 			} `json:"repository"`
+			Sender struct {
+				Login string `json:"login"`
+			} `json:"sender"`
 		}
 		if err := json.Unmarshal(payload, &raw); err != nil {
 			writeDomainError(w, entity.ErrInvalidInput)
@@ -336,6 +366,8 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			HeadSHA:        raw.PullRequest.Head.SHA,
 			BaseRef:        raw.PullRequest.Base.Ref,
 			MergeableState: raw.PullRequest.MergeableState,
+			SenderLogin:    raw.Sender.Login,
+			Merged:         raw.PullRequest.Merged,
 		}); err != nil {
 			writeDomainError(w, err)
 			return

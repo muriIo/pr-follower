@@ -40,7 +40,7 @@ describe('AuthStore (GitHub-only sign-in, ADR-0010)', () => {
     expect(store.status()).toBe('signed-in');
     expect(store.user()?.login).toBe('octocat');
     expect(store.isAuthenticated()).toBe(true);
-    expect(workspace.startLiveSession).toHaveBeenCalledTimes(1);
+    expect(workspace.startLiveSession).toHaveBeenCalledWith('octocat');
   });
 
   it('shows the sign-in screen when there is no session, without starting the workspace', async () => {

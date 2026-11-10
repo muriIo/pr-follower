@@ -119,6 +119,12 @@ export interface TimelineEventItem {
   readonly repo: string;
   readonly pr?: number;
   readonly fresh?: boolean;
+  /** Server activity id, when the activity came from the API. */
+  readonly id?: string;
+  /** Activity type (pr.merged, ci.failed, ...), used for its icon. */
+  readonly type?: string;
+  /** GitHub login of who acted. */
+  readonly actor?: string;
   /** The event changed what the workspace shows (e.g. repository access), so reload it. */
   readonly refreshWorkspace?: boolean;
 }

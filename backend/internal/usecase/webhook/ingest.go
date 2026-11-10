@@ -25,6 +25,10 @@ type PullRequestEventPayload struct {
 	BaseRef      string
 	// MergeableState is GitHub's mergeable_state from the payload (clean, dirty, blocked, ...).
 	MergeableState string
+	// Merged is pull_request.merged: GitHub reports a merge as action "closed" with merged=true.
+	Merged bool
+	// SenderLogin is who triggered the event (who merged, pushed, edited); the PR author may differ.
+	SenderLogin string
 }
 
 type IngestUseCase struct {
@@ -70,7 +74,7 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		HTMLURL:        p.HTMLURL,
 		IsDependabot:   isDependabot,
 		IsDraft:        p.IsDraft,
-		State:          p.State,
+		State:          stateOf(p),
 		MergeableState: entity.MergeableStateFromGitHub(p.MergeableState),
 		CIStatus:       entity.CIStatusNone,
 		HeadSHA:        p.HeadSHA,
@@ -105,13 +109,13 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 
 	return uc.pub.Publish(ctx, entity.ActivityEvent{
 		ID:             fmt.Sprintf("wh-pr-%d-%d", p.Number, time.Now().UnixNano()),
-		Type:           "pr." + p.Action,
+		Type:           "pr." + actionOf(p),
 		RepositoryID:   repo.ID,
 		RepositoryName: repo.FullName,
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
-		ActorLogin:     p.AuthorLogin,
-		Summary:        fmt.Sprintf("%s #%d (%s): %s", repo.FullName, pr.Number, p.Action, pr.Title),
+		ActorLogin:     actorOf(p),
+		Summary:        fmt.Sprintf("%s #%d (%s): %s", repo.FullName, pr.Number, actionOf(p), pr.Title),
 		OccurredAt:     time.Now().UTC(),
 	})
 }
@@ -127,4 +131,25 @@ func sameWebhookState(stored, incoming *entity.PullRequest) bool {
 		stored.AuthorLogin == incoming.AuthorLogin &&
 		stored.HTMLURL == incoming.HTMLURL &&
 		stored.MergeableState == incoming.MergeableState
+}
+
+func actorOf(p PullRequestEventPayload) string {
+	if p.SenderLogin != "" {
+		return p.SenderLogin
+	}
+	return p.AuthorLogin
+}
+
+func stateOf(p PullRequestEventPayload) entity.PRState {
+	if p.Merged {
+		return entity.PRStateMerged
+	}
+	return p.State
+}
+
+func actionOf(p PullRequestEventPayload) string {
+	if p.Action == "closed" && p.Merged {
+		return "merged"
+	}
+	return p.Action
 }
