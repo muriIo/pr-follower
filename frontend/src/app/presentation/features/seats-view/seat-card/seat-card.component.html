@@ -2,6 +2,11 @@
   <header class="pf-seat-head">
     <h2 class="pf-seat-name">{{ seat().name }}</h2>
     <span class="pf-badge pf-tag pf-mono">{{ seat().branch }}</span>
+    @if (seat().noCodeowners) {
+      <span class="pf-badge pf-tag pf-seat-no-codeowners" [title]="'seats.codeowners.noneTip' | t">
+        {{ 'seats.codeowners.none' | t }}
+      </span>
+    }
     <span [class]="'pf-seat-ci ' + seat().ciCls">
       <app-status-dot [dotClass]="seat().ciDot" />{{ seat().ciLabel }}
     </span>

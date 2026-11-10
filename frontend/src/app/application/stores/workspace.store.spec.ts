@@ -6,10 +6,10 @@ import {
   PULL_REQUEST_GATEWAY,
   PullRequestGateway,
 } from '../../domain/gateways/workspace.gateways';
-import { TimelineEventItem } from '../../domain/models/workspace.models';
+import { PullRequestItem, RepoInfo, TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
 import { WorkspaceStore } from './workspace.store';
-import { loadWorkspaceFixture } from '../../testing/workspace-fixtures';
+import { createInitialPrDataset, loadWorkspaceFixture } from '../../testing/workspace-fixtures';
 
 function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: LiveEventGateway } {
   const prGateway: PullRequestGateway = {
@@ -322,5 +322,101 @@ describe('WorkspaceStore live stream recovery', () => {
     setState!('reconectando');
     setState!('conectado');
     expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('WorkspaceStore truthful PR state', () => {
+  function setup(repos: readonly RepoInfo[], prs: readonly PullRequestItem[]): WorkspaceStore {
+    const { prGateway, sseGateway } = createFakeGateways();
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.repos.set(repos);
+    store.prs.set(prs);
+    return store;
+  }
+
+  const base = createInitialPrDataset().find((p) => !p.dep)!;
+  const pr = (id: number, repo: string, overrides: Partial<PullRequestItem>): PullRequestItem => ({
+    ...base,
+    id,
+    repo,
+    turn: false,
+    approvedBy: undefined,
+    muteBadge: undefined,
+    ...overrides,
+  });
+
+  it('shows a repository without CI or CODEOWNERS as such, not as running or pending review', () => {
+    const store = setup(
+      [{ name: 'acme/bare', branch: 'main', codeowners: 'absent' }],
+      [pr(11, 'acme/bare', { ci: 'none', owners: 'none', merge: 'unknown' })],
+    );
+
+    const seat = store.allSeats()[0];
+    expect(seat.ciLabel).toBe('Sem CI');
+    expect(seat.ciDot).toBe('pf-dot');
+    expect(seat.noCodeowners).toBe(true);
+
+    store.openPr(11);
+    const drawer = store.drawer()!;
+    expect(drawer.signals[0]).toEqual({ k: 'CI', v: 'Nenhum CI reportado para este commit', dot: 'pf-dot' });
+    expect(drawer.signals[1]).toEqual({ k: 'CODEOWNERS', v: 'Repositório sem CODEOWNERS', dot: 'pf-dot' });
+    // Neither missing CI nor missing CODEOWNERS blocks the merge; only the user's own approval is asked.
+    expect(drawer.blockedText).toBe('Aprove antes de mesclar.');
+    expect(drawer.blockedCls).toBe('pf-note');
+  });
+
+  it('keeps reporting real blockers: running CI, pending owners and the merge state GitHub reported', () => {
+    const store = setup(
+      [{ name: 'acme/owned', branch: 'main', codeowners: 'present' }],
+      [
+        pr(21, 'acme/owned', { ci: 'run', owners: 'pend' }),
+        pr(22, 'acme/owned', { ci: 'none', owners: 'pend' }),
+        pr(23, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'conflict' }),
+        pr(24, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'behind' }),
+        pr(25, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'blocked' }),
+        pr(26, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'draft' }),
+        pr(27, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'clean' }),
+      ],
+    );
+
+    const seat = store.allSeats()[0];
+    expect(seat.ciLabel).toBe('1 CI Rodando'); // only the PR whose CI actually runs
+    expect(seat.noCodeowners).toBe(false);
+
+    const blocked = (id: number) => {
+      store.openPr(id);
+      return store.drawer()!.blockedText;
+    };
+    expect(blocked(21)).toBe('Mesclagem bloqueada: o CI ainda está rodando.');
+    expect(blocked(22)).toBe('Mesclagem bloqueada: falta aprovação de CODEOWNERS.');
+    expect(blocked(23)).toBe('Mesclagem bloqueada: há conflitos com a branch base.');
+    expect(blocked(24)).toBe('Mesclagem bloqueada: a branch está desatualizada em relação à base.');
+    expect(blocked(25)).toBe('Mesclagem bloqueada pela proteção da branch no GitHub (revisões ou checks obrigatórios).');
+    expect(blocked(26)).toBe('Mesclagem bloqueada: o PR ainda é rascunho.');
+    expect(blocked(27)).toBe('');
+  });
+
+  it('labels cards without CI as "Sem CI" in the inbox and the radar', () => {
+    const dep = createInitialPrDataset().find((p) => p.dep)!;
+    const store = setup(
+      [{ name: 'acme/bare', branch: 'main', codeowners: 'absent' }],
+      [
+        pr(31, 'acme/bare', { ci: 'none', owners: 'none', muteBadge: '🚧 gate' }),
+        { ...dep, id: 32, repo: 'acme/bare', ci: 'none' },
+      ],
+    );
+    expect(store.mutedInboxCards().find((c) => c.id === 31)!.ciLabel).toBe('Sem CI');
+    const radar = store.radarGroups().flatMap((g) => g.items);
+    expect(radar.find((c) => c.id === 32)!.ciShort).toBe('Sem CI');
+    // A dependency bump nothing has verified is not a safe batch candidate.
+    expect(store.safeBatchSummary().safeApproved.concat(store.safeBatchSummary().safePending)).toEqual([]);
   });
 });

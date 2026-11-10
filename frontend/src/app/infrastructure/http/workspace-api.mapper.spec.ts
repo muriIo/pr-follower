@@ -234,6 +234,68 @@ describe('workspace-api.mapper', () => {
     expect(dataset!.repos.map((r) => r.access)).toEqual(['removed', 'suspended', 'active']);
   });
 
+  it('shows what GitHub reported: no CI, no CODEOWNERS and the merge state are real states', () => {
+    const pr = (id: number, repo: string, ci: 'NONE' | 'PENDING', mergeable: 'BEHIND' | 'UNKNOWN') => ({
+      id,
+      repository_id: id,
+      repository_name: repo,
+      number: id,
+      title: `PR ${id}`,
+      author_login: 'ana',
+      html_url: '',
+      is_dependabot: false,
+      is_draft: false,
+      state: 'OPEN' as const,
+      mergeable_state: mergeable,
+      ci_status: ci,
+      head_sha: 'abc',
+      base_ref: 'main',
+    });
+    const userState = (id: number) => ({
+      pull_request_id: id,
+      user_id: 1,
+      turn_state: 'WAITING_ON_AUTHOR' as const,
+      team_already_approved: false,
+    });
+    const seat = (id: number, fullName: string, codeowners?: '' | 'present' | 'absent') => ({
+      repository: {
+        id,
+        owner: 'acme',
+        name: fullName.split('/')[1],
+        full_name: fullName,
+        default_branch: 'main',
+        codeowners_status: codeowners,
+      },
+      open_pr_count: 1,
+      waiting_on_me_count: 0,
+      dependabot_pr_count: 0,
+      failing_ci_count: 0,
+      pull_requests: [],
+    });
+
+    const dataset = mapApiWorkspaceResponseToDataset({
+      snapshot: {
+        seats: [seat(1, 'acme/bare', 'absent'), seat(2, 'acme/owned', 'present'), seat(3, 'acme/new', '')],
+        inbox_dimmed: [
+          { pull_request: pr(11, 'acme/bare', 'NONE', 'BEHIND'), user_state: userState(11) },
+          { pull_request: pr(12, 'acme/owned', 'PENDING', 'UNKNOWN'), user_state: userState(12) },
+        ],
+      },
+    })!;
+
+    expect(dataset.repos.map((r) => r.codeowners)).toEqual(['absent', 'present', undefined]);
+
+    const bare = dataset.prs.find((p) => p.id === 11)!;
+    expect(bare.ci).toBe('none'); // the repository never reported a check: not "running"
+    expect(bare.owners).toBe('none'); // no CODEOWNERS file: nobody's review is pending
+    expect(bare.merge).toBe('behind');
+
+    const owned = dataset.prs.find((p) => p.id === 12)!;
+    expect(owned.ci).toBe('run');
+    expect(owned.owners).toBe('pend');
+    expect(owned.merge).toBe('unknown');
+  });
+
   it('marks every server activity as a workspace change, with access losses as failures', () => {
     const event = (type: string) =>
       mapActivityEventToTimelineItem({ id: type, type, repository_name: 'acme/web', summary: type, occurred_at: '2026-11-10T12:00:00Z' });
