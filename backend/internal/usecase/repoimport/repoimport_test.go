@@ -28,6 +28,10 @@ type fakeUserAPI struct {
 	gotToken      string
 }
 
+func (f *fakeUserAPI) ListPullRequestFiles(context.Context, string, string, string, int) ([]entity.ChangedFile, error) {
+	return nil, nil
+}
+
 func (f *fakeUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
 	if f.fileErr != nil {
 		return nil, f.fileErr

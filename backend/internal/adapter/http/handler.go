@@ -19,6 +19,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
@@ -45,6 +46,8 @@ type HandlerDeps struct {
 	InstallationUC *webhook.InstallationUseCase
 	// Follows scopes the live event stream to followed repositories. Nil sends nothing.
 	Follows port.FollowChecker
+	// FilesUC serves the drawer's changed-files preview.
+	FilesUC *prfiles.UseCase
 }
 
 type Handler struct {

@@ -88,7 +88,11 @@
     }
 
     @if (drawer().showDiff) {
-      <app-changed-files [files]="drawer().files" (toggleFile)="store.toggleChangedFile($event)" />
+      <app-changed-files
+        [files]="drawer().files"
+        [state]="drawer().filesState"
+        (toggleFile)="store.toggleChangedFile($event)"
+      />
     }
   </div>
 

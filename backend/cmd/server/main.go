@@ -26,6 +26,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
@@ -86,6 +87,7 @@ func main() {
 	// login endpoint redirects with auth_error=not_configured and every API route is 401.
 	var authUC *auth.UseCase
 	var importUC *repoimport.UseCase
+	var filesUC *prfiles.UseCase
 	if cfg.GitHubLoginConfigured() {
 		authUC = auth.NewUseCase(auth.Deps{
 			OAuth: github.NewOAuthClient(github.OAuthConfig{
@@ -97,12 +99,9 @@ func main() {
 			Users:    userRepo,
 			Sessions: sessionRepo,
 		})
-		importUC = repoimport.NewUseCase(
-			authUC,
-			github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()}),
-			repoRepo,
-			sseHub,
-		)
+		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, sseHub)
+		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
@@ -124,6 +123,7 @@ func main() {
 		InstallURL:     cfg.GitHubAppInstallURL(),
 		InstallationUC: installationUC,
 		Follows:        repoRepo,
+		FilesUC:        filesUC,
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)

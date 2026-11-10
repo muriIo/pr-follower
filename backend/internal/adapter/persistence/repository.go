@@ -427,6 +427,15 @@ func (r *PullRequestRepository) GetByRepoAndNumber(ctx context.Context, repoID u
 	return toDomainPR(row), nil
 }
 
+// HeadSHA returns the stored head commit of a PR, if PR Follower has seen it.
+func (r *PullRequestRepository) HeadSHA(ctx context.Context, repositoryID uint64, number int) (string, bool) {
+	pr, err := r.GetByRepoAndNumber(ctx, repositoryID, number)
+	if err != nil || pr.HeadSHA == "" {
+		return "", false
+	}
+	return pr.HeadSHA, true
+}
+
 // ListOpenByHeadSHA returns the open PRs of a repository whose head is the given commit.
 func (r *PullRequestRepository) ListOpenByHeadSHA(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.PullRequest, error) {
 	if err := ctx.Err(); err != nil {

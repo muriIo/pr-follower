@@ -1,6 +1,15 @@
 <section class="pf-drawer-sec">
-  <h3 class="pf-section">{{ 'drawer.files.title' | t }} ({{ files().length }})</h3>
-  @if (files().length === 0) {
+  <h3 class="pf-section">
+    {{ 'drawer.files.title' | t }}
+    @if (state() === 'ready') {
+      ({{ files().length }})
+    }
+  </h3>
+  @if (state() === 'loading') {
+    <p class="pf-empty-note" aria-busy="true">{{ 'drawer.files.loading' | t }}</p>
+  } @else if (state() === 'error') {
+    <p class="pf-empty-note">{{ 'drawer.files.error' | t }}</p>
+  } @else if (files().length === 0) {
     <p class="pf-empty-note">{{ 'drawer.files.unavailable' | t }}</p>
   } @else {
     <div class="pf-blasts">
@@ -28,6 +37,9 @@
                 <path d="M4.5 3l3 3-3 3"></path>
               </svg>
               <span class="pf-changed-path">{{ f.path }}</span>
+              @if (f.owned) {
+                <span class="pf-badge pf-turn pf-changed-owned">{{ 'drawer.files.owned' | t }}</span>
+              }
             </span>
             <span class="pf-blast-tags">
               <span class="pf-delta-add">{{ f.deltaAdd }}</span>

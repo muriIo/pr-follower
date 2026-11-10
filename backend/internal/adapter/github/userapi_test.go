@@ -173,3 +173,58 @@ func TestUserClient_GetRepositoryFile(t *testing.T) {
 		t.Fatalf("canceled: expected context.Canceled, got %v", err)
 	}
 }
+
+func TestUserClient_ListPullRequestFilesPaginates(t *testing.T) {
+	t.Parallel()
+	const total = 130
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/repos/acme/web/pulls/7/files" {
+			http.NotFound(w, r)
+			return
+		}
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		var files []map[string]any
+		for i := (page-1)*100 + 1; i <= min(page*100, total); i++ {
+			file := map[string]any{"filename": fmt.Sprintf("src/f%d.ts", i), "status": "modified", "additions": i, "deletions": 1}
+			if i == 1 {
+				file["patch"] = "@@ -1 +1 @@\n-old\n+new"
+				file["status"] = "added"
+			}
+			files = append(files, file)
+		}
+		_ = json.NewEncoder(w).Encode(files)
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	files, err := c.ListPullRequestFiles(context.Background(), "ghu_a", "acme", "web", 7)
+	if err != nil {
+		t.Fatalf("ListPullRequestFiles() error: %v", err)
+	}
+	if len(files) != total {
+		t.Fatalf("expected %d files across pages, got %d", total, len(files))
+	}
+	first := files[0]
+	if first.Path != "src/f1.ts" || first.Status != "added" || first.Additions != 1 || first.Deletions != 1 || first.Patch == "" {
+		t.Fatalf("unexpected mapping: %+v", first)
+	}
+	if files[1].Patch != "" {
+		t.Fatal("GitHub omits patches for large or binary files; none must be invented")
+	}
+
+	if _, err := c.ListPullRequestFiles(context.Background(), "ghu_a", "acme", "web", 404); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown PR: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.ListPullRequestFiles(context.Background(), "revoked", "acme", "web", 7); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.ListPullRequestFiles(canceled, "ghu_a", "acme", "web", 7); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}

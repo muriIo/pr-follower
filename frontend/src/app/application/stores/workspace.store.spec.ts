@@ -479,3 +479,69 @@ describe('WorkspaceStore truthful PR state', () => {
     expect(store.safeBatchSummary().safeApproved.concat(store.safeBatchSummary().safePending)).toEqual([]);
   });
 });
+
+describe('WorkspaceStore changed-files preview', () => {
+  const file = (path: string, owned: boolean) => ({ path, additions: 1, deletions: 0, hunk: [], owned });
+
+  function setup(fetchChangedFiles: PullRequestGateway['fetchChangedFiles']) {
+    const { prGateway, sseGateway } = createFakeGateways();
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: { ...prGateway, fetchChangedFiles } },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    loadWorkspaceFixture(store);
+    return store;
+  }
+
+  it('loads the files when a PR opens, opening the first file the user owns', async () => {
+    const fetch = vi.fn(async () => [file('README.md', false), file('src/app/seat.ts', true), file('src/app/x.ts', true)]);
+    const store = setup(fetch);
+
+    store.openPr(142);
+    expect(store.drawer()!.filesState).toBe('loading');
+    await vi.waitFor(() => expect(store.drawer()!.filesState).toBe('ready'));
+
+    expect(fetch).toHaveBeenCalledWith('arvore/hive-web', 142, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    const files = store.drawer()!.files;
+    expect(files.map((f) => [f.path, f.owned, f.expanded])).toEqual([
+      ['README.md', false, false],
+      ['src/app/seat.ts', true, true],
+      ['src/app/x.ts', true, false],
+    ]);
+  });
+
+  it('cancels the previous load when another PR opens or the drawer closes', async () => {
+    const signals: AbortSignal[] = [];
+    const store = setup(
+      vi.fn((_repo: string, _n: number, options?: { signal?: AbortSignal }) => {
+        signals.push(options!.signal!);
+        return new Promise<never>(() => undefined);
+      }),
+    );
+    store.openPr(142);
+    store.openPr(139);
+    expect(signals[0].aborted).toBe(true);
+    store.closeDrawer();
+    expect(signals[1].aborted).toBe(true);
+  });
+
+  it('reports a failed load instead of an empty list', async () => {
+    const store = setup(vi.fn(async () => Promise.reject(new Error('502'))));
+    store.openPr(142);
+    await vi.waitFor(() => expect(store.drawer()!.filesState).toBe('error'));
+    expect(store.drawer()!.files).toEqual([]);
+  });
+
+  it('does not load files for Dependabot PRs, whose drawer shows the impact analysis', () => {
+    const fetch = vi.fn(async () => []);
+    const store = setup(fetch);
+    const dep = store.prs().find((p) => p.dep)!;
+    store.openPr(dep.id);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

@@ -109,6 +109,9 @@
   "seats.access.fix": "Fix access",
   "drawer.codeowners.unknown": "CODEOWNERS not checked yet",
   "drawer.files.title": "Changed files",
-  "drawer.files.unavailable": "The changed-files preview is not available yet.",
-  "drawer.files.noDiff": "No diff available for this file."
+  "drawer.files.unavailable": "This PR does not change any file.",
+  "drawer.files.noDiff": "No diff available for this file.",
+  "drawer.files.loading": "Loading files from GitHub...",
+  "drawer.files.error": "Could not load the files from GitHub.",
+  "drawer.files.owned": "Yours"
 }

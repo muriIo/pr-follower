@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
-import { ChangedFileCardViewModel } from '../../../../application/stores/workspace.store';
+import { ChangedFileCardViewModel, ChangedFilesState } from '../../../../application/stores/workspace.store';
 import { TranslatePipe } from '../../../../infrastructure/i18n/json-translation.gateway';
 import { DiffViewerComponent } from '../../../common/diff-viewer/diff-viewer.component';
 
@@ -13,5 +13,6 @@ import { DiffViewerComponent } from '../../../common/diff-viewer/diff-viewer.com
 })
 export class ChangedFilesComponent {
   readonly files = input.required<readonly ChangedFileCardViewModel[]>();
+  readonly state = input<ChangedFilesState>('ready');
   readonly toggleFile = output<number>();
 }
