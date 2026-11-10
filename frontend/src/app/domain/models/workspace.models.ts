@@ -1,4 +1,4 @@
-export type PerspectiveView = 'seats' | 'inbox' | 'radar' | 'timeline';
+export type PerspectiveView = 'seats' | 'inbox' | 'radar' | 'timeline' | 'import';
 export type SeatFilterType = 'todos' | 'turn' | 'deps';
 export type RiskVerdictTier = 'baixo' | 'medio' | 'alto';
 export type CiState = 'ok' | 'run' | 'fail';

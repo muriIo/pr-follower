@@ -12,10 +12,6 @@ import { WorkspaceStore } from './workspace.store';
 function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: LiveEventGateway } {
   const prGateway: PullRequestGateway = {
     fetchWorkspace: async () => null,
-    followRepository: async (owner, name, defaultBranch = 'main') => ({
-      name: `${owner}/${name}`,
-      branch: defaultBranch,
-    }),
     approvePullRequest: async () => undefined,
     mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
     batchMergePullRequests: async (ids) => ({ mergedIds: ids }),
@@ -76,10 +72,9 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     expect(store.drawer()!.blasts.length).toBe(7);
   });
 
-  it('executes PR approval, squash merge, followRepo, loadWorkspace from API, and supports cooperative cancellation', async () => {
+  it('executes PR approval, squash merge, loadWorkspace from API, and supports cooperative cancellation', async () => {
     const { prGateway, sseGateway } = createFakeGateways();
     const fetchWorkspaceSpy = vi.spyOn(prGateway, 'fetchWorkspace');
-    const followRepoSpy = vi.spyOn(prGateway, 'followRepository');
 
     TestBed.configureTestingModule({
       providers: [
@@ -94,11 +89,6 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     expect(fetchWorkspaceSpy).not.toHaveBeenCalled();
     store.startLiveSession();
     expect(fetchWorkspaceSpy).toHaveBeenCalled();
-
-    // Follow a new repository via API
-    await store.followRepo('arvore', 'billing-worker', 'main');
-    expect(followRepoSpy).toHaveBeenCalledWith('arvore', 'billing-worker', 'main');
-    expect(store.repos().some((r) => r.name === 'arvore/billing-worker')).toBe(true);
 
     store.openPr(142);
 

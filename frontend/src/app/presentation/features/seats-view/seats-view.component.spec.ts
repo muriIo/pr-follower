@@ -16,7 +16,6 @@ describe('SeatsViewComponent', () => {
           provide: PULL_REQUEST_GATEWAY,
           useValue: {
             fetchWorkspace: async () => null,
-            followRepository: async (owner: string, name: string) => ({ name: `${owner}/${name}`, branch: 'main' }),
             approvePullRequest: async () => undefined,
             mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
             commentOnPullRequest: async () => undefined,
@@ -51,5 +50,9 @@ describe('SeatsViewComponent', () => {
     filterBtns[1].click();
     fixture.detectChanges();
     expect(el.querySelectorAll('app-seat-card').length).toBe(2);
+
+    // "+ Importar repositório" opens the Vercel-style import screen
+    (el.querySelector('#pf-import-open') as HTMLButtonElement).click();
+    expect(fixture.componentInstance.store.view()).toBe('import');
   });
 });

@@ -53,16 +53,6 @@ describe('HttpPullRequestGateway', () => {
     const ws = await gateway.fetchWorkspace({ signal: ctrl.signal, operationId: 'op-ws-1' });
     expect(ws?.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main' }]);
 
-    const followed = await gateway.followRepository('arvore', 'design-system', 'main', {
-      signal: ctrl.signal,
-      operationId: 'op-follow-1',
-    });
-    expect(followed).toEqual({ name: 'arvore/design-system', branch: 'main' });
-    expect(fetchSpy).toHaveBeenCalledWith(
-      '/api/v1/repositories/follow',
-      expect.objectContaining({ method: 'POST' }),
-    );
-
     await gateway.approvePullRequest(142, { signal: ctrl.signal, operationId: 'op-approve-142' });
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/v1/prs/142/approve',

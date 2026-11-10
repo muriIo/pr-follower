@@ -10,7 +10,7 @@ Production readiness depends on open items in the Status list of [`implementatio
 
 - [ ] **Demo seed endpoint.** `POST /api/v1/demo/seed` writes fake repositories and PRs for whoever calls it. Remove it or gate it to non-production before going public.
 - [ ] **Acting on GitHub.** Approve / merge / comment do not yet use the user's token, and installation tokens (App ID + private key) are not wired. Until then those actions do not reach GitHub.
-- [ ] **Repository import.** The Vercel-style import screen is not built yet.
+- [ ] **Installation webhooks.** Uninstalling the app or removing repositories from it does not yet update followed repositories (the user can still unfollow them on the import screen).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
@@ -62,7 +62,7 @@ On the app's **General** page:
 
 1. Copy **Client ID** → `GITHUB_CLIENT_ID`.
 2. **Generate a new client secret** → `GITHUB_CLIENT_SECRET` (shown once).
-3. Copy **App ID** → `GITHUB_APP_ID`.
+3. Copy **App ID** → `GITHUB_APP_ID`, and the app's URL name (the `<slug>` in `https://github.com/apps/<slug>`) → `GITHUB_APP_SLUG`.
 4. **Generate a private key** → download the `.pem`. Store it in your secret manager; never commit it. (Needed once installation tokens are wired.)
 5. Optionally upload a logo, so the authorization and install pages look trustworthy.
 
@@ -83,6 +83,7 @@ API environment:
 | `GITHUB_CLIENT_ID` | from step 3 | Without it sign-in is disabled (`auth_error=not_configured`). |
 | `GITHUB_CLIENT_SECRET` | from step 3 | Secret. |
 | `GITHUB_APP_ID` | from step 3 | |
+| `GITHUB_APP_SLUG` | from step 3 | Builds the "install on GitHub / add account" links on the import screen. |
 | `GITHUB_WEBHOOK_SECRET` | from step 2 | Secret. **Must be set**: the default is the public dev value. |
 | `TOKEN_ENCRYPTION_KEY` | from above | Secret. **Must be set**: without it a random key is used and every sign-in is lost on restart. |
 | `ALLOWED_ORIGIN` | `https://app.example.com` | CORS; the app is same-origin, so this only narrows the default `*`. |
@@ -142,7 +143,7 @@ TLS proxy requirements:
 3. `curl -s -o /dev/null -w '%{http_code}\n' https://app.example.com/api/v1/workspace` → `401` (API reachable and protected).
 4. Open `https://app.example.com`, click **Entrar com GitHub**, authorize the app. You should land in the workspace with your avatar.
 5. In the browser dev tools, the `pf_session` cookie is `HttpOnly`, `Secure`, `SameSite=Lax`.
-6. Install the app on a test repository (app page → **Install App**). In the app's **Advanced → Recent Deliveries**, the `installation` delivery shows a `2xx` response. A `401` means `GITHUB_WEBHOOK_SECRET` differs from the app's webhook secret.
+6. In the app, open **Seats → + Importar repositório**, follow **+ Adicionar conta do GitHub**, install the app on a test repository, and check that GitHub returns you to the import screen with that account selected. Follow the repository. In the app's **Advanced → Recent Deliveries**, the `installation` delivery shows a `2xx` response. A `401` means `GITHUB_WEBHOOK_SECRET` differs from the app's webhook secret.
 7. Open a PR on the test repository: the delivery succeeds and the event appears in **Linha do Tempo**.
 
 ## 8. Operate

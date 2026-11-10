@@ -255,17 +255,6 @@ export class WorkspaceStore {
     }
   }
 
-  async followRepo(owner: string = 'arvore', name: string = 'hive-analytics', defaultBranch: string = 'main'): Promise<void> {
-    const followed = await this.prGateway?.followRepository?.(owner, name, defaultBranch);
-    const fullName = followed?.name ?? `${owner}/${name}`;
-    const branch = followed?.branch ?? defaultBranch;
-    if (!this.repos().some((r) => r.name === fullName)) {
-      this.repos.update((curr) => [...curr, { name: fullName, branch }]);
-    }
-    this.freshRepo.set(fullName);
-    this.appendTimelineEvent('info', `Repositório ${fullName} adicionado aos Seats`, fullName);
-  }
-
   readonly openPrs = computed(() => {
     const merged = this.mergedMap();
     return this.prs().filter((p) => !merged[p.id]);

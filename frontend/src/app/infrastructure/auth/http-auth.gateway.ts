@@ -1,22 +1,12 @@
-import { Injectable, InjectionToken, inject } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { ActionRequestOptions, AuthGateway } from '../../domain/gateways/workspace.gateways';
 import {
   AuthErrorCode,
   AuthenticatedUser,
   buildAuthenticatedUser,
 } from '../../domain/models/workspace.models';
+import { BROWSER_WINDOW } from '../browser/browser-window';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
-
-/** The slice of `window` the gateway needs, injectable so tests never navigate. */
-export interface BrowserWindow {
-  readonly location: Pick<Location, 'assign' | 'search' | 'pathname' | 'hash'>;
-  readonly history: Pick<History, 'replaceState'>;
-}
-
-export const BROWSER_WINDOW = new InjectionToken<BrowserWindow>('BROWSER_WINDOW', {
-  providedIn: 'root',
-  factory: () => window,
-});
 
 const SIGN_IN_PATH = '/api/v1/auth/github/login';
 const KNOWN_AUTH_ERRORS: readonly AuthErrorCode[] = [
