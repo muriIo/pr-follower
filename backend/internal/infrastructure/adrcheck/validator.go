@@ -365,6 +365,7 @@ func validateADR0008And0009FrontendIfPresent(repoRoot string, report *Validation
 	}
 
 	validateADR0008TemplateTranslationKeys(repoRoot, appDir, report)
+	validateADR0008HardcodedText(repoRoot, appDir, report)
 
 	// ADR-0001 Frontend Clean Architecture check
 	feDomainDir := filepath.Join(appDir, "domain")
@@ -675,6 +676,81 @@ func isSelector(node ast.Node, pkg, name string) bool {
 	}
 	ident, ok := sel.X.(*ast.Ident)
 	return ok && ident.Name == pkg
+}
+
+var (
+	stringLiteralPattern = regexp.MustCompile("'(?:[^'\\\\]|\\\\.)*'|\"(?:[^\"\\\\]|\\\\.)*\"|`[^`]*`")
+	accentedPattern      = regexp.MustCompile(`[À-ÿ]`)
+	// Common pt-BR UI words without accents; accented text is caught by accentedPattern.
+	ptWordPattern        = regexp.MustCompile(`(?i)\b(todos|todas|agora|hoje|ontem|sem|mesclar|mesclado|mesclados|mesclando|mesclagem|aprovar|aprovando|aprovado|aprovados|cancelado|cancelada|sincronizando|sincronizado|silenciado|arquivo|arquivos|risco|nenhum|nenhuma|enviando|lote|raiz|pacote|usos|recolher|expandir|rodando|falhando|verde|pendente|aberto|abertos|dono|donos|seu|seus|sua|suas)\b`)
+	interpolationPattern = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
+	tagPattern           = regexp.MustCompile(`(?s)<[^>]*>`)
+	controlFlowPattern   = regexp.MustCompile(`@(if|else if|else|for|switch|case|default|empty)\b[^{]*\{`)
+	entityPattern        = regexp.MustCompile(`&#?\w+;`)
+	wordPattern          = regexp.MustCompile(`[A-Za-zÀ-ÿ]{3,}`)
+	literalAttrPattern   = regexp.MustCompile(`(?:^|\s)(label|title|placeholder|aria-label)="([^"{]*)"`)
+)
+
+// validateADR0008HardcodedText reports display text written outside the i18n dictionaries:
+// pt-BR literals in TypeScript, raw text in templates, and literal label/title/placeholder/
+// aria-label attributes. Specs, test fixtures and the LocaleStore fallback dictionary are exempt.
+func validateADR0008HardcodedText(repoRoot, appDir string, report *ValidationReport) {
+	_ = filepath.WalkDir(appDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == "testing" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, ".spec.ts") || name == "locale.store.ts" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		rel := relPath(repoRoot, path)
+		switch {
+		case strings.HasSuffix(name, ".ts"):
+			for i, line := range strings.Split(string(raw), "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "*") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "import ") {
+					continue
+				}
+				for _, lit := range stringLiteralPattern.FindAllString(line, -1) {
+					text := lit[1 : len(lit)-1]
+					if accentedPattern.MatchString(text) || ptWordPattern.MatchString(text) {
+						report.Violations = append(report.Violations,
+							fmt.Sprintf("ADR-0008: %s:%d hardcoded text %q: move it to the i18n dictionaries", rel, i+1, text))
+					}
+				}
+			}
+		case strings.HasSuffix(name, ".html"):
+			text := string(raw)
+			for _, m := range literalAttrPattern.FindAllStringSubmatch(text, -1) {
+				if wordPattern.MatchString(m[2]) {
+					report.Violations = append(report.Violations,
+						fmt.Sprintf("ADR-0008: %s literal %s=%q: bind it to a translation key", rel, m[1], m[2]))
+				}
+			}
+			body := interpolationPattern.ReplaceAllString(text, " ")
+			body = tagPattern.ReplaceAllString(body, "\n")
+			body = controlFlowPattern.ReplaceAllString(body, " ")
+			body = entityPattern.ReplaceAllString(body, " ")
+			for _, chunk := range strings.Split(body, "\n") {
+				chunk = strings.TrimSpace(strings.Trim(strings.TrimSpace(chunk), "}{"))
+				if wordPattern.MatchString(chunk) {
+					report.Violations = append(report.Violations,
+						fmt.Sprintf("ADR-0008: %s raw text %q: render it through the t pipe", rel, chunk))
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // forbiddenIdentityHeader is assembled so this package does not trip its own scan.

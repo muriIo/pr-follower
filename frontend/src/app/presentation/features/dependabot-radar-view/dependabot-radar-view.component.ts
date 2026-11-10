@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { LocaleStore } from '../../../application/stores/locale.store';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { TranslatePipe } from '../../../infrastructure/i18n/json-translation.gateway';
 import { PageHeaderComponent } from '../../common/page-header/page-header.component';
@@ -14,10 +15,11 @@ import { RadarPrCardComponent } from './radar-pr-card/radar-pr-card.component';
 })
 export class DependabotRadarViewComponent {
   readonly store = inject(WorkspaceStore);
+  private readonly locale = inject(LocaleStore);
 
   readonly subtitle = computed(() => {
     const deps = this.store.openDependabotPrs();
     const repoCount = new Set(deps.map((p) => p.repo)).size;
-    return `${deps.length} PRs abertos em ${repoCount} repositórios, agrupados por risco.`;
+    return this.locale.translate('radar.subtitle', { prs: deps.length, repos: repoCount });
   });
 }

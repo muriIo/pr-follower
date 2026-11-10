@@ -73,7 +73,6 @@ func (uc *UseCase) ApprovePR(ctx context.Context, userID, prID uint64, body stri
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     uc.actorLogin(ctx, userID),
-		Summary:        fmt.Sprintf("Approved PR #%d", pr.Number),
 		OccurredAt:     time.Now().UTC(),
 	})
 }
@@ -120,7 +119,7 @@ func (uc *UseCase) MergePR(ctx context.Context, userID, prID uint64, method stri
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     uc.actorLogin(ctx, userID),
-		Summary:        fmt.Sprintf("Merged PR #%d (%s)", pr.Number, method),
+		Params:         map[string]string{"method": string(method)},
 		OccurredAt:     time.Now().UTC(),
 	})
 }
@@ -173,7 +172,7 @@ func (uc *UseCase) RunDependabotCommand(ctx context.Context, userID uint64, prID
 		PullRequestID:  pr.ID,
 		PRNumber:       pr.Number,
 		ActorLogin:     uc.actorLogin(ctx, userID),
-		Summary:        fmt.Sprintf("Triggered '%s' on PR #%d", body, pr.Number),
+		Params:         map[string]string{"command": body},
 		OccurredAt:     time.Now().UTC(),
 	})
 }

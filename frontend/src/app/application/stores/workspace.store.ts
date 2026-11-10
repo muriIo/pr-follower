@@ -9,6 +9,7 @@ import {
   ChangedFileItem,
   CiState,
   DiffHunkLine,
+  I18nText,
   MergeState,
   PerspectiveView,
   PullRequestItem,
@@ -33,7 +34,8 @@ const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   draft: 'drawer.blocked.draft',
 };
 
-export interface TimelineItemViewModel extends TimelineEventItem {
+export interface TimelineItemViewModel extends Omit<TimelineEventItem, 'text'> {
+  readonly text: string;
   readonly time: string;
   readonly icon: ActivityIconName;
   readonly tone: ActivityTone;
@@ -60,12 +62,8 @@ export interface ChangedFileCardViewModel {
   readonly lines: readonly RenderedDiffLine[];
 }
 
-const RISK_LABELS: Readonly<Record<RiskVerdictTier, string>> = { baixo: 'Baixo Risco', medio: 'Médio Risco', alto: 'Alto Risco' };
-const RISK_TIER_LABELS: Readonly<Record<RiskVerdictTier, string>> = {
-  baixo: '🟢 Baixo Risco',
-  medio: '🟡 Médio Risco',
-  alto: '🔴 Alto Risco',
-};
+const RISK_LABEL_KEYS: Readonly<Record<RiskVerdictTier, string>> = { baixo: 'risk.baixo', medio: 'risk.medio', alto: 'risk.alto' };
+const RISK_TIER_KEYS: Readonly<Record<RiskVerdictTier, string>> = { baixo: 'risk.tier.baixo', medio: 'risk.tier.medio', alto: 'risk.tier.alto' };
 
 export interface SyntaxToken {
   readonly s: string;
@@ -237,12 +235,12 @@ export class WorkspaceStore {
   readonly closingDrawer = signal(false);
   readonly drawerWidth = signal(this.loadInitialDrawerWidth());
   readonly isResizingDrawer = signal(false);
-  readonly seatFilter = signal<SeatFilterType>('todos');
+  readonly seatFilter = signal<SeatFilterType>('all');
   readonly showMuted = signal(true);
   readonly mergedMap = signal<Record<number, boolean>>({});
   readonly approvedMap = signal<Record<number, boolean>>({});
-  readonly silencedMap = signal<Record<number, string>>({});
-  readonly ciOverrides = signal<Record<number, { ci: CiState; ciText: string }>>({});
+  readonly silencedMap = signal<Record<number, I18nText>>({});
+  readonly ciOverrides = signal<Record<number, { ci: CiState; ciText: I18nText }>>({});
   readonly events = signal<readonly TimelineEventItem[]>([]);
   readonly unreadEvents = signal(0);
   readonly pausedTimeline = signal(false);
@@ -415,9 +413,9 @@ export class WorkspaceStore {
           const showTurn = isTurn && !p.dep;
           const mine = Boolean(approved[p.id]);
           const isApproved = Boolean(p.approvedBy || (mine && !p.dep));
-          const tier = p.verdict ? RISK_TIER_LABELS[p.verdict] : '⚪ Sem análise';
+          const tier = this.t(p.verdict ? RISK_TIER_KEYS[p.verdict] : 'risk.tier.none');
           const dev = p.depType === 'devDependencies';
-          const vLabel = p.verdict ? RISK_LABELS[p.verdict] : '';
+          const vLabel = p.verdict ? this.t(RISK_LABEL_KEYS[p.verdict]) : '';
           const safe = isSafeBatchCandidate(p, this.effectiveCi(p).ci);
 
           return {
@@ -427,24 +425,24 @@ export class WorkspaceStore {
             dim: p.approvedBy && !mine ? 'is-dim' : '',
             showTurn,
             hasOwn: Boolean(p.ownFiles),
-            ownLabel: this.plural(p.ownFiles ?? 0, 'arquivo seu', 'arquivos seus'),
+            ownLabel: this.n('seats.ownFiles', p.ownFiles ?? 0),
             showRisk: p.verdict !== null && !showTurn && !isApproved && (!mine || Boolean(p.dep)),
             vCls: `pf-badge-${p.verdict}`,
             riskTip: p.dep
               ? dev
-                ? 'Só afeta desenvolvimento e build. Não chega à produção.'
-                : 'Código que roda em produção. Veja o raio de impacto no drawer.'
-              : 'Veja o veredito completo no drawer.',
+                ? this.t('seats.riskTip.dev')
+                : this.t('seats.riskTip.prod')
+              : this.t('seats.riskTip.human'),
             riskLabel: p.dep ? `${tier}${dev ? ' (Dev)' : ' (Prod)'}` : vLabel,
             isApproved: isApproved || mine,
             approvedTip: mine
-              ? 'Sua aprovação foi registrada. O PR ainda não foi mesclado.'
-              : 'Já aprovado por alguém do time. Sua revisão não é necessária.',
-            approvedLabel: mine ? 'Aprovado por você' : `Aprovado pelo Time (${p.approvedBy})`,
+              ? this.t('seats.approvedTip.mine')
+              : this.t('seats.approvedTip.team'),
+            approvedLabel: mine ? this.t('seats.approvedByYou') : this.t('seats.approvedByTeam', { login: p.approvedBy ?? '' }),
             hasQuick: safe,
             act: this.cancellation.getView(actionsMap, `merge:${p.id}`),
-            quickTip: mine ? 'Mescla o PR com squash.' : 'Registra sua aprovação sem mesclar. Depois, use Squash.',
-            quickLabel: mine ? 'Squash' : 'Aprovar',
+            quickTip: mine ? this.t('seats.quickTip.merge') : this.t('seats.quickTip.approve'),
+            quickLabel: mine ? 'Squash' : this.t('seats.quick.approve'),
             open: () => this.openPr(p.id),
             quick: () => {
               if (mine) {
@@ -471,22 +469,22 @@ export class WorkspaceStore {
         }[ciState],
         ciCls: { fail: 'pf-ci-fail', run: 'pf-ci-warn', ok: 'pf-ci-stable', none: 'pf-ci-none' }[ciState],
         ciLabel: {
-          fail: `${fails} CI Falhando`,
-          run: `${runs} CI Rodando`,
-          ok: 'CI Estável',
+          fail: this.n('seats.ci.failing', fails),
+          run: this.n('seats.ci.running', runs),
+          ok: this.t('seats.ci.stable'),
           none: this.locale.translate('ci.none'),
         }[ciState],
         ciTip: {
-          fail: 'PRs abertos deste repositório com CI falhando.',
-          run: 'PRs abertos deste repositório com CI ainda rodando.',
-          ok: 'Nenhum PR aberto com CI falhando ou rodando.',
+          fail: this.t('seats.ci.failTip'),
+          run: this.t('seats.ci.runTip'),
+          ok: this.t('seats.ci.okTip'),
           none: this.locale.translate('seats.ci.noneTip'),
         }[ciState],
         turn: turnCount,
         turnCls: turnCount > 0 ? 'pf-turn' : 'pf-badge-zero',
         deps: deps.length,
         depCls: deps.length === 0 ? 'pf-badge-zero' : risky ? 'pf-badge-medio' : 'pf-badge-baixo',
-        openLabel: this.plural(repoPrs.length, 'PR Aberto', 'PRs Abertos'),
+        openLabel: this.n('seats.openPrs', repoPrs.length),
         isEmpty: repoPrs.length === 0,
         accessKey,
         noCodeowners: r.codeowners === 'absent',
@@ -501,9 +499,9 @@ export class WorkspaceStore {
     const depSeats = all.filter((s) => s.deps > 0);
     const current = this.seatFilter();
     return [
-      { id: 'todos' as const, label: `Todos (${all.length})`, active: current === 'todos' },
-      { id: 'turn' as const, label: `Com PRs na Minha Vez (${turnSeats.length})`, active: current === 'turn' },
-      { id: 'deps' as const, label: `Dependabot Pendente (${depSeats.length})`, active: current === 'deps' },
+      { id: 'all' as const, label: this.t('seats.filter.all', { count: all.length }), active: current === 'all' },
+      { id: 'turn' as const, label: this.t('seats.filter.turn', { count: turnSeats.length }), active: current === 'turn' },
+      { id: 'deps' as const, label: this.t('seats.filter.deps', { count: depSeats.length }), active: current === 'deps' },
     ];
   });
 
@@ -538,10 +536,10 @@ export class WorkspaceStore {
     const approved = this.approvedMap();
     const selected = this.selectedPrId();
     const tiers: readonly [RiskVerdictTier | null, string][] = [
-      ['alto', '🔴 Alto Risco — Requer Análise de Impacto'],
-      ['baixo', '🟢 Baixo Risco — Seguros para Merge Rápido'],
-      ['medio', '🟡 Médio Risco — Revisar Antes de Mesclar'],
-      [null, '⚪ Sem análise — risco ainda não avaliado'],
+      ['alto', this.t('radar.group.alto')],
+      ['baixo', this.t('radar.group.baixo')],
+      ['medio', this.t('radar.group.medio')],
+      [null, this.t('radar.group.none')],
     ];
 
     return tiers
@@ -554,14 +552,14 @@ export class WorkspaceStore {
               id: p.id,
               repo: p.repo,
               radarTitle: p.radarTitle ?? p.title,
-              radarMeta: p.radarMeta ?? '',
+              radarMeta: this.locale.text(p.radarMeta),
               metaTip:
                 p.via && p.via.length > 0
-                  ? 'Transitiva: chega ao projeto por meio de outro pacote. Veja o caminho na árvore do drawer.'
+                  ? this.t('radar.metaTip.transitive')
                   : p.depType === 'devDependencies'
-                    ? 'Usada só em desenvolvimento. Não entra no build de produção.'
-                    : 'Declarada no package.json e carregada em produção.',
-              ciShort: { ok: 'CI verde', run: 'CI rodando', fail: 'CI falhando', none: this.locale.translate('ci.none') }[ci],
+                    ? this.t('radar.metaTip.dev')
+                    : this.t('radar.metaTip.prod'),
+              ciShort: { ok: this.t('radar.ci.ok'), run: this.t('radar.ci.run'), fail: this.t('radar.ci.fail'), none: this.t('ci.none') }[ci],
               ciTextCls: { ok: 'pf-ci-ok', run: 'pf-ci-warn', fail: 'pf-ci-fail', none: 'pf-ci-none' }[ci],
               approvedMine: Boolean(approved[p.id]),
               sel: selected === p.id ? 'is-sel' : '',
@@ -583,15 +581,15 @@ export class WorkspaceStore {
 
     return {
       has: safe.length > 0 || batchAct.running,
-      title: `🟢 ${batchN} PRs de Baixo Risco prontos para mesclagem segura (devDependencies ou transitivos sem import direto e CI verde)`,
+      title: this.t('radar.batch.title', { count: batchN }),
       canApprove: safePending.length > 0,
-      approveLabel: safeApproved.length > 0 ? `Aprovar os ${safePending.length} Restantes` : `Aprovar Todos os ${batchN}`,
+      approveLabel: safeApproved.length > 0 ? this.t('radar.batch.approveRest', { count: safePending.length }) : this.t('radar.batch.approveAll', { count: batchN }),
       mergeDis: safeApproved.length === 0 ? 'true' : 'false',
       mergeCls: safePending.length === 0 ? 'pf-btn-primary' : '',
       mergeLabel:
         safeApproved.length > 0 && safePending.length > 0
-          ? `Mesclar ${safeApproved.length} Aprovado(s)`
-          : `Mesclar Todos os ${batchN}`,
+          ? this.t('radar.batch.mergeApproved', { count: safeApproved.length })
+          : this.t('radar.batch.mergeAll', { count: batchN }),
       safeApproved,
       safePending,
     };
@@ -633,16 +631,17 @@ export class WorkspaceStore {
     const groups: TimelineGroupViewModel[] = [];
     for (const ev of visible) {
       const mins = (now.getTime() - ev.t) / 60_000;
-      const label =
+      const label = this.t(
         mins <= 5
-          ? 'Agora'
+          ? 'timeline.group.now'
           : mins <= 60
-            ? 'Última hora'
+            ? 'timeline.group.lastHour'
             : ev.t >= startOfToday
-              ? 'Hoje'
+              ? 'timeline.group.today'
               : ev.t >= startOfYesterday
-                ? 'Ontem'
-                : 'Mais antigas';
+                ? 'timeline.group.yesterday'
+                : 'timeline.group.older',
+      );
       let group = groups.find((g) => g.label === label);
       if (!group) {
         group = { label, items: [] };
@@ -654,6 +653,7 @@ export class WorkspaceStore {
       const { icon, tone } = activityIconFor(ev.type, ev.kind);
       group.items.push({
         ...ev,
+        text: this.locale.text(ev.text),
         time,
         icon,
         tone,
@@ -690,19 +690,19 @@ export class WorkspaceStore {
       none: 'pf-dot',
       unknown: 'pf-dot',
     }[pr.owners];
-    const ciText = ci.ci === 'none' ? this.locale.translate('drawer.ci.none') : ci.ciText;
+    const ciText = ci.ci === 'none' ? this.locale.translate('drawer.ci.none') : this.locale.text(ci.ciText);
     const ownersText =
       pr.owners === 'none'
         ? this.locale.translate('drawer.codeowners.none')
         : pr.owners === 'unknown'
           ? this.locale.translate('drawer.codeowners.unknown')
-          : pr.ownersText;
+          : this.locale.text(pr.ownersText);
 
     // Only GitHub decides what blocks a merge (mergeable_state: conflicts, out of date, branch
     // protection with its required reviews and checks, draft). CI and CODEOWNERS are signals.
     const blockedText = pr.merge && MERGE_BLOCKER_KEYS[pr.merge] ? this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!) : '';
 
-    const vLabel = pr.verdict ? RISK_LABELS[pr.verdict] : '';
+    const vLabel = pr.verdict ? this.t(RISK_LABEL_KEYS[pr.verdict]) : '';
     const openFiles = this.changedFileOpenMap();
     const loaded = this.changedFiles();
     const filesState: ChangedFilesState = loaded?.prId === pr.id ? loaded.state : 'ready';
@@ -731,13 +731,13 @@ export class WorkspaceStore {
       ghUrl: `https://github.com/${pr.repo}/pull/${pr.id}`,
       focused: Boolean(pr.focusRule),
       banner: pr.focusRule
-        ? `Você foi acionado via regra ${pr.focusRule}. Seus arquivos aparecem primeiro, marcados como "Seu".`
+        ? this.t('drawer.banner.focus', { rule: pr.focusRule })
         : '',
       general: Boolean(!pr.focusRule && !pr.dep),
       vCls: pr.verdict ? `pf-badge-${pr.verdict}` : '',
       hasVerdict: pr.verdict !== null,
       vLabel,
-      why: pr.why,
+      why: this.locale.text(pr.why),
       signals,
       isDep: Boolean(pr.dep),
       notDep: !pr.dep,
@@ -772,7 +772,7 @@ export class WorkspaceStore {
       approvedMine: mine,
       mergeCls: (mine || pr.approvedBy) && !blockedText ? 'pf-btn-primary' : '',
       mergeDis: blockedText ? 'true' : 'false',
-      mergeTip: blockedText || 'Mescla o PR com squash: todos os commits viram um só na branch padrão.',
+      mergeTip: blockedText || this.t('drawer.mergeTip'),
       busyDis: act.running ? 'true' : 'false',
       act,
     };
@@ -952,7 +952,7 @@ export class WorkspaceStore {
       `merge:${prId}`,
       [
         {
-          label: 'Aprovando PR...',
+          label: this.t('actions.approving'),
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
             await this.prGateway?.approvePullRequest(prId, opts);
@@ -963,19 +963,19 @@ export class WorkspaceStore {
         this.markApproved(pr);
         return null;
       },
-      () => 'Cancelado. Nada foi enviado ao GitHub.',
+      () => this.t('actions.canceled.nothingSent'),
     );
   }
 
   async mergePr(prId: number, delayMs: number = 1600): Promise<void> {
     const pr = this.prs().find((x) => x.id === prId);
     if (!pr) return;
-    let mergedSha = 'a1b2c3d';
+    let mergedSha = '';
     await this.cancellation.run(
       `merge:${prId}`,
       [
         {
-          label: 'Mesclando via squash...',
+          label: this.t('actions.merging'),
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
             const res = await this.prGateway?.mergePullRequest(prId, opts);
@@ -987,19 +987,21 @@ export class WorkspaceStore {
       ],
       () => {
         this.markMerged(pr);
-        return `Mesclado via squash em ${mergedSha}.`;
+        return mergedSha ? this.t('actions.mergedSha', { sha: mergedSha }) : this.t('actions.merged');
       },
-      () => 'Cancelado. O PR continua aberto e aprovado.',
+      () => this.t('actions.canceled.mergeKeepsOpen'),
     );
   }
 
-  async silencePr(prId: number, badge: string, delayMs: number = 1000): Promise<void> {
-    const condition = badge.toLowerCase().includes('ci') ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
+  /** Snooze a PR until its next commit, until CI passes, or (Dependabot) out of the Radar. */
+  async silencePr(prId: number, until: 'commit' | 'ci' | 'radar', delayMs: number = 1000): Promise<void> {
+    const condition = until === 'ci' ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
+    const badge: I18nText = { key: `silenced.${until}` };
     await this.cancellation.run(
       `merge:${prId}`,
       [
         {
-          label: 'Silenciando...',
+          label: this.t('actions.silencing'),
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
             await this.prGateway?.snoozePullRequest(prId, condition, opts);
@@ -1008,9 +1010,9 @@ export class WorkspaceStore {
       ],
       () => {
         this.silencedMap.update((curr) => ({ ...curr, [prId]: badge }));
-        return 'PR silenciado.';
+        return this.t('actions.silenced');
       },
-      () => 'Cancelado. O PR continua na sua fila.',
+      () => this.t('actions.canceled.silence'),
     );
   }
 
@@ -1019,15 +1021,15 @@ export class WorkspaceStore {
       `merge:${prId}`,
       [
         {
-          label: `Enviando ${command}...`,
+          label: this.t('actions.commenting', { command }),
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
             await this.prGateway?.commentOnPullRequest(prId, command, opts);
           },
         },
       ],
-      () => `Comentário enviado: ${command}.`,
-      () => 'Cancelado. Nada foi enviado ao GitHub.',
+      () => this.t('actions.commented', { command }),
+      () => this.t('actions.canceled.nothingSent'),
     );
   }
 
@@ -1037,15 +1039,15 @@ export class WorkspaceStore {
       'sync',
       [
         {
-          label: `Sincronizando ${count} repositórios...`,
+          label: this.n('actions.syncing', count),
           execute: async (opts) => {
             await this.waitWithSignal(delayMs, opts.signal);
             await this.loadWorkspace(opts);
           },
         },
       ],
-      () => 'Sincronizado agora.',
-      () => 'Sincronização cancelada.',
+      () => this.t('actions.synced'),
+      () => this.t('actions.syncCanceled'),
     );
   }
 
@@ -1058,7 +1060,7 @@ export class WorkspaceStore {
     await this.cancellation.run(
       'batch',
       list.map((pr, idx) => ({
-        label: `Aprovando ${idx + 1} de ${total}...`,
+        label: this.t('actions.batch.approving', { current: idx + 1, total }),
         pct: ((idx + 1) / total) * 100,
         execute: async (opts: Required<ActionRequestOptions>) => {
           await this.waitWithSignal(stepDelayMs, opts.signal);
@@ -1069,8 +1071,8 @@ export class WorkspaceStore {
       () => null,
       (idx) =>
         idx === 0
-          ? 'Lote cancelado. Nenhum PR foi aprovado.'
-          : `Lote cancelado. ${this.plural(idx, 'PR aprovado', 'PRs aprovados')}, ${total - idx} sem aprovação.`,
+          ? this.t('actions.batch.approveCanceledNone')
+          : this.n('actions.batch.approveCanceled', idx, { rest: total - idx }),
     );
   }
 
@@ -1083,7 +1085,7 @@ export class WorkspaceStore {
     await this.cancellation.run(
       'batch',
       list.map((pr, idx) => ({
-        label: `Mesclando ${idx + 1} de ${total}...`,
+        label: this.t('actions.batch.merging', { current: idx + 1, total }),
         pct: ((idx + 1) / total) * 100,
         execute: async (opts: Required<ActionRequestOptions>) => {
           await this.waitWithSignal(stepDelayMs, opts.signal);
@@ -1091,22 +1093,22 @@ export class WorkspaceStore {
           this.markMerged(pr);
         },
       })),
-      () => `${total} PRs mesclados via squash.`,
+      () => this.n('actions.batch.merged', total),
       (idx) =>
         idx === 0
-          ? 'Lote cancelado. Nenhum PR foi mesclado.'
-          : `Lote cancelado. ${this.plural(idx, 'PR mesclado', 'PRs mesclados')}, ${total - idx} continuam abertos.`,
+          ? this.t('actions.batch.mergeCanceledNone')
+          : this.n('actions.batch.mergeCanceled', idx, { rest: total - idx }),
     );
   }
 
   private markApproved(pr: PullRequestItem): void {
     this.approvedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: `Você aprovou #${pr.id}`, repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: { key: 'timeline.local.approved', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private markMerged(pr: PullRequestItem): void {
     this.mergedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: `Você mesclou #${pr.id} via squash`, repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: { key: 'timeline.local.merged', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private appendTimelineEvent(item: Omit<TimelineEventItem, 'key' | 't'>): void {
@@ -1116,7 +1118,7 @@ export class WorkspaceStore {
     }
   }
 
-  private effectiveCi(pr: PullRequestItem): { ci: CiState; ciText: string } {
+  private effectiveCi(pr: PullRequestItem): { ci: CiState; ciText: I18nText } {
     return this.ciOverrides()[pr.id] ?? { ci: pr.ci, ciText: pr.ciText };
   }
 
@@ -1130,16 +1132,16 @@ export class WorkspaceStore {
       title: pr.title,
       sel: selected === pr.id ? 'is-sel' : '',
       authorLabel: pr.author.startsWith('@') ? pr.author : `@${pr.author}`,
-      ciLabel: { ok: 'CI Verde', run: 'CI Pendente', fail: 'CI Falhando', none: this.locale.translate('ci.none') }[ci],
+      ciLabel: { ok: this.t('inbox.ci.ok'), run: this.t('inbox.ci.run'), fail: this.t('inbox.ci.fail'), none: this.t('ci.none') }[ci],
       ciTextCls: { ok: 'pf-ci-stable', run: 'pf-ci-warn', fail: 'pf-ci-fail', none: 'pf-ci-none' }[ci],
       hasPill: Boolean(pr.ownPill),
-      ownPill: pr.ownPill,
+      ownPill: this.locale.text(pr.ownPill),
       hasClaim: Boolean(pr.claim),
-      claim: pr.claim,
-      badge: silenced ?? pr.muteBadge ?? '✅ Você aprovou',
+      claim: this.locale.text(pr.claim),
+      badge: this.locale.text(silenced ?? pr.muteBadge ?? { key: 'inbox.badge.approvedByYou' }),
       badgeTip: silenced
-        ? 'Silenciado por você. Volta à fila quando a condição for atendida.'
-        : pr.muteTip ?? 'Sua aprovação foi registrada. O PR ainda não foi mesclado.',
+        ? this.t('inbox.badgeTip.silenced')
+        : this.locale.text(pr.muteTip ?? { key: 'seats.approvedTip.mine' }),
     };
   }
 
@@ -1154,15 +1156,15 @@ export class WorkspaceStore {
   }
 
   private buildDependabotDetail(pr: PullRequestItem) {
-    const tier = pr.verdict ? RISK_TIER_LABELS[pr.verdict] : '⚪ Sem análise';
+    const tier = this.t(pr.verdict ? RISK_TIER_KEYS[pr.verdict] : 'risk.tier.none');
     const bump = pr.from && pr.to ? computeSemverBumpLabel(pr.from, pr.to) : null;
     const repoShort = pr.repo.split('/')[1] ?? pr.repo;
     const nodes: { label: string; info: string; target?: boolean }[] = [
-      { label: `📦 ${repoShort} (root)`, info: 'Raiz do projeto, definida no package.json.' },
-      ...(pr.via ?? []),
+      { label: `📦 ${repoShort} (root)`, info: this.t('impact.root.info') },
+      ...(pr.via ?? []).map((v) => ({ label: this.locale.text(v.label), info: this.locale.text(v.info) })),
       {
         label: pr.pkg ? `🎯 ${pr.pkg} ${pr.from} → ${pr.to}${bump ? ` (${bump} Bump)` : ''}` : `🎯 ${pr.title}`,
-        info: 'Pacote que esta atualização altera.',
+        info: this.t('impact.target.info'),
         target: true,
       },
     ];
@@ -1201,15 +1203,15 @@ export class WorkspaceStore {
         expanded: isOpen ? 'true' : 'false',
         chevCls: isOpen ? 'is-open' : '',
         hasUses: f.uses > 1,
-        usesLabel: `${f.uses} usos`,
+        usesLabel: this.n('impact.uses', f.uses),
         breaks: Boolean(f.breaks),
         lines,
       };
     });
 
     return {
-      rvHead: `${tier} (Score ${pr.score ?? 0}/100)`,
-      rvDetail: pr.rvDetail ?? '',
+      rvHead: pr.score !== undefined ? this.t('impact.rvHead', { tier, score: pr.score }) : tier,
+      rvDetail: this.locale.text(pr.rvDetail),
       tree: nodes.map((n, idx) => ({
         index: idx,
         label: n.label,
@@ -1218,8 +1220,12 @@ export class WorkspaceStore {
         cls: `${idx === selectedNode ? 'is-on ' : ''}${n.target ? `pf-node-${pr.verdict}` : ''}`.trim(),
       })),
       treeInfo: nodes[selectedNode]?.info ?? '',
-      blastTitle: `Raio de Impacto no Código — ${this.plural(allBlasts.length, 'arquivo afetado', 'arquivos afetados')}`,
-      blastSummary: `${this.plural(prodCount, 'em produção', 'em produção')} · ${this.plural(testCount, 'em testes', 'em testes')} · ${this.plural(breakCount, 'usa API que quebra', 'usam API que quebra')}`,
+      blastTitle: this.n('impact.blast.title', allBlasts.length),
+      blastSummary: [
+        this.n('impact.blast.prod', prodCount),
+        this.n('impact.blast.test', testCount),
+        this.n('impact.blast.breaking', breakCount),
+      ].join(' · '),
       hasSummary: allBlasts.length > 1,
       hasBlast: allBlasts.length > 0,
       noBlast: allBlasts.length === 0,
@@ -1227,10 +1233,9 @@ export class WorkspaceStore {
       hasBlastFoot: allBlasts.length > 1,
       hasMore: hidden.length > 0,
       moreLabel:
-        `Ver mais ${this.plural(hidden.length, 'arquivo', 'arquivos')}` +
-        (hidden.every((f) => f.kind === 'test') ? ' (testes)' : ''),
-      allLabel: allOpen ? 'Recolher todos' : 'Expandir todos',
-      note: pr.note ?? '',
+        this.n('impact.blast.more', hidden.length) + (hidden.every((f) => f.kind === 'test') ? this.t('impact.blast.moreTests') : ''),
+      allLabel: allOpen ? this.t('impact.blast.collapseAll') : this.t('impact.blast.expandAll'),
+      note: this.locale.text(pr.note),
       noteCls: pr.noteWarn ? 'pf-alert-warn' : '',
     };
   }
@@ -1279,14 +1284,18 @@ export class WorkspaceStore {
     return out;
   }
 
-  private plural(n: number, singular: string, pluralForm: string): string {
-    return `${n} ${n === 1 ? singular : pluralForm}`;
+  private t(key: string, params?: Readonly<Record<string, string | number>>): string {
+    return this.locale.translate(key, params);
+  }
+
+  private n(base: string, count: number, params?: Readonly<Record<string, string | number>>): string {
+    return this.locale.plural(base, count, params);
   }
 
   private waitWithSignal(ms: number, signal: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       if (signal.aborted) {
-        reject(new DOMException('Cancelado', 'AbortError'));
+        reject(new DOMException('Aborted', 'AbortError'));
         return;
       }
       const t = setTimeout(resolve, ms);
@@ -1294,7 +1303,7 @@ export class WorkspaceStore {
         'abort',
         () => {
           clearTimeout(t);
-          reject(new DOMException('Cancelado', 'AbortError'));
+          reject(new DOMException('Aborted', 'AbortError'));
         },
         { once: true },
       );

@@ -132,7 +132,6 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 		RepositoryID:   repo.ID,
 		RepositoryName: repo.FullName,
 		ActorLogin:     uc.actorLogin(ctx, userID),
-		Summary:        "Followed repository " + repo.FullName,
 		OccurredAt:     uc.nowFunc().UTC(),
 	})
 	return repo, nil

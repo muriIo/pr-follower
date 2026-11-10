@@ -84,17 +84,10 @@ func (uc *IngestUseCase) IngestCheckRunEvent(ctx context.Context, p CheckRunEven
 			RepositoryName: repo.FullName,
 			PullRequestID:  pr.ID,
 			PRNumber:       pr.Number,
-			Summary:        fmt.Sprintf("%s #%d: CI %s", repo.FullName, pr.Number, ciSummary[ci]),
 			OccurredAt:     time.Now().UTC(),
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-var ciSummary = map[entity.CIStatus]string{
-	entity.CIStatusPending: "running",
-	entity.CIStatusSuccess: "passed",
-	entity.CIStatusFailure: "failed",
 }

@@ -25,3 +25,34 @@ describe('LocaleStore (Signal-based i18n Store)', () => {
     expect(store.translate('nav.inbox')).toBe('My Turn (CODEOWNERS)');
   });
 });
+
+describe('LocaleStore messages with parameters', () => {
+  function store(dictionary: Record<string, string>) {
+    TestBed.configureTestingModule({
+      providers: [LocaleStore, { provide: TRANSLATION_GATEWAY, useValue: { loadDictionary: async () => dictionary } }],
+    });
+    return TestBed.inject(LocaleStore);
+  }
+
+  it('fills {placeholders} and picks singular or plural forms', async () => {
+    const locale = store({
+      'seats.openPrs.one': '{count} open PR',
+      'seats.openPrs.other': '{count} open PRs',
+      'drawer.approvedBy': 'Approved by {login}',
+    });
+    await locale.switchLocale('en-US');
+
+    expect(locale.translate('drawer.approvedBy', { login: '@ana' })).toBe('Approved by @ana');
+    expect(locale.plural('seats.openPrs', 1)).toBe('1 open PR');
+    expect(locale.plural('seats.openPrs', 3)).toBe('3 open PRs');
+    expect(locale.plural('seats.openPrs', 0)).toBe('0 open PRs');
+  });
+
+  it('renders I18nText: literal strings as they are, keys in the current language', async () => {
+    const locale = store({ 'drawer.why.owner': 'You own changed files' });
+    await locale.switchLocale('en-US');
+    expect(locale.text('literal')).toBe('literal');
+    expect(locale.text({ key: 'drawer.why.owner' })).toBe('You own changed files');
+    expect(locale.text(undefined)).toBe('');
+  });
+});

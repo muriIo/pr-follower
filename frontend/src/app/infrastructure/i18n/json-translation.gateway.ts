@@ -27,7 +27,7 @@ export class JsonTranslationGateway implements TranslationGateway {
 export class TranslatePipe implements PipeTransform {
   private readonly localeStore = inject(LocaleStore);
 
-  transform(key: string): string {
-    return this.localeStore.translate(key);
+  transform(key: string, params?: Readonly<Record<string, string | number>>): string {
+    return this.localeStore.translate(key, params);
   }
 }

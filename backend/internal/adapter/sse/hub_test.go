@@ -29,7 +29,7 @@ func TestHub_PublishAndSubscribeWithContextCleanup(t *testing.T) {
 		Type:       "pr.opened",
 		PRNumber:   42,
 		ActorLogin: "murilo",
-		Summary:    "Opened PR #42",
+		Params:     map[string]string{"title": "feat: x"},
 		OccurredAt: time.Now().UTC(),
 	}
 
@@ -92,7 +92,7 @@ func TestHub_StreamSendsEveryTypeAsOneActivityEvent(t *testing.T) {
 
 	body, header := streamOnce(t, hub, allowAll, func() {
 		for _, typ := range []string{"pr.synchronize", "pr.opened", "dependabot.analyzed"} {
-			_ = hub.Publish(context.Background(), entity.ActivityEvent{ID: "ev-" + typ, Type: typ, RepositoryID: 1, Summary: typ})
+			_ = hub.Publish(context.Background(), entity.ActivityEvent{ID: "ev-" + typ, Type: typ, RepositoryID: 1})
 		}
 	})
 
