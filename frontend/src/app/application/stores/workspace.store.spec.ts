@@ -237,3 +237,39 @@ describe('WorkspaceStore repository access (ADR-0010)', () => {
     expect(fetchWorkspace).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('WorkspaceStore live stream recovery', () => {
+  it('reloads the workspace after the stream reconnects, since events sent meanwhile were missed', async () => {
+    const { prGateway } = createFakeGateways();
+    const fetchWorkspace = vi.spyOn(prGateway, 'fetchWorkspace');
+    let setState: ((s: 'conectado' | 'reconectando' | 'desconectado') => void) | null = null;
+
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        {
+          provide: LIVE_EVENT_GATEWAY,
+          useValue: {
+            connect: (_onEvent: unknown, onState: typeof setState) => {
+              setState = onState;
+              return () => undefined;
+            },
+          },
+        },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.startLiveSession();
+    expect(fetchWorkspace).toHaveBeenCalledTimes(1);
+
+    setState!('conectado'); // first open: the initial load already covers it
+    expect(fetchWorkspace).toHaveBeenCalledTimes(1);
+    expect(store.connectionState()).toBe('conectado');
+
+    setState!('reconectando');
+    setState!('conectado');
+    expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+  });
+});

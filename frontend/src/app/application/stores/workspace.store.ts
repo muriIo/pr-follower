@@ -232,13 +232,29 @@ export class WorkspaceStore {
             void this.loadWorkspace();
           }
         },
-        (state) => this.connectionState.set(state),
+        (state) => this.onConnectionState(state),
       ) ?? (() => undefined);
+  }
+
+  private streamOpenedBefore = false;
+
+  /** After a reconnect, reload: events sent while the stream was down were missed (ADR-0011). */
+  private onConnectionState(state: SseConnectionState): void {
+    const previous = this.connectionState();
+    this.connectionState.set(state);
+    if (state !== 'conectado') {
+      return;
+    }
+    if (this.streamOpenedBefore && previous !== 'conectado') {
+      void this.loadWorkspace();
+    }
+    this.streamOpenedBefore = true;
   }
 
   stopLiveSession(): void {
     const disconnect = this.disconnectLive;
     this.disconnectLive = null;
+    this.streamOpenedBefore = false;
     disconnect?.();
   }
 
