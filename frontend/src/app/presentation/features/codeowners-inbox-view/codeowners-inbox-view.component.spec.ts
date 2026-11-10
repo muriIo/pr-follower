@@ -6,6 +6,8 @@ import {
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
 import { CodeownersInboxViewComponent } from './codeowners-inbox-view.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
+import { WorkspaceStore } from '../../../application/stores/workspace.store';
 
 describe('CodeownersInboxViewComponent', () => {
   it('renders active waiting-on-me PRs and toggles muted/gated PRs', () => {
@@ -38,6 +40,8 @@ describe('CodeownersInboxViewComponent', () => {
         },
       ],
     });
+
+    loadWorkspaceFixture(TestBed.inject(WorkspaceStore));
 
     const fixture = TestBed.createComponent(CodeownersInboxViewComponent);
     fixture.detectChanges();

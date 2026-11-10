@@ -7,6 +7,7 @@ import {
 } from '../../../../domain/gateways/workspace.gateways';
 import { WorkspaceStore } from '../../../../application/stores/workspace.store';
 import { DependabotImpactComponent } from './dependabot-impact.component';
+import { loadWorkspaceFixture } from '../../../../testing/workspace-fixtures';
 
 describe('DependabotImpactComponent', () => {
   it('renders Dependabot risk verdict, dependency path tree, blast radius files, and breaking notes', () => {
@@ -42,6 +43,8 @@ describe('DependabotImpactComponent', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+
+    loadWorkspaceFixture(store);
     store.openPr(233);
     const drawerVm = store.drawer()!;
 

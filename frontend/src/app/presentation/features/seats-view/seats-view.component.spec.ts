@@ -6,6 +6,8 @@ import {
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
 import { SeatsViewComponent } from './seats-view.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
+import { WorkspaceStore } from '../../../application/stores/workspace.store';
 
 describe('SeatsViewComponent', () => {
   it('renders seat filter pills, seat cards, and filters by turn', () => {
@@ -38,6 +40,8 @@ describe('SeatsViewComponent', () => {
         },
       ],
     });
+
+    loadWorkspaceFixture(TestBed.inject(WorkspaceStore));
 
     const fixture = TestBed.createComponent(SeatsViewComponent);
     fixture.detectChanges();

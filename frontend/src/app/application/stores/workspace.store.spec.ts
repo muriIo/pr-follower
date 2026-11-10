@@ -9,6 +9,7 @@ import {
 import { TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
 import { WorkspaceStore } from './workspace.store';
+import { loadWorkspaceFixture } from '../../testing/workspace-fixtures';
 
 function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: LiveEventGateway } {
   const prGateway: PullRequestGateway = {
@@ -19,7 +20,6 @@ function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: Live
     commentOnPullRequest: async () => undefined,
     snoozePullRequest: async () => undefined,
     claimPullRequest: async () => undefined,
-    seedDemoWorkspace: async () => undefined,
     cancelServerOperation: async () => undefined,
   };
   const sseGateway: LiveEventGateway = {
@@ -44,6 +44,7 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+    loadWorkspaceFixture(store);
     expect(store.view()).toBe('seats');
     expect(store.seats().length).toBe(4);
     expect(store.navCounts().inbox).toBe(2);
@@ -87,6 +88,7 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+    loadWorkspaceFixture(store);
     expect(fetchWorkspaceSpy).not.toHaveBeenCalled();
     store.startLiveSession();
     expect(fetchWorkspaceSpy).toHaveBeenCalled();
@@ -231,10 +233,59 @@ describe('WorkspaceStore repository access (ADR-0010)', () => {
     expect(byName['acme/ok'].accessKey).toBeNull();
 
     expect(fetchWorkspace).toHaveBeenCalledTimes(1);
-    emit!({ kind: 'fail', text: 'Lost access to acme/web', repo: 'acme/web', refreshWorkspace: true });
-    expect(fetchWorkspace).toHaveBeenCalledTimes(2);
-    emit!({ kind: 'ok', text: 'CI passou', repo: 'acme/ok' });
-    expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+    vi.useFakeTimers();
+    try {
+      emit!({ kind: 'fail', text: 'Lost access to acme/web', repo: 'acme/web', refreshWorkspace: true });
+      vi.advanceTimersByTime(300);
+      expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+      emit!({ kind: 'info', text: 'local note', repo: 'acme/ok' });
+      vi.advanceTimersByTime(300);
+      expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('coalesces a burst of live changes into one workspace reload', () => {
+    vi.useFakeTimers();
+    try {
+      const { prGateway } = createFakeGateways();
+      const fetchWorkspace = vi.spyOn(prGateway, 'fetchWorkspace');
+      let emit: ((evt: Omit<TimelineEventItem, 'key' | 't'>) => void) | null = null;
+      TestBed.configureTestingModule({
+        providers: [
+          ActionCancellationManager,
+          WorkspaceStore,
+          { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+          {
+            provide: LIVE_EVENT_GATEWAY,
+            useValue: {
+              connect: (onEvent: (evt: Omit<TimelineEventItem, 'key' | 't'>) => void) => {
+                emit = onEvent;
+                return () => undefined;
+              },
+            },
+          },
+        ],
+      });
+      const store = TestBed.inject(WorkspaceStore);
+      store.startLiveSession();
+      expect(fetchWorkspace).toHaveBeenCalledTimes(1);
+
+      for (const pr of [1, 2, 3, 4, 5]) {
+        emit!({ kind: 'info', text: `PR #${pr} opened`, repo: 'acme/web', pr, refreshWorkspace: true });
+      }
+      expect(fetchWorkspace).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(300);
+      expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+
+      store.stopLiveSession();
+      emit!({ kind: 'info', text: 'late', repo: 'acme/web', refreshWorkspace: true });
+      vi.advanceTimersByTime(300);
+      expect(fetchWorkspace).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

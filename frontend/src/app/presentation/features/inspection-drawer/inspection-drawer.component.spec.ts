@@ -7,6 +7,7 @@ import {
 } from '../../../domain/gateways/workspace.gateways';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { InspectionDrawerComponent } from './inspection-drawer.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
 
 describe('InspectionDrawerComponent', () => {
   it('renders docked PR inspection drawer with diff viewer and closes when close button is clicked', () => {
@@ -42,6 +43,8 @@ describe('InspectionDrawerComponent', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+
+    loadWorkspaceFixture(store);
     store.openPr(142);
 
     const fixture = TestBed.createComponent(InspectionDrawerComponent);
@@ -90,6 +93,8 @@ describe('InspectionDrawerComponent', () => {
     });
 
     const store = TestBed.inject(WorkspaceStore);
+
+    loadWorkspaceFixture(store);
     store.resetDrawerWidth();
     store.openPr(142);
 

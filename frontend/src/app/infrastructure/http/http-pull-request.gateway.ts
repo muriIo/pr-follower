@@ -53,17 +53,13 @@ export class HttpPullRequestGateway implements PullRequestGateway {
     await this.requestJson(`/api/v1/prs/${prId}/claim`, 'POST', {}, options);
   }
 
-  async seedDemoWorkspace(options?: ActionRequestOptions): Promise<void> {
-    await this.requestJson('/api/v1/demo/seed', 'POST', {}, options);
-  }
-
   async cancelServerOperation(operationId: string): Promise<void> {
     try {
       await fetch(`/api/v1/operations/${encodeURIComponent(operationId)}`, {
         method: 'DELETE',
       });
     } catch {
-      // Best-effort server cancellation when offline/demo
+      // Best-effort server cancellation; the request may already be gone
     }
   }
 

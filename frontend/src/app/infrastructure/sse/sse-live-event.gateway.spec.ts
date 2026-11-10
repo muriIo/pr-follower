@@ -156,4 +156,20 @@ describe('SseLiveEventGateway', () => {
     vi.advanceTimersByTime(60_000);
     expect(FakeEventSource.instances.length).toBe(1);
   });
+
+  it('reports disconnected and invents nothing when EventSource is unavailable', () => {
+    vi.useFakeTimers();
+    (globalThis as { EventSource?: unknown }).EventSource = undefined;
+    TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
+    const states: SseConnectionState[] = [];
+    const texts: string[] = [];
+    const disconnect = TestBed.inject(SseLiveEventGateway).connect(
+      (ev) => texts.push(ev.text),
+      (state) => states.push(state),
+    );
+    vi.advanceTimersByTime(60_000);
+    expect(states).toEqual(['desconectado']);
+    expect(texts).toEqual([]);
+    disconnect();
+  });
 });

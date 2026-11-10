@@ -100,12 +100,6 @@ describe('HttpPullRequestGateway', () => {
       expect.objectContaining({ method: 'POST' }),
     );
 
-    await gateway.seedDemoWorkspace({ signal: ctrl.signal, operationId: 'op-seed-1' });
-    expect(fetchSpy).toHaveBeenCalledWith(
-      '/api/v1/demo/seed',
-      expect.objectContaining({ method: 'POST' }),
-    );
-
     await gateway.cancelServerOperation('op-merge-142');
     expect(fetchSpy).toHaveBeenCalledWith(
       '/api/v1/operations/op-merge-142',

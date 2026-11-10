@@ -8,7 +8,6 @@ Throughout, `app.example.com` stands for your production domain.
 
 Production readiness depends on open items in the Status list of [`implementation-plan.md`](implementation-plan.md). Check these first:
 
-- [ ] **Demo seed endpoint.** `POST /api/v1/demo/seed` writes fake repositories and PRs for whoever calls it. Remove it or gate it to non-production before going public.
 - [ ] **Acting on GitHub.** Approve / merge / comment do not yet use the user's token, and installation tokens (App ID + private key) are not wired. Until then those actions do not reach GitHub.
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.

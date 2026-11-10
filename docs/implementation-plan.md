@@ -104,4 +104,5 @@ Open:
 - [ ] **yarn / pnpm lockfiles.** `CanAnalyze` accepts them, but path reconstruction is npm lockfile v2/v3 (`buildNpmV3DependencyPath`). Verify or implement the others.
 - [ ] **Outbound concurrency bound.** Plan called for a bounded worker pool on GitHub requests and honoring `X-RateLimit-Reset`; only `Retry-After` is handled today.
 - [ ] **Gates from the plan not in the Makefile:** `golangci-lint run`, frontend coverage (`ng test --code-coverage`).
-- [ ] **Demo data.** `POST /api/v1/demo/seed` exists for local use; decide whether it stays and gate it to non-production.
+- [x] **No demo data in production.** `POST /api/v1/demo/seed`, the SPA's built-in sample workspace and the fake SSE event generator are gone; sample data lives only in test fixtures (`frontend/src/app/testing/`, `seedWorkspaceFixture` in the HTTP tests).
+- [ ] **Artificial delays.** `WorkspaceStore.runSync` and `runBatchApprove` wait on purpose (2.4 s, 0.7 s per PR) to show progress; drop them once real GitHub calls provide the latency.

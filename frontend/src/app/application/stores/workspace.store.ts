@@ -10,14 +10,12 @@ import {
   DiffHunkLine,
   PerspectiveView,
   PullRequestItem,
+  RepoInfo,
   RiskVerdictTier,
   SeatFilterType,
   SseConnectionState,
   TimelineEventItem,
   computeSemverBumpLabel,
-  createInitialPrDataset,
-  createInitialRepos,
-  createInitialTimelineEvents,
   isActionableTurn,
   isSafeBatchCandidate,
 } from '../../domain/models/workspace.models';
@@ -175,6 +173,8 @@ export interface DrawerViewModel {
   readonly act: ActionViewModel;
 }
 
+const WORKSPACE_REFRESH_DEBOUNCE_MS = 250;
+
 @Injectable({ providedIn: 'root' })
 export class WorkspaceStore {
   private readonly destroyRef = inject(DestroyRef);
@@ -182,8 +182,8 @@ export class WorkspaceStore {
   private readonly sseGateway = inject(LIVE_EVENT_GATEWAY, { optional: true });
   private readonly cancellation = inject(ActionCancellationManager);
 
-  readonly repos = signal(createInitialRepos());
-  readonly prs = signal(createInitialPrDataset());
+  readonly repos = signal<readonly RepoInfo[]>([]);
+  readonly prs = signal<readonly PullRequestItem[]>([]);
   readonly view = signal<PerspectiveView>('seats');
   readonly selectedPrId = signal<number | null>(null);
   readonly closingDrawer = signal(false);
@@ -195,7 +195,7 @@ export class WorkspaceStore {
   readonly approvedMap = signal<Record<number, boolean>>({});
   readonly silencedMap = signal<Record<number, string>>({});
   readonly ciOverrides = signal<Record<number, { ci: CiState; ciText: string }>>({});
-  readonly events = signal<readonly TimelineEventItem[]>(createInitialTimelineEvents());
+  readonly events = signal<readonly TimelineEventItem[]>([]);
   readonly unreadEvents = signal(0);
   readonly pausedTimeline = signal(false);
   readonly freshRepo = signal<string | null>(null);
@@ -229,7 +229,7 @@ export class WorkspaceStore {
             this.appendTimelineEvent(evt.kind, evt.text, evt.repo, evt.pr);
           }
           if (evt.refreshWorkspace) {
-            void this.loadWorkspace();
+            this.scheduleWorkspaceRefresh();
           }
         },
         (state) => this.onConnectionState(state),
@@ -237,6 +237,21 @@ export class WorkspaceStore {
   }
 
   private streamOpenedBefore = false;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Reload the workspace shortly after live changes, coalescing a burst (a batch merge, many
+   * webhooks) into one request instead of one per event (ADR-0006).
+   */
+  private scheduleWorkspaceRefresh(): void {
+    if (this.refreshTimer !== null || !this.disconnectLive) {
+      return;
+    }
+    this.refreshTimer = setTimeout(() => {
+      this.refreshTimer = null;
+      void this.loadWorkspace();
+    }, WORKSPACE_REFRESH_DEBOUNCE_MS);
+  }
 
   /** After a reconnect, reload: events sent while the stream was down were missed (ADR-0011). */
   private onConnectionState(state: SseConnectionState): void {
@@ -255,6 +270,10 @@ export class WorkspaceStore {
     const disconnect = this.disconnectLive;
     this.disconnectLive = null;
     this.streamOpenedBefore = false;
+    if (this.refreshTimer !== null) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     disconnect?.();
   }
 
@@ -265,9 +284,7 @@ export class WorkspaceStore {
     }
     this.repos.set(dataset.repos);
     this.prs.set(dataset.prs);
-    if (dataset.events.length > 0) {
-      this.events.set(dataset.events);
-    }
+    this.events.set(dataset.events);
     if (dataset.approvedMap) {
       this.approvedMap.set(dataset.approvedMap);
     }

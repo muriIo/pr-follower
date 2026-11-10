@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAuthenticatedUser,
   computeSemverBumpLabel,
-  createInitialPrDataset,
   isActionableTurn,
   isSafeBatchCandidate,
 } from './workspace.models';
+import { createInitialPrDataset } from '../../testing/workspace-fixtures';
 
 describe('Domain Models & Policies (workspace.models)', () => {
   it('computes Major, Minor, and Patch semver bump labels accurately', () => {

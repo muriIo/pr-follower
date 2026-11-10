@@ -6,6 +6,8 @@ import {
   TRANSLATION_GATEWAY,
 } from '../../../domain/gateways/workspace.gateways';
 import { TimelineViewComponent } from './timeline-view.component';
+import { loadWorkspaceFixture } from '../../../testing/workspace-fixtures';
+import { WorkspaceStore } from '../../../application/stores/workspace.store';
 
 describe('TimelineViewComponent', () => {
   it('renders live activity groups and toggles timeline pause state', () => {
@@ -38,6 +40,8 @@ describe('TimelineViewComponent', () => {
         },
       ],
     });
+
+    loadWorkspaceFixture(TestBed.inject(WorkspaceStore));
 
     const fixture = TestBed.createComponent(TimelineViewComponent);
     fixture.detectChanges();
