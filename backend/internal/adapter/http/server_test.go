@@ -28,6 +28,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/server"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
+	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
@@ -93,6 +94,17 @@ func (fakeGitHubUserAPI) ListInstallations(_ context.Context, token string) ([]e
 	}
 	return []entity.Installation{{ID: 20, AccountLogin: "acme", AccountType: "Organization", RepositorySelection: "selected",
 		SettingsURL: "https://github.com/organizations/acme/settings/installations/20"}}, nil
+}
+
+// ListPullRequestFiles: acme/web #7 changes two files.
+func (fakeGitHubUserAPI) ListPullRequestFiles(_ context.Context, _ string, owner, name string, number int) ([]entity.ChangedFile, error) {
+	if owner+"/"+name != "acme/web" || number != 7 {
+		return nil, entity.ErrNotFound
+	}
+	return []entity.ChangedFile{
+		{Path: "src/app.ts", Status: "modified", Additions: 3, Deletions: 1, Patch: "@@ -1 +1 @@\n-a\n+b"},
+		{Path: "assets/logo.png", Status: "added", Additions: 0, Deletions: 0},
+	}, nil
 }
 
 // GetRepositoryFile: acme/web has CODEOWNERS, acme/api has none.
@@ -215,6 +227,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
+	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
@@ -231,6 +244,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		InstallURL:     "https://github.com/apps/pr-follower/installations/new",
 		InstallationUC: installationUC,
 		Follows:        repoRepo,
+		FilesUC:        filesUC,
 	})
 
 	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo}
@@ -982,5 +996,54 @@ func TestPRState_ReflectsGitHubForRepositoriesWithoutCIOrCodeowners(t *testing.T
 	}
 	if rec := ts.postWebhook(t, "check_run", `{`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("malformed check_run: expected 400, got %d", rec.Code)
+	}
+}
+
+func TestPullRequestFiles_ListsChangedFilesWithOwnership(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec := ts.do(t, http.MethodGet, "/api/v1/repositories/acme/web/pulls/7/files", "", session)
+	var body struct {
+		Files []prfiles.File `json:"files"`
+	}
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+		t.Fatalf("files: %d %s", rec.Code, rec.Body.String())
+	}
+	if len(body.Files) != 2 || body.Files[0].Path != "src/app.ts" || body.Files[0].Patch == "" || body.Files[1].Patch != "" {
+		t.Fatalf("unexpected files: %+v", body.Files)
+	}
+	// acme/web's CODEOWNERS ("* @octocat") makes octocat the owner of every file.
+	if !body.Files[0].Owned || !body.Files[1].Owned || body.Files[1].Status != "added" {
+		t.Fatalf("expected ownership and status from GitHub: %+v", body.Files)
+	}
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/api/v1/repositories/acme/api/pulls/7/files", http.StatusNotFound},  // not followed
+		{"/api/v1/repositories/acme/web/pulls/99/files", http.StatusNotFound}, // unknown PR
+		{"/api/v1/repositories/acme/web/pulls/abc/files", http.StatusBadRequest},
+	} {
+		if rec := ts.do(t, http.MethodGet, tc.path, "", session); rec.Code != tc.want {
+			t.Errorf("%s: expected %d, got %d", tc.path, tc.want, rec.Code)
+		}
+	}
+	if rec := ts.do(t, http.MethodGet, "/api/v1/repositories/acme/web/pulls/7/files", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("without session: expected 401, got %d", rec.Code)
+	}
+
+	unconfigured := server.NewChiRouter(httpadapter.NewHandler(httpadapter.HandlerDeps{AuthUC: ts.authUC}), "*")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/repositories/acme/web/pulls/7/files", nil)
+	req.AddCookie(session)
+	rr := httptest.NewRecorder()
+	unconfigured.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("without the files use case: expected 503, got %d", rr.Code)
 	}
 }

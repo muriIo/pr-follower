@@ -477,3 +477,22 @@ func TestRepositoryRepository_CodeownersStatusRoundTrip(t *testing.T) {
 		t.Fatalf("list must carry codeowners status: %+v", followed)
 	}
 }
+
+func TestPullRequestRepository_HeadSHA(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	_ = prs.Upsert(ctx, &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: 1, Number: 7, State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "sha-7", BaseRef: "main"})
+
+	if head, ok := prs.HeadSHA(ctx, repo.ID, 7); !ok || head != "sha-7" {
+		t.Fatalf("HeadSHA(7) = %q, %v", head, ok)
+	}
+	if _, ok := prs.HeadSHA(ctx, repo.ID, 8); ok {
+		t.Fatal("unknown PR must report no head")
+	}
+}

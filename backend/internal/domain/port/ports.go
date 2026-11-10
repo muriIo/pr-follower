@@ -44,6 +44,8 @@ type GitHubUserAPI interface {
 	ListInstallationRepositories(ctx context.Context, accessToken string, installationID int64) ([]entity.InstallationRepository, error)
 	// GetRepositoryFile returns a file's raw content; entity.ErrNotFound when it does not exist.
 	GetRepositoryFile(ctx context.Context, accessToken, owner, name, path string) ([]byte, error)
+	// ListPullRequestFiles lists a PR's changed files; entity.ErrNotFound for an unknown PR.
+	ListPullRequestFiles(ctx context.Context, accessToken, owner, name string, number int) ([]entity.ChangedFile, error)
 }
 
 // RepositoryAccessStore updates repository access from installation webhooks (ADR-0010).
@@ -64,6 +66,16 @@ type CheckRunStore interface {
 	GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error)
 	ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error)
 	ListOpenByHeadSHA(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.PullRequest, error)
+}
+
+// FollowedRepositories lists the repositories a user follows.
+type FollowedRepositories interface {
+	ListFollowedByUser(ctx context.Context, userID uint64) ([]entity.Repository, error)
+}
+
+// PullRequestHeads tells the stored head commit of a PR, when PR Follower knows it.
+type PullRequestHeads interface {
+	HeadSHA(ctx context.Context, repositoryID uint64, number int) (string, bool)
 }
 
 type RepositoryRepository interface {

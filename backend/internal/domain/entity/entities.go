@@ -130,6 +130,7 @@ func (r Repository) Validate() error {
 
 type ChangedFile struct {
 	Path      string `json:"path"`
+	Status    string `json:"status,omitempty"` // added | modified | removed | renamed | ...
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
 	Patch     string `json:"patch"`

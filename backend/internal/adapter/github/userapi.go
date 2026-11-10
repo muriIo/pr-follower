@@ -151,6 +151,38 @@ func (c *UserClient) GetRepositoryFile(ctx context.Context, accessToken, owner, 
 	})
 }
 
+// prFilesMaxPages is GitHub's own cap: the files endpoint lists at most 3,000 files.
+const prFilesMaxPages = 30
+
+// ListPullRequestFiles lists a PR's changed files with the user's token. GitHub omits the
+// patch of large or binary files; those come back without one.
+func (c *UserClient) ListPullRequestFiles(ctx context.Context, accessToken, owner, name string, number int) ([]entity.ChangedFile, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var out []entity.ChangedFile
+	for page := 1; page <= prFilesMaxPages; page++ {
+		var raw []struct {
+			Filename  string `json:"filename"`
+			Status    string `json:"status"`
+			Additions int    `json:"additions"`
+			Deletions int    `json:"deletions"`
+			Patch     string `json:"patch"`
+		}
+		target := fmt.Sprintf("/repos/%s/%s/pulls/%d/files?per_page=%d&page=%d", owner, name, number, userAPIPerPage, page)
+		if err := getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, target, &raw); err != nil {
+			return nil, err
+		}
+		for _, f := range raw {
+			out = append(out, entity.ChangedFile{Path: f.Filename, Status: f.Status, Additions: f.Additions, Deletions: f.Deletions, Patch: f.Patch})
+		}
+		if len(raw) < userAPIPerPage {
+			break
+		}
+	}
+	return out, nil
+}
+
 // paginate fetches ?per_page=100&page=N until total_count items were seen or a page is short.
 // consume decodes one page and returns (total_count, items on this page).
 func (c *UserClient) paginate(ctx context.Context, accessToken, path string, consume func(json.RawMessage) (int, int, error)) error {
