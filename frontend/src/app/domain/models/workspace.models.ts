@@ -176,7 +176,14 @@ export interface GitHubProfileInput {
 }
 
 /** Why the last GitHub sign-in attempt failed (`?auth_error=` from the backend callback). */
-export type AuthErrorCode = 'not_configured' | 'state_mismatch' | 'access_denied' | 'login_failed' | 'unknown';
+export type AuthErrorCode =
+  | 'not_configured'
+  | 'state_mismatch'
+  | 'access_denied'
+  | 'login_failed'
+  | 'session_expired'
+  | 'github_token_expired'
+  | 'unknown';
 
 export type AuthStatus = 'checking' | 'signed-out' | 'redirecting' | 'signed-in';
 

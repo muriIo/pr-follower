@@ -1,4 +1,5 @@
 import { Injectable, inject } from '@angular/core';
+import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
 import { ActionRequestOptions, RepositoryImportGateway } from '../../domain/gateways/workspace.gateways';
 import {
   GitHubAccount,
@@ -33,6 +34,7 @@ interface ImportableRepositoryDto {
 @Injectable({ providedIn: 'root' })
 export class HttpRepositoryImportGateway implements RepositoryImportGateway {
   private readonly win = inject(BROWSER_WINDOW);
+  private readonly session = inject(SessionExpiryMonitor);
 
   async listAccounts(options?: ActionRequestOptions): Promise<GitHubAccountsResult> {
     const body = await this.request<{ accounts?: InstallationDto[]; install_url?: string }>(
@@ -111,7 +113,10 @@ export class HttpRepositoryImportGateway implements RepositoryImportGateway {
       }
       throw new RepositoryImportError('failed');
     }
-    if (response.status === 401) throw new RepositoryImportError('unauthorized');
+    if (response.status === 401) {
+      this.session.report();
+      throw new RepositoryImportError('unauthorized');
+    }
     if (response.status === 404) throw new RepositoryImportError('not_found');
     if (response.status === 503) throw new RepositoryImportError('not_configured');
     if (!response.ok) throw new RepositoryImportError('failed');

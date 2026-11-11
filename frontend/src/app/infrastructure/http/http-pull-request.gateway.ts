@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
 import { ActionRequestOptions, PullRequestGateway } from '../../domain/gateways/workspace.gateways';
 import { ActionError, toActionErrorCode } from '../../domain/models/action-error.models';
 import { ChangedFileItem, WorkspaceDataset } from '../../domain/models/workspace.models';
@@ -12,6 +13,8 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class HttpPullRequestGateway implements PullRequestGateway {
+  private readonly session = inject(SessionExpiryMonitor);
+
   async fetchWorkspace(options?: ActionRequestOptions): Promise<WorkspaceDataset | null> {
     const res = await this.requestJson<ApiWorkspaceResponseDto>('/api/v1/workspace', 'GET', undefined, options);
     if (!res) {
@@ -104,10 +107,23 @@ export class HttpPullRequestGateway implements PullRequestGateway {
       throw new ActionError('outcome_unknown');
     }
     const payload = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    if (response.status === 401) {
+      this.session.report(payload?.code === 'github_token_expired' ? 'github_token_expired' : 'unauthorized');
+    }
     if (!response.ok) {
       throw new ActionError(toActionErrorCode(payload?.code), payload?.error ?? '');
     }
     return payload as T | null;
+  }
+
+  private async reportUnauthorized(response: Response): Promise<void> {
+    let code: string | undefined;
+    try {
+      code = ((await response.clone().json()) as { code?: string } | null)?.code;
+    } catch {
+      // No readable body: it is still an unauthenticated answer.
+    }
+    this.session.report(code === 'github_token_expired' ? 'github_token_expired' : 'unauthorized');
   }
 
   private async requestJson<T>(
@@ -129,6 +145,9 @@ export class HttpPullRequestGateway implements PullRequestGateway {
             body: body ? JSON.stringify(body) : undefined,
             signal: options?.signal,
           });
+          if (response.status === 401) {
+            await this.reportUnauthorized(response);
+          }
           if (response.status >= 400 && response.status < 500 && response.status !== 429) {
             throw new PermanentError(`HTTP ${response.status}`);
           }

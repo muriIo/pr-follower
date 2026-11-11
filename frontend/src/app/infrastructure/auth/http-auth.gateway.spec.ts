@@ -91,4 +91,21 @@ describe('HttpAuthGateway (GitHub-only sign-in, ADR-0010)', () => {
     fetchSpy.mockRejectedValue(new TypeError('offline'));
     await expect(gateway.logout()).resolves.toBeUndefined();
   });
+
+  it('tells an expired session from a server that cannot be reached', async () => {
+    const gateway = setup();
+    const ok = new Response(JSON.stringify({ user: { id: 7, login: 'octocat' } }), { status: 200 });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(ok);
+    expect(await gateway.verifySession()).toBe('active');
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 401 }));
+    expect(await gateway.verifySession()).toBe('expired');
+
+    // Not knowing is not the same as expired: a dropped connection or a 5xx must not sign anyone out.
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('offline'));
+    expect(await gateway.verifySession()).toBe('unreachable');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    expect(await gateway.verifySession()).toBe('unreachable');
+  });
 });

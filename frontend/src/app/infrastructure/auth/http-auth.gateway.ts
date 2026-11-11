@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { ActionRequestOptions, AuthGateway } from '../../domain/gateways/workspace.gateways';
+import { ActionRequestOptions, AuthGateway, SessionCheck } from '../../domain/gateways/workspace.gateways';
 import {
   AuthErrorCode,
   AuthenticatedUser,
@@ -66,6 +66,18 @@ export class HttpAuthGateway implements AuthGateway {
     } catch {
       // Unreachable backend or rejected session: the user sees the sign-in screen.
       return null;
+    }
+  }
+
+  async verifySession(options?: ActionRequestOptions): Promise<SessionCheck> {
+    try {
+      const response = await fetch('/api/v1/auth/me', { method: 'GET', credentials: 'same-origin', signal: options?.signal });
+      if (response.status === 401) {
+        return 'expired';
+      }
+      return response.ok ? 'active' : 'unreachable';
+    } catch {
+      return 'unreachable';
     }
   }
 
