@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+type ActivityEvent struct {
+	Seq            int64     `json:"seq"`
+	EventID        string    `json:"event_id"`
+	Type           string    `json:"type"`
+	RepositoryID   int64     `json:"repository_id"`
+	RepositoryName string    `json:"repository_name"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	PrNumber       int64     `json:"pr_number"`
+	ActorLogin     string    `json:"actor_login"`
+	ParamsJson     string    `json:"params_json"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
 type DependabotAnalysis struct {
 	ID                int64     `json:"id"`
 	PullRequestID     int64     `json:"pull_request_id"`

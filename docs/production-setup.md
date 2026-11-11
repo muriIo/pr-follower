@@ -22,7 +22,7 @@ browser ──https──▶ TLS proxy / load balancer ──▶ panel (nginx, :
 
 - The **panel** image serves the Angular app and proxies `/api/*` to the API (`API_UPSTREAM`), with an unbuffered location for the live event stream. The browser only ever talks to one origin, which is what makes the session cookie work.
 - Terminate **TLS in front of the panel** (load balancer, Caddy, Traefik, a cloud ingress…). The panel itself listens on plain HTTP 8080.
-- Run **one API replica** for now. The live event hub and the operation-cancellation registry are in memory, so with several replicas a user only sees events and can only cancel operations on the replica they happen to hit.
+- Run **one API replica** for now. Activity (timeline and live stream) is stored in Postgres and shared by replicas, but the sync jobs and the operation-cancellation registry are still in memory: with several replicas a sync progress poll or a cancel that lands on another replica finds nothing. If you do run more, route each user's requests to one replica (sticky sessions) and use a direct Postgres connection for `DATABASE_URL`: replicas wake each other with `LISTEN/NOTIFY`, which a transaction-mode pooler (PgBouncer) does not carry.
 - Use a **managed Postgres** (17) with backups. Migrations run automatically when the API starts.
 
 ## 2. Create the production GitHub App

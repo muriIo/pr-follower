@@ -83,6 +83,9 @@ func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// timelineLimit caps the activity sent with the workspace.
+const timelineLimit = 200
+
 // followedTimeline returns recent activity of the repositories the user follows, newest first.
 // Like the live stream, nobody sees another account's repositories (events without one go to nobody).
 func (h *Handler) followedTimeline(ctx context.Context, userID uint64) ([]entity.ActivityEvent, error) {
@@ -90,18 +93,11 @@ func (h *Handler) followedTimeline(ctx context.Context, userID uint64) ([]entity
 	if err != nil {
 		return nil, err
 	}
-	ids := make(map[uint64]bool, len(followed))
+	ids := make([]uint64, 0, len(followed))
 	for _, r := range followed {
-		ids[r.ID] = true
+		ids = append(ids, r.ID)
 	}
-	recent := h.deps.SSEHub.RecentEvents()
-	out := make([]entity.ActivityEvent, 0, len(recent))
-	for i := len(recent) - 1; i >= 0; i-- {
-		if ids[recent[i].RepositoryID] {
-			out = append(out, recent[i])
-		}
-	}
-	return out, nil
+	return h.deps.SSEHub.Recent(ctx, ids, timelineLimit)
 }
 
 func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
