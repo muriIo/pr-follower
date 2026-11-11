@@ -37,6 +37,9 @@ server {
         # The default 60s would cut a slow GitHub-backed call (analysis, a large batch) into a 504
         # while the server is still working on it. A sync is a background job and needs none of this.
         proxy_read_timeout 300s;
+        # nginx's default 1m would refuse a large GitHub webhook delivery (a push listing many files)
+        # with 413 before it reaches the API, which reads up to 5 MiB of a delivery.
+        client_max_body_size 5m;
     }
 
     location = /index.html {
