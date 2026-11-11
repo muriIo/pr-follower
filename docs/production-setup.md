@@ -2,7 +2,7 @@
 
 Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-11 (`main` after #31). The sign-in model is [ADR-0010](adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
 
-Work through the sections in order: each one uses what the previous ones produced.
+Work through the sections in order: each one uses what the previous ones produced. Deploying on AWS? [`aws-setup.md`](aws-setup.md) maps these steps to AWS services (and explains the choices); it reuses §2, §4–5, §10–11 and §13 from here.
 
 | Placeholder | Meaning |
 |---|---|
