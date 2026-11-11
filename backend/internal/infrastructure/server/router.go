@@ -35,6 +35,9 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 			private.Get("/github/installations", h.ListGitHubInstallations)
 			private.Get("/github/installations/{installationID}/repositories", h.ListInstallationRepositories)
 			private.Post("/repositories/import", h.ImportRepository)
+			private.Post("/sync", h.StartSync)
+			private.Get("/sync", h.GetSync)
+			private.Delete("/sync", h.CancelSync)
 			private.Delete("/repositories/{id}/follow", h.UnfollowRepository)
 			private.Get("/repositories/{owner}/{name}/pulls/{number}/files", h.ListPullRequestFiles)
 

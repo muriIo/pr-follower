@@ -2,13 +2,15 @@ import { Injectable, inject } from '@angular/core';
 import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
 import { ActionRequestOptions, PullRequestGateway } from '../../domain/gateways/workspace.gateways';
 import { ActionError, toActionErrorCode } from '../../domain/models/action-error.models';
-import { ChangedFileItem, WorkspaceDataset } from '../../domain/models/workspace.models';
+import { ChangedFileItem, SyncStatus, WorkspaceDataset } from '../../domain/models/workspace.models';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
 import {
   ApiPullRequestFileDto,
+  ApiSyncStatusDto,
   ApiWorkspaceResponseDto,
   mapApiWorkspaceResponseToDataset,
   mapPullRequestFile,
+  mapSyncStatus,
 } from './workspace-api.mapper';
 
 @Injectable({ providedIn: 'root' })
@@ -46,6 +48,47 @@ export class HttpPullRequestGateway implements PullRequestGateway {
 
   async commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void> {
     await this.postAction(`/api/v1/prs/${prId}/dependabot-command`, { command }, options);
+  }
+
+  async startSync(options?: ActionRequestOptions): Promise<{ started: boolean; status: SyncStatus }> {
+    const res = await this.postAction<{ started?: boolean; status?: ApiSyncStatusDto }>('/api/v1/sync', {}, options);
+    return { started: res?.started ?? false, status: mapSyncStatus(res?.status) };
+  }
+
+  async syncStatus(options?: ActionRequestOptions): Promise<SyncStatus> {
+    const response = await this.syncRequest('GET', options);
+    const payload = (await response.json().catch(() => null)) as ApiSyncStatusDto | null;
+    if (!response.ok) {
+      throw new ActionError(toActionErrorCode((payload as { code?: string } | null)?.code));
+    }
+    const status = mapSyncStatus(payload ?? undefined);
+    if (status.error?.code === 'github_token_expired' || status.error?.code === 'unauthorized') {
+      this.session.report(status.error.code);
+    }
+    return status;
+  }
+
+  async cancelSync(): Promise<void> {
+    try {
+      await this.syncRequest('DELETE');
+    } catch {
+      // Best-effort: the sync may already be over.
+    }
+  }
+
+  private async syncRequest(method: 'GET' | 'DELETE', options?: ActionRequestOptions): Promise<Response> {
+    try {
+      const response = await fetch('/api/v1/sync', { method, signal: options?.signal });
+      if (response.status === 401) {
+        await this.reportUnauthorized(response);
+      }
+      return response;
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      throw new ActionError('outcome_unknown');
+    }
   }
 
   async analyzePullRequest(prId: number, options?: ActionRequestOptions): Promise<void> {
@@ -106,12 +149,12 @@ export class HttpPullRequestGateway implements PullRequestGateway {
       }
       throw new ActionError('outcome_unknown');
     }
-    const payload = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    const payload = (await response.json().catch(() => null)) as { error?: string; code?: string; retry_at?: string } | null;
     if (response.status === 401) {
       this.session.report(payload?.code === 'github_token_expired' ? 'github_token_expired' : 'unauthorized');
     }
     if (!response.ok) {
-      throw new ActionError(toActionErrorCode(payload?.code), payload?.error ?? '');
+      throw new ActionError(toActionErrorCode(payload?.code), payload?.error ?? '', payload?.retry_at);
     }
     return payload as T | null;
   }

@@ -4,6 +4,7 @@ import {
   AuthenticatedUser,
   ChangedFileItem,
   SseConnectionState,
+  SyncStatus,
   TimelineEventItem,
   WorkspaceDataset,
 } from '../models/workspace.models';
@@ -41,6 +42,12 @@ export interface PullRequestGateway {
   analyzePullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;
   claimPullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
+  /** Starts (or joins) the background sync of every followed repository with GitHub; rejects with an ActionError. */
+  startSync?(options?: ActionRequestOptions): Promise<{ started: boolean; status: SyncStatus }>;
+  /** Where the background sync is now. */
+  syncStatus?(options?: ActionRequestOptions): Promise<SyncStatus>;
+  /** Asks the server to stop the background sync. */
+  cancelSync?(): Promise<void>;
   cancelServerOperation(operationId: string): Promise<void>;
   /** A PR's changed files from GitHub, owned files first; rejects when they cannot be read. */
   fetchChangedFiles?(repo: string, number: number, options?: ActionRequestOptions): Promise<readonly ChangedFileItem[]>;

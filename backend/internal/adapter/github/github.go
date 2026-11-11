@@ -311,11 +311,14 @@ func classifyWrite(resp *http.Response) error {
 		return nil
 	}
 	message := githubMessage(resp)
+	if err := classifyRateLimit(resp, message); err != nil {
+		return err // not processed because of a limit: retried after a short wait, else reported with its reset time
+	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrGitHubTokenExpired, message))
-	case resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != ""):
-		return classifyHTTPStatus(resp)
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return fmt.Errorf("github rate limited (429)")
 	case resp.StatusCode == http.StatusForbidden:
 		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrForbidden, message))
 	case resp.StatusCode == http.StatusNotFound:
@@ -340,15 +343,57 @@ func githubMessage(resp *http.Response) string {
 	return body.Message
 }
 
+// A wait for GitHub's rate limit is made inside the request only when it is short: longer than
+// this the call fails at once with a RateLimitedError that says when to come back, instead of
+// holding a request (and a worker) for minutes.
+const (
+	maxRateLimitWait   = 30 * time.Second
+	secondaryLimitWait = time.Minute // GitHub: wait at least a minute after a secondary limit
+	rateLimitMargin    = time.Second // the reset header has one-second granularity
+)
+
+// classifyRateLimit recognises GitHub's three ways of saying "slow down" and returns nil when the
+// answer is none of them: Retry-After; an exhausted primary limit (X-RateLimit-Remaining: 0 with
+// X-RateLimit-Reset); and a secondary limit, which only its message gives away. A short wait is a
+// retryable error that carries the delay; a long one is a permanent RateLimitedError with the reset
+// time. message is the response's explanation (read by the caller, since the body is single use).
+func classifyRateLimit(resp *http.Response, message string) error {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusForbidden {
+		return nil
+	}
+	limited := func(wait time.Duration) error {
+		if wait <= maxRateLimitWait {
+			return resilience.RetryAfter(fmt.Errorf("github rate limited (%d)", resp.StatusCode), wait)
+		}
+		return resilience.Permanent(&entity.RateLimitedError{ResetAt: time.Now().Add(wait)})
+	}
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+			return limited(time.Duration(secs) * time.Second)
+		}
+	}
+	if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil &&
+		(resp.Header.Get("X-RateLimit-Remaining") == "0" || resp.StatusCode == http.StatusTooManyRequests) {
+		return limited(time.Until(time.Unix(reset, 0)) + rateLimitMargin)
+	}
+	lower := strings.ToLower(message)
+	if resp.StatusCode == http.StatusForbidden && (strings.Contains(lower, "secondary rate limit") || strings.Contains(lower, "abuse detection")) {
+		return limited(secondaryLimitWait)
+	}
+	return nil
+}
+
 func classifyHTTPStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-				return resilience.RetryAfter(fmt.Errorf("github rate limited (%d)", resp.StatusCode), time.Duration(secs)*time.Second)
-			}
+		message := ""
+		if resp.StatusCode == http.StatusForbidden {
+			message = githubMessage(resp) // only a secondary limit hides in the message
+		}
+		if err := classifyRateLimit(resp, message); err != nil {
+			return err
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
 			return fmt.Errorf("github rate limited (429)")

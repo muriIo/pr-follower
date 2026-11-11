@@ -13,8 +13,7 @@ Last reviewed: 2026-11-11 (after the checks panel and drawer state).
 
 No P1 item is open. In order of value:
 1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses): the open "not verified" items below.
-2. **P2** Resync a followed repository on demand ([PR state](#3-pr-state-from-github)), which would also refill the reviews and commit statuses of PRs stored before they were ingested.
-3. **P2** Persist activity and fan out across replicas ([Live updates](#7-live-updates--timeline)).
+2. **P2** Persist activity and fan out across replicas ([Live updates](#7-live-updates--timeline)).
 
 ## 1. Identity & sessions
 
@@ -39,7 +38,11 @@ No P1 item is open. In order of value:
 - [x] CI from `check_run` webhooks: running / passing / failing, `NONE` when nothing was reported (#12). Only the latest run of each check name counts, as on GitHub: a re-run that passes clears the earlier failure, and one that is still going is pending.
 - [x] GitHub's `mergeable_state` stored and used as the only source of merge blockers (#12, #13).
 - [x] Backfill on import: the repository's open PRs (up to 1,000) and their check runs are read with the user's token before the follow is recorded, so existing PRs appear without waiting for a webhook. A failure leaves the repository unfollowed so the import can be retried; PRs already kept live by webhooks are never rewound; merge state stays `unknown` (the list does not carry it).
-- [ ] **P2** Resync a followed repository on demand (re-read open PRs, closing those GitHub no longer lists as open), for PRs that changed while the app was not receiving webhooks.
+- [x] "Sincronizar" resyncs with GitHub as a background job (`POST /sync` starts or joins it, `GET /sync` reports progress, `DELETE /sync` cancels; one per user, in memory). For every repository the user follows, one after the other, it refreshes the open PRs (title, head commit, draft, checks and statuses, reviews, files), adds ones it missed, reopens ones reopened, and closes the ones GitHub no longer has open after asking GitHub what became of each (merged or closed; a PR missing only from the capped listing stays open), announcing each close so open drawers follow. The panel polls once a second ("Sincronizando 3 de 10: acme/web..."), cancelling stops the server too, and the workspace reloads when it is done. One repository failing is reported by name and does not stop the others; the user's own GitHub access failing ends it. It used to only reload what the server already had.
+- [x] GitHub's rate limit is honoured, not guessed at: `Retry-After` and `X-RateLimit-Remaining: 0` + `X-RateLimit-Reset` (and the secondary-limit message). A wait up to 30s is waited out in the request; a longer one fails at once as `rate_limited` (HTTP 429, `retry_at`), and a sync stops there, names how many repositories it left for later and when to try again. nginx's `/api/` read timeout is 300s (was the 60s default).
+- [ ] **P2** A sync runs only when the user asks: a repository nobody syncs after downtime stays stale until someone does (or a webhook arrives). A periodic background resync would close that.
+- [ ] **P2** Not verified against real GitHub yet: a sync after real downtime, and the rate-limit headers.
+- [ ] **P3** A sync reads repositories one by one and every open PR in full: conditional requests (ETag), skipping PRs whose head did not change, and a little parallelism across repositories would cut its time and its share of the 5,000 requests/hour per user. The sync status lives in one replica's memory.
 - [x] Reviews ingested: `pull_request_review` webhooks (approved / changes requested / commented / dismissed) are stored by GitHub's review id, idempotently (a redelivery changes nothing, a dismissal is never revived), and the open human PRs' reviews are read at import for repositories with CODEOWNERS.
 - [ ] **P2** Reviews of PRs stored before this existed (imported earlier) are missing until the repository is imported again or a new review arrives: refresh them (resync, or the installation token).
 - [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown.

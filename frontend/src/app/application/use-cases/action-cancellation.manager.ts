@@ -106,6 +106,15 @@ export class ActionCancellationManager {
     }
   }
 
+  /** A running action reports how far it is; ignored once it is over. */
+  setProgress(key: string, label: string, pct?: number): void {
+    const entry = this.actionsState()[key];
+    if (entry?.status !== 'running') {
+      return;
+    }
+    this.setAction(key, { ...entry, label, pct });
+  }
+
   cancel(key: string): void {
     const active = this.controllers.get(key);
     if (active) {

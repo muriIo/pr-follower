@@ -8,6 +8,7 @@ export type ActionErrorCode =
   | 'unauthorized'
   | 'github_token_expired'
   | 'checks_running'
+  | 'rate_limited'
   | 'invalid_input'
   | 'unavailable'
   | 'not_analysable'
@@ -23,6 +24,7 @@ const KNOWN_CODES: readonly string[] = [
   'unauthorized',
   'github_token_expired',
   'checks_running',
+  'rate_limited',
   'invalid_input',
   'unavailable',
   'not_analysable',
@@ -41,6 +43,8 @@ export class ActionError extends Error {
   constructor(
     readonly code: ActionErrorCode,
     readonly detail: string = '',
+    /** For `rate_limited`: when GitHub's limit lifts (ISO). */
+    readonly retryAt?: string,
   ) {
     super(detail || code);
     this.name = 'ActionError';

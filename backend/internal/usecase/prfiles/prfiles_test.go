@@ -203,6 +203,10 @@ func (f *fakeGitHub) ListOpenPullRequests(context.Context, string, string, strin
 	return nil, nil
 }
 
+func (f *fakeGitHub) GetPullRequest(context.Context, string, string, string, int) (entity.RemotePullRequestState, error) {
+	return entity.RemotePullRequestState{}, nil
+}
+
 func (f *fakeGitHub) ListCommitStatuses(context.Context, string, string, string, string) ([]entity.CommitStatus, error) {
 	return nil, nil
 }

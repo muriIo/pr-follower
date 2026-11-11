@@ -7,7 +7,7 @@ import {
   PullRequestGateway,
 } from '../../domain/gateways/workspace.gateways';
 import { ActionError } from '../../domain/models/action-error.models';
-import { PullRequestItem, RepoInfo, TimelineEventItem } from '../../domain/models/workspace.models';
+import { PullRequestItem, RepoInfo, SyncResult, SyncStatus, TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
 import { LocaleStore } from './locale.store';
 import { WorkspaceStore } from './workspace.store';
@@ -1122,5 +1122,120 @@ describe('WorkspaceStore keeps the drawer true to its PR', () => {
 
     expect(store.drawer()!.act.note).toBe(t('actions.error.checks_running'));
     expect(store.approvedMap()[1]).toBeUndefined();
+  });
+});
+
+describe('WorkspaceStore "Sincronizar"', () => {
+  const status = (over: Partial<SyncStatus> = {}): SyncStatus => ({ state: 'running', total: 2, done: 0, current: '', ...over });
+  const result = (over: Partial<SyncResult> = {}): SyncResult => ({ repositories: 2, added: 0, updated: 0, closed: 0, merged: 0, skipped: 0, failed: [], ...over });
+
+  function setup(statuses: SyncStatus[], fetchWorkspace: PullRequestGateway['fetchWorkspace'] = async () => null, hasSync = true) {
+    const { prGateway, sseGateway } = createFakeGateways();
+    const queue = [...statuses];
+    const gateway = {
+      ...prGateway,
+      fetchWorkspace: vi.fn(fetchWorkspace),
+      startSync: hasSync ? vi.fn(async () => ({ started: true, status: queue.shift()! })) : undefined,
+      syncStatus: hasSync ? vi.fn(async () => queue.shift() ?? statuses[statuses.length - 1]) : undefined,
+      cancelSync: hasSync ? vi.fn(async () => undefined) : undefined,
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: gateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.repos.set([{ name: 'acme/web', branch: 'main', access: 'active' }]);
+    return { store, gateway, t: (key: string, params?: Record<string, string | number>) => TestBed.inject(LocaleStore).translate(key, params) };
+  }
+
+  it('starts the sync, follows its progress, and reloads the workspace only when it is done', async () => {
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      const { store, gateway, t } = setup(
+        [status(), status({ done: 1, current: 'acme/web' }), status({ state: 'done', done: 2, result: result({ merged: 1 }) })],
+        async () => { order.push('reload'); return null; },
+      );
+
+      const done = store.runSync();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(store.syncAction().running).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1000); // the first poll: 1 done, so it is reading the 2nd of 2: acme/web
+      expect(store.syncAction().label).toBe(t('actions.syncing.progress', { done: 2, total: 2, current: 'acme/web' }));
+      expect(order).toEqual([]); // nothing reloaded while it runs
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await done;
+      expect(order).toEqual(['reload']);
+      expect(gateway.startSync).toHaveBeenCalledTimes(1);
+      expect(store.syncAction().note).toBe(t('actions.synced.summary', { parts: t('actions.synced.ended.one', { count: 1 }) }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks the server to stop when the user cancels, and says it was canceled', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, gateway, t } = setup([status(), status({ done: 1, current: 'acme/web' })]);
+      const done = store.runSync();
+      await vi.advanceTimersByTimeAsync(0);
+
+      store.cancelAction('sync');
+      await vi.advanceTimersByTimeAsync(1000);
+      await done;
+
+      expect(gateway.cancelSync).toHaveBeenCalledTimes(1);
+      expect(store.syncAction().note).toBe(t('actions.syncCanceled'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says what it found, when nothing differed, and names what it could not sync', async () => {
+    const found = setup([status({ state: 'done', done: 2, result: result({ closed: 1, merged: 2, added: 1, updated: 3 }) })]);
+    await found.store.runSync();
+    expect(found.store.syncAction().note).toBe(
+      found.t('actions.synced.summary', { parts: [found.t('actions.synced.ended.other', { count: 3 }), found.t('actions.synced.added.one', { count: 1 }), found.t('actions.synced.updated.other', { count: 3 })].join(', ') }),
+    );
+    TestBed.resetTestingModule();
+
+    const same = setup([status({ state: 'done', result: result() })]);
+    await same.store.runSync();
+    expect(same.store.syncAction().note).toBe(same.t('actions.synced'));
+    TestBed.resetTestingModule();
+
+    const partial = setup([status({ state: 'done', result: result({ closed: 1, failed: [{ repository: 'acme/api', code: 'not_found' }] }) })]);
+    await partial.store.runSync();
+    expect(partial.store.syncAction().note).toContain(partial.t('actions.synced.failed', { repos: 'acme/api' }));
+  });
+
+  it('says when GitHub\'s rate limit stopped it, and when to try again', async () => {
+    const until = '2026-11-11T12:30:00Z';
+    const { store, t } = setup([status({ state: 'done', done: 2, result: result({ closed: 1, skipped: 4, rateLimitedUntil: until, failed: [{ repository: 'acme/web', code: 'rate_limited' }] }) })]);
+    await store.runSync();
+
+    const time = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const note = store.syncAction().note;
+    expect(note).toContain(t('actions.synced.rateLimited', { time, count: 4 }));
+    expect(note).not.toContain(t('actions.synced.failed', { repos: 'acme/web' })); // the limit explains it, once
+  });
+
+  it('shows a failed sync as the error it is, for example the user\'s GitHub access being gone', async () => {
+    const { store, t, gateway } = setup([status({ state: 'failed', error: { code: 'github_token_expired' } })]);
+    await store.runSync();
+    expect(store.syncAction().note).toBe(t('actions.error.github_token_expired'));
+    expect(gateway.fetchWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('still reloads when the gateway cannot sync (nothing to ask GitHub)', async () => {
+    const { store, gateway } = setup([], async () => null, false);
+    await store.runSync();
+    expect(gateway.fetchWorkspace).toHaveBeenCalledTimes(1);
   });
 });

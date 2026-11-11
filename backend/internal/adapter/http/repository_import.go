@@ -2,12 +2,15 @@ package httpadapter
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
 )
 
 // Vercel-style repository import (ADR-0010 §5). Every listing and import is checked against
@@ -101,4 +104,77 @@ func (h *Handler) UnfollowRepository(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// syncConfigured answers 503 when the sync is not set up (no GitHub sign-in on this server).
+func (h *Handler) syncConfigured(w http.ResponseWriter) bool {
+	if h.deps.SyncJobs == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "github_import_not_configured", "code": "unavailable"})
+		return false
+	}
+	return true
+}
+
+// StartSync begins bringing every repository the user follows in line with GitHub, in the
+// background, and answers at once: a sync takes minutes, far too long to hold a request open. If one
+// is already running it is joined (started is false). Progress is read with GetSync.
+func (h *Handler) StartSync(w http.ResponseWriter, r *http.Request) {
+	if !h.syncConfigured(w) {
+		return
+	}
+	status, started := h.deps.SyncJobs.Start(r.Context(), currentUserID(r))
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": started, "status": syncStatusBody(status)})
+}
+
+// GetSync reports the user's latest sync: its state, progress, and result when it is done.
+func (h *Handler) GetSync(w http.ResponseWriter, r *http.Request) {
+	if !h.syncConfigured(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, syncStatusBody(h.deps.SyncJobs.Status(r.Context(), currentUserID(r))))
+}
+
+// CancelSync stops the user's running sync.
+func (h *Handler) CancelSync(w http.ResponseWriter, r *http.Request) {
+	if !h.syncConfigured(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"canceled": h.deps.SyncJobs.Cancel(r.Context(), currentUserID(r))})
+}
+
+func syncStatusBody(st syncjob.Status) map[string]any {
+	body := map[string]any{
+		"state": st.State, "total": st.Progress.Total, "done": st.Progress.Done, "current": st.Progress.Current,
+	}
+	if !st.StartedAt.IsZero() {
+		body["started_at"] = st.StartedAt.UTC().Format(time.RFC3339)
+	}
+	if !st.FinishedAt.IsZero() {
+		body["finished_at"] = st.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	if res := st.Result; res != nil {
+		failed := make([]map[string]string, 0, len(res.Failed))
+		for _, f := range res.Failed {
+			_, code := statusAndCode(f.Err)
+			failed = append(failed, map[string]string{"repository": f.Repository, "code": code})
+		}
+		result := map[string]any{
+			"repositories": res.Repositories, "added": res.Added, "updated": res.Updated,
+			"closed": res.Closed, "merged": res.Merged, "skipped": res.Skipped, "failed": failed,
+		}
+		if !res.RateLimitedUntil.IsZero() {
+			result["rate_limited_until"] = res.RateLimitedUntil.UTC().Format(time.RFC3339)
+		}
+		body["result"] = result
+	}
+	if st.Err != nil {
+		_, code := statusAndCode(st.Err)
+		errBody := map[string]string{"code": code}
+		var limited *entity.RateLimitedError
+		if errors.As(st.Err, &limited) {
+			errBody["retry_at"] = limited.ResetAt.UTC().Format(time.RFC3339)
+		}
+		body["error"] = errBody
+	}
+	return body
 }

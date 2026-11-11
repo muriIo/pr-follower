@@ -22,6 +22,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
+	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -37,6 +38,7 @@ type HandlerDeps struct {
 	AnalyzeUC     *dependabot.AnalyzeUseCase
 	WebhookUC     *webhook.IngestUseCase
 	ReviewUC      *webhook.ReviewIngestUseCase
+	SyncJobs      *syncjob.Manager
 	PushUC        *webhook.PushIngestUseCase
 	SSEHub        *sse.Hub
 	OpRegistry    *operation.Registry
@@ -547,10 +549,23 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 // writeDomainError answers with a status and a stable "code" the client translates, plus the
 // error text (GitHub's own explanation when it refused an action).
 func writeDomainError(w http.ResponseWriter, err error) {
+	status, code := statusAndCode(err)
+	body := map[string]string{"error": displayMessage(err), "code": code}
+	var limited *entity.RateLimitedError
+	if errors.As(err, &limited) {
+		body["retry_at"] = limited.ResetAt.UTC().Format(time.RFC3339) // when the same request will work again
+	}
+	writeJSON(w, status, body)
+}
+
+// statusAndCode maps a domain error to its HTTP status and the stable code the client translates.
+func statusAndCode(err error) (int, string) {
 	status, code := http.StatusInternalServerError, "internal"
 	switch {
 	case errors.Is(err, entity.ErrOperationCanceled), errors.Is(err, context.Canceled):
 		status, code = StatusClientClosedRequest, "canceled"
+	case errors.Is(err, entity.ErrRateLimited):
+		status, code = http.StatusTooManyRequests, "rate_limited"
 	case errors.Is(err, entity.ErrChecksRunning):
 		status, code = http.StatusConflict, "checks_running"
 	case errors.Is(err, entity.ErrOwnPullRequest):
@@ -572,7 +587,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	case errors.Is(err, entity.ErrConflict):
 		status, code = http.StatusConflict, "conflict"
 	}
-	writeJSON(w, status, map[string]string{"error": displayMessage(err), "code": code})
+	return status, code
 }
 
 // displayMessage is the error text for the client: GitHub's own explanation without the

@@ -37,6 +37,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
+	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -128,8 +129,31 @@ func (fakeGitHubOAuth) FetchProfile(_ context.Context, token string) (entity.Git
 
 // fakeGitHubUserAPI: octocat reaches installation 20 (acme) with two repositories.
 type fakeGitHubUserAPI struct {
+	// ended says which PRs (by number) are no longer open on the fake GitHub: "merged" or "closed".
+	ended *fakeEndedPRs
 	// files, when set, is what the repositories' CODEOWNERS files hold right now (path by repo).
 	files *fakeRepoFiles
+}
+
+// fakeEndedPRs is a mutable set of PRs that ended on the fake GitHub.
+type fakeEndedPRs struct {
+	mu sync.Mutex
+	m  map[int]string
+}
+
+func (f *fakeEndedPRs) set(number int, how string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.m[number] = how
+}
+
+func (f *fakeEndedPRs) get(number int) string {
+	if f == nil {
+		return ""
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.m[number]
 }
 
 // fakeRepoFiles is a mutable set of repository files, keyed "owner/name:path".
@@ -183,8 +207,8 @@ func (fakeGitHubUserAPI) ListPullRequestFiles(_ context.Context, _ string, owner
 }
 
 // ListOpenPullRequests / ListCommitCheckRuns: the fake GitHub has nothing open to backfill.
-func (fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
-	if owner+"/"+name != "acme/web" {
+func (f fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
+	if owner+"/"+name != "acme/web" || f.ended.get(42) != "" {
 		return nil, nil
 	}
 	return []entity.RemotePullRequest{{GitHubPRID: 4200, Number: 42, Title: "feat: already open", AuthorLogin: "bia",
@@ -192,7 +216,10 @@ func (fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner
 }
 
 // GetPullRequest: every PR is open on GitHub, written by bianca-dev, at "live-<number>".
-func (fakeGitHubUserAPI) GetPullRequest(_ context.Context, _ string, _, _ string, number int) (entity.RemotePullRequestState, error) {
+func (f fakeGitHubUserAPI) GetPullRequest(_ context.Context, _ string, _, _ string, number int) (entity.RemotePullRequestState, error) {
+	if how := f.ended.get(number); how != "" {
+		return entity.RemotePullRequestState{Open: false, Merged: how == "merged", HeadSHA: fmt.Sprintf("live-%d", number)}, nil
+	}
 	return entity.RemotePullRequestState{Open: true, HeadSHA: fmt.Sprintf("live-%d", number), AuthorLogin: "bianca-dev"}, nil
 }
 
@@ -237,6 +264,7 @@ type testServer struct {
 	prs    *persistence.PullRequestRepository
 	gh     *noopGHGateway
 	files  *fakeRepoFiles
+	ended  *fakeEndedPRs
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -327,7 +355,8 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	opReg := operation.NewRegistry()
 	ghGw := &noopGHGateway{}
 	repoFiles := &fakeRepoFiles{files: map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}}
-	userAPI := fakeGitHubUserAPI{files: repoFiles}
+	ended := &fakeEndedPRs{m: map[int]string{}}
+	userAPI := fakeGitHubUserAPI{files: repoFiles, ended: ended}
 
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
@@ -345,6 +374,9 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	codeownersUC := codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, nil, sseHub)
 	pushUC := webhook.NewPushIngestUseCase(repoRepo, codeownersUC)
 	importUC := repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
+	syncCtx, stopSync := context.WithCancel(context.Background())
+	t.Cleanup(stopSync)
+	syncJobs := syncjob.NewManager(syncCtx, importUC)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 
@@ -357,6 +389,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
 		ReviewUC:       reviewUC,
+		SyncJobs:       syncJobs,
 		PushUC:         pushUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,
@@ -369,7 +402,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		FilesUC:        filesUC,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles, ended: ended}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -1892,5 +1925,119 @@ func TestWorkspace_AStatusFromVercelHoldsTheChecksPanelBack(t *testing.T) {
 	checks, ci = view()
 	if ci != entity.CIStatusSuccess || len(checks) != 2 {
 		t.Fatalf("the latest status of the context decides: %+v %q", checks, ci)
+	}
+}
+
+func TestSync_RunsInTheBackgroundAndBringsTheWorkspaceInLineWithGitHub(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	openNumbers := func() []int {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		out := []int{}
+		for _, seat := range body.Snapshot.Seats {
+			for _, pr := range seat.PullRequests {
+				out = append(out, pr.Number)
+			}
+		}
+		return out
+	}
+	status := func(cookie *http.Cookie) map[string]any {
+		t.Helper()
+		rec := ts.do(t, http.MethodGet, "/api/v1/sync", "", cookie)
+		var body map[string]any
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("GET /sync: %d %s", rec.Code, rec.Body.String())
+		}
+		return body
+	}
+	// sync starts a sync and waits for it to finish, returning its final status.
+	sync := func() map[string]any {
+		t.Helper()
+		rec := ts.do(t, http.MethodPost, "/api/v1/sync", "", session)
+		var started map[string]any
+		if rec.Code != http.StatusAccepted || json.NewDecoder(rec.Body).Decode(&started) != nil {
+			t.Fatalf("POST /sync must answer at once with 202: %d %s", rec.Code, rec.Body.String())
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			st := status(session)
+			if st["state"] != "running" {
+				return st
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the sync never finished")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	if st := status(session); st["state"] != "idle" {
+		t.Fatalf("before any sync the state is idle: %v", st)
+	}
+	if got := openNumbers(); len(got) != 1 || got[0] != 42 {
+		t.Fatalf("PR 42 starts open: %v", got)
+	}
+
+	// PR 42 is merged on GitHub while no webhook reaches us: the workspace still lists it...
+	ts.ended.set(42, "merged")
+	if got := openNumbers(); len(got) != 1 {
+		t.Fatalf("without a webhook nothing has changed here: %v", got)
+	}
+	// ...until the user syncs.
+	st := sync()
+	result, _ := st["result"].(map[string]any)
+	if st["state"] != "done" || result["repositories"] != float64(1) || result["merged"] != float64(1) || result["closed"] != float64(0) {
+		t.Fatalf("unexpected final status: %v", st)
+	}
+	if st["total"] != float64(1) || st["done"] != float64(1) || st["started_at"] == nil || st["finished_at"] == nil {
+		t.Fatalf("a finished sync reports its progress and times: %v", st)
+	}
+	if got := openNumbers(); len(got) != 0 {
+		t.Fatalf("a PR merged on GitHub must be gone after a sync: %v", got)
+	}
+	again := sync()
+	if r, _ := again["result"].(map[string]any); r["merged"] != float64(0) || r["closed"] != float64(0) || r["updated"] != float64(0) {
+		t.Fatalf("a second sync changes nothing: %v", again)
+	}
+
+	// Cancelling nothing is harmless; someone who follows nothing syncs nothing; signed out is refused.
+	if rec := ts.do(t, http.MethodDelete, "/api/v1/sync", "", session); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"canceled":false`) {
+		t.Fatalf("DELETE /sync with nothing running: %d %s", rec.Code, rec.Body.String())
+	}
+	other := ts.signInAs(t, "other")
+	if st := status(other); st["state"] != "idle" {
+		t.Fatalf("another user's sync is separate: %v", st)
+	}
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+		if rec := ts.do(t, method, "/api/v1/sync", "", nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s /sync signed out: %d", method, rec.Code)
+		}
+	}
+}
+
+func TestSync_NotAvailableWithoutGitHubSignIn(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{AuthUC: ts.authUC}) // no SyncJobs
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, "/api/v1/sync", nil)
+		req.AddCookie(session)
+		server.NewChiRouter(handler, "*").ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"unavailable"`) {
+			t.Fatalf("%s /sync: %d %s", method, rec.Code, rec.Body.String())
+		}
 	}
 }
