@@ -58,6 +58,31 @@ export interface ChangedFileItem {
   readonly owned?: boolean;
 }
 
+/** What a sync with GitHub found: how many PRs it added, updated and found ended, and what it could not sync. */
+export interface SyncResult {
+  readonly repositories: number;
+  readonly added: number;
+  readonly updated: number;
+  readonly closed: number;
+  readonly merged: number;
+  /** Repositories left out because GitHub's rate limit stopped the sync. */
+  readonly skipped: number;
+  /** When GitHub's rate limit lifts (ISO), if it stopped the sync. */
+  readonly rateLimitedUntil?: string;
+  readonly failed: readonly { readonly repository: string; readonly code: string }[];
+}
+
+/** Where a background sync is: running (with progress), or how it ended. */
+export interface SyncStatus {
+  readonly state: 'idle' | 'running' | 'done' | 'failed' | 'canceled';
+  readonly total: number;
+  readonly done: number;
+  /** The repository being read now, or ''. */
+  readonly current: string;
+  readonly result?: SyncResult;
+  readonly error?: { readonly code: string; readonly retryAt?: string };
+}
+
 /** One check of a PR's head commit, as GitHub's checks panel lists it. */
 export interface CheckItem {
   readonly name: string;

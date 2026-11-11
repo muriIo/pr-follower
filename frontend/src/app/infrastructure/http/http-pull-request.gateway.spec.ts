@@ -236,4 +236,41 @@ describe('HttpPullRequestGateway actions are never silent and never repeated', (
     await expect(g.mergePullRequest(1)).rejects.toMatchObject({ code: 'github_token_expired' });
     expect(reported).toHaveBeenLastCalledWith('github_token_expired');
   });
+
+  it('starts a sync, reads its progress and cancels it, in the client\'s own shape', async () => {
+    const running = { state: 'running', total: 10, done: 3, current: 'acme/web' };
+    const spy = answer(202, { started: true, status: running });
+    const started = await gateway().startSync({ operationId: 'op-sync-1' });
+    expect(spy).toHaveBeenCalledWith(
+      '/api/v1/sync',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'X-Operation-ID': 'op-sync-1' }) }),
+    );
+    expect(started).toEqual({ started: true, status: { state: 'running', total: 10, done: 3, current: 'acme/web' } });
+    spy.mockRestore();
+
+    const done = answer(200, {
+      state: 'done', total: 10, done: 10, current: '',
+      result: { repositories: 10, added: 1, updated: 3, closed: 1, merged: 2, skipped: 4, rate_limited_until: '2026-11-11T12:30:00Z', failed: [{ repository: 'acme/api', code: 'not_found' }] },
+    });
+    const status = await gateway().syncStatus();
+    expect(done).toHaveBeenCalledWith('/api/v1/sync', expect.objectContaining({ method: 'GET' }));
+    expect(status.result).toEqual({
+      repositories: 10, added: 1, updated: 3, closed: 1, merged: 2, skipped: 4,
+      rateLimitedUntil: '2026-11-11T12:30:00Z', failed: [{ repository: 'acme/api', code: 'not_found' }],
+    });
+    done.mockRestore();
+
+    const failed = answer(200, { state: 'failed', total: 0, done: 0, current: '', error: { code: 'rate_limited', retry_at: '2026-11-11T12:30:00Z' } });
+    expect((await gateway().syncStatus()).error).toEqual({ code: 'rate_limited', retryAt: '2026-11-11T12:30:00Z' });
+    failed.mockRestore();
+
+    const cancel = answer(200, { canceled: true });
+    await gateway().cancelSync();
+    expect(cancel).toHaveBeenCalledWith('/api/v1/sync', expect.objectContaining({ method: 'DELETE' }));
+  });
+
+  it('keeps the reset time of a rate limit on the error it raises', async () => {
+    answer(429, { error: 'limit', code: 'rate_limited', retry_at: '2026-11-11T12:30:00Z' });
+    await expect(gateway().mergePullRequest(1)).rejects.toMatchObject({ code: 'rate_limited', retryAt: '2026-11-11T12:30:00Z' });
+  });
 });

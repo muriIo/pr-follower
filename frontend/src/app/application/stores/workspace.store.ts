@@ -16,6 +16,8 @@ import {
   PullRequestItem,
   RepoInfo,
   ReviewItem,
+  SyncResult,
+  SyncStatus,
   RiskVerdictTier,
   SeatFilterType,
   SseConnectionState,
@@ -26,8 +28,35 @@ import {
 } from '../../domain/models/workspace.models';
 import { ActionCancellationManager, ActionViewModel } from '../use-cases/action-cancellation.manager';
 import { ActivityIconName, ActivityTone, activityIconFor } from '../../domain/models/activity.models';
-import { ActionError } from '../../domain/models/action-error.models';
+import { ActionError, toActionErrorCode } from '../../domain/models/action-error.models';
 import { LocaleStore } from './locale.store';
+
+/** How often the progress of a background sync is read. */
+const SYNC_POLL_MS = 1000;
+
+/** Waits, or rejects with an AbortError the moment the signal aborts. */
+function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** A moment as the clock time the user reads it. */
+function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
 /** i18n keys for the GitHub mergeable states that stop a merge; the others do not block. */
 const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
@@ -1136,7 +1165,10 @@ export class WorkspaceStore {
       if (err.code === 'outcome_unknown' || err.code === 'conflict' || err.code === 'checks_running') {
         this.scheduleWorkspaceRefresh(); // GitHub's state may differ from ours: look again
       }
-      return this.t(`actions.error.${err.code}`, { detail: err.detail });
+      return this.t(`actions.error.${err.code}`, {
+        detail: err.detail,
+        time: err.retryAt ? formatClock(err.retryAt) : '',
+      });
     }
     return this.t('actions.error.unknown', { detail: '' });
   }
@@ -1261,21 +1293,97 @@ export class WorkspaceStore {
     );
   }
 
+  /**
+   * Brings the workspace in line with GitHub: the server re-reads every followed repository in the
+   * background (closing PRs that ended while no webhook arrived) and this follows its progress until
+   * it is over, then reloads the workspace. Cancelling asks the server to stop. A sync already
+   * running (another tab, a double click) is joined, not repeated.
+   */
   async runSync(): Promise<void> {
     const count = this.repos().length;
+    let found: SyncResult | null = null;
     await this.cancellation.run(
       'sync',
       [
         {
           label: this.n('actions.syncing', count),
           execute: async (opts) => {
+            if (this.prGateway?.startSync && this.prGateway.syncStatus) {
+              try {
+                found = await this.followSync(opts);
+              } catch (err: unknown) {
+                if (err instanceof DOMException && err.name === 'AbortError') {
+                  await this.prGateway.cancelSync?.();
+                }
+                throw err;
+              }
+            }
             await this.loadWorkspace(opts);
           },
         },
       ],
-      () => this.t('actions.synced'),
+      () => this.syncNote(found),
       () => this.t('actions.syncCanceled'),
+      (err) => this.failureNote(err),
     );
+  }
+
+  private async followSync(opts: Required<ActionRequestOptions>): Promise<SyncResult | null> {
+    const gateway = this.prGateway;
+    let status = (await gateway!.startSync!(opts)).status;
+    while (status.state === 'running' || status.state === 'idle') {
+      this.showSyncProgress(status);
+      await sleepUnlessAborted(SYNC_POLL_MS, opts.signal);
+      status = await gateway!.syncStatus!(opts);
+    }
+    if (status.state === 'failed') {
+      throw new ActionError(toActionErrorCode(status.error?.code), '', status.error?.retryAt);
+    }
+    if (status.state === 'canceled') {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    return status.result ?? null;
+  }
+
+  private showSyncProgress(status: SyncStatus): void {
+    if (!status.current || status.total === 0) {
+      return;
+    }
+    this.cancellation.setProgress(
+      'sync',
+      this.t('actions.syncing.progress', { done: status.done + 1, total: status.total, current: status.current }),
+      (status.done / status.total) * 100,
+    );
+  }
+
+  /** What a sync found, or that everything already agreed; what it could not sync, and why, is named. */
+  private syncNote(found: SyncResult | null): string {
+    if (!found) {
+      return this.t('actions.synced');
+    }
+    const ended = found.closed + found.merged;
+    const parts = [
+      ended ? this.n('actions.synced.ended', ended) : '',
+      found.added ? this.n('actions.synced.added', found.added) : '',
+      found.updated ? this.n('actions.synced.updated', found.updated) : '',
+    ].filter(Boolean);
+    const limited = found.skipped > 0 && !!found.rateLimitedUntil;
+    const base = parts.length
+      ? this.t('actions.synced.summary', { parts: parts.join(', ') })
+      : limited
+        ? ''
+        : this.t('actions.synced');
+    // The limit explains the repositories it stopped at, so they are not named again as failures.
+    const failed = found.failed.filter((f) => !(limited && f.code === 'rate_limited'));
+    return [
+      base,
+      failed.length ? this.t('actions.synced.failed', { repos: failed.map((f) => f.repository).join(', ') }) : '',
+      limited
+        ? this.t('actions.synced.rateLimited', { time: formatClock(found.rateLimitedUntil!), count: found.skipped })
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   async runBatchApprove(): Promise<void> {

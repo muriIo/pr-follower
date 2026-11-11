@@ -81,6 +81,8 @@ h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .pf-btn-primary:hover { background: #FFFFFF; border-color: #FFFFFF; }
 .pf-btn-primary:disabled, .pf-btn-primary[aria-disabled="true"] { color: var(--text-3); background: transparent; border-color: var(--border); }
 .pf-running { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); }
+/* The running label (or spinner) and its Cancel button are siblings inside the host: space them like any other row. */
+app-cancellable-action { display: inline-flex; align-items: center; gap: var(--space-3); }
 .pf-spin { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--focus); animation: pf-rot .7s linear infinite; }
 @keyframes pf-rot { to { transform: rotate(360deg); } }
 .pf-note { color: var(--text-2); }

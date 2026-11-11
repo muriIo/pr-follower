@@ -14,6 +14,7 @@ import {
   RepoInfo,
   RepositoryAccessState,
   RiskVerdictTier,
+  SyncStatus,
   TimelineEventItem,
   WorkspaceDataset,
 } from '../../domain/models/workspace.models';
@@ -618,5 +619,47 @@ function mapDependabotPrToModel(
     note: breakingNote ? `⚠️ ${breakingNote.summary}` : { key: 'impact.note.clean' },
     noteWarn: Boolean(breakingNote?.is_breaking_note),
     why: { key: 'drawer.why.depDone' },
+  };
+}
+
+export interface ApiSyncStatusDto {
+  state?: string;
+  total?: number;
+  done?: number;
+  current?: string;
+  result?: {
+    repositories?: number;
+    added?: number;
+    updated?: number;
+    closed?: number;
+    merged?: number;
+    skipped?: number;
+    rate_limited_until?: string;
+    failed?: { repository: string; code: string }[];
+  };
+  error?: { code?: string; retry_at?: string };
+}
+
+const SYNC_STATES: readonly SyncStatus['state'][] = ['idle', 'running', 'done', 'failed', 'canceled'];
+
+export function mapSyncStatus(dto: ApiSyncStatusDto | undefined): SyncStatus {
+  const state = SYNC_STATES.find((s) => s === dto?.state) ?? 'idle';
+  const r = dto?.result;
+  return {
+    state,
+    total: dto?.total ?? 0,
+    done: dto?.done ?? 0,
+    current: dto?.current ?? '',
+    result: r && {
+      repositories: r.repositories ?? 0,
+      added: r.added ?? 0,
+      updated: r.updated ?? 0,
+      closed: r.closed ?? 0,
+      merged: r.merged ?? 0,
+      skipped: r.skipped ?? 0,
+      ...(r.rate_limited_until ? { rateLimitedUntil: r.rate_limited_until } : {}),
+      failed: r.failed ?? [],
+    },
+    error: dto?.error?.code ? { code: dto.error.code, ...(dto.error.retry_at ? { retryAt: dto.error.retry_at } : {}) } : undefined,
   };
 }

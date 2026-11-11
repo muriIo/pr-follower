@@ -142,3 +142,25 @@ describe('ActionCancellationManager failures and cancellation between steps', ()
     expect(manager.getView(undefined, 'batch').note).toBe('cancelled at 1');
   });
 });
+
+describe('ActionCancellationManager progress', () => {
+  it('lets a running action update its label and bar as it goes', async () => {
+    TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+    const manager = TestBed.inject(ActionCancellationManager);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+
+    const promise = manager.run('sync', [{ label: 'Sincronizando 10 repositórios...', execute: async () => gate }], () => 'ok', () => 'cancelado');
+    manager.setProgress('sync', 'Sincronizando 3 de 10: acme/web...', 30);
+
+    const view = manager.getView(undefined, 'sync');
+    expect(view.running).toBe(true);
+    expect(view.label).toBe('Sincronizando 3 de 10: acme/web...');
+    expect(view.pct).toBe(30);
+
+    release();
+    await promise;
+    manager.setProgress('sync', 'late', 90); // after it finished: ignored
+    expect(manager.getView(undefined, 'sync').label).toBe('');
+  });
+});
