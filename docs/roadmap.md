@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after the Dependabot analysis).
+Last reviewed: 2026-11-11 (after review state in the drawer).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,8 +12,8 @@ Last reviewed: 2026-11-10 (after the Dependabot analysis).
 ## Next up
 
 In order:
-1. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
-2. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
+1. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
+2. **P1** CODEOWNERS freshness ([Repositories](#2-repositories--github-app-installation)): refresh the cached rules on `push` to the default branch.
 
 ## 1. Identity & sessions
 
@@ -91,7 +91,7 @@ In order:
 
 - [x] Signals and blockers only from GitHub: CI, CODEOWNERS state, merge state (#12, #13).
 - [x] Changed-files preview: every file from GitHub as a collapsible card, owned files first with "Seu", loading and error states (#14).
-- [ ] **P1** Review state in the drawer: who reviewed and what they decided (reviews are stored, module 3; not exposed to the drawer yet).
+- [x] Review state in the drawer: a "Revisões" section lists each reviewer's latest decision (approved, requested changes, commented, dismissed), current ones first and reviews of an older commit marked, from the stored reviews. The author's own comments are not reviews; it shows for every PR, whoever owns the files.
 
 ## 9. Frontend platform
 
