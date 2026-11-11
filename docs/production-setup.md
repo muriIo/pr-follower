@@ -8,7 +8,7 @@ Throughout, `app.example.com` stands for your production domain.
 
 Production readiness depends on open items in [`roadmap.md`](roadmap.md) (P0 and P1 first). Check these before going public:
 
-- [ ] **Acting on GitHub.** Approve / merge / comment do not yet use the user's token, and installation tokens (App ID + private key) are not wired. Until then those actions do not reach GitHub.
+- [ ] **Verified against real GitHub.** Approve / merge / comment act with the user's token and background reads use the app's installation token, but neither has been exercised against a real repository yet. Run [`real-github-verification.md`](real-github-verification.md) with a dev app first.
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
