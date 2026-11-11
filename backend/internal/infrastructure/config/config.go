@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +12,9 @@ type Config struct {
 	DatabaseURL         string
 	GitHubWebhookSecret string
 	GitHubAppID         string
+	// GitHubAppPrivateKey is the app's PEM private key, from GITHUB_APP_PRIVATE_KEY_FILE or
+	// GITHUB_APP_PRIVATE_KEY. It signs the JWTs that become installation tokens. Never log it.
+	GitHubAppPrivateKey string
 	GitHubAppSlug       string
 	GitHubClientID      string
 	GitHubClientSecret  string
@@ -22,11 +26,20 @@ type Config struct {
 }
 
 func LoadFromEnv() (*Config, error) {
+	privateKey := getEnvOrDefault("GITHUB_APP_PRIVATE_KEY", "")
+	if path := getEnvOrDefault("GITHUB_APP_PRIVATE_KEY_FILE", ""); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read GITHUB_APP_PRIVATE_KEY_FILE: %w", err)
+		}
+		privateKey = strings.TrimSpace(string(raw))
+	}
 	return &Config{
 		Port:                getEnvOrDefault("PORT", "8080"),
 		DatabaseURL:         getEnvOrDefault("DATABASE_URL", "postgres://prfollower:prfollower_secret@localhost:5432/pr_follower?sslmode=disable"),
 		GitHubWebhookSecret: getEnvOrDefault("GITHUB_WEBHOOK_SECRET", "dev-webhook-secret"),
 		GitHubAppID:         getEnvOrDefault("GITHUB_APP_ID", ""),
+		GitHubAppPrivateKey: privateKey,
 		GitHubAppSlug:       getEnvOrDefault("GITHUB_APP_SLUG", ""),
 		GitHubClientID:      getEnvOrDefault("GITHUB_CLIENT_ID", ""),
 		GitHubClientSecret:  getEnvOrDefault("GITHUB_CLIENT_SECRET", ""),
@@ -47,6 +60,12 @@ func (c *Config) GitHubCallbackURL() string {
 // GitHubLoginConfigured reports whether GitHub sign-in can run.
 func (c *Config) GitHubLoginConfigured() bool {
 	return c.GitHubClientID != "" && c.GitHubClientSecret != ""
+}
+
+// GitHubAppConfigured reports whether the server can authenticate as the GitHub App itself
+// (installation tokens for reads that have no signed-in user behind them).
+func (c *Config) GitHubAppConfigured() bool {
+	return c.GitHubAppID != "" && c.GitHubAppPrivateKey != ""
 }
 
 // GitHubAppInstallURL is where users install the app on an account (the Vercel-style

@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/config"
@@ -86,5 +88,42 @@ func TestLoadFromEnv_GitHubAppInstallURL(t *testing.T) {
 	cfg, _ = config.LoadFromEnv()
 	if cfg.GitHubAppInstallURL() != "" {
 		t.Errorf("expected no install URL without a slug, got %q", cfg.GitHubAppInstallURL())
+	}
+}
+
+func TestLoadFromEnv_GitHubAppCredentials(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", `-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----`)
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv() error: %v", err)
+	}
+	if !cfg.GitHubAppConfigured() || cfg.GitHubAppPrivateKey == "" {
+		t.Fatalf("expected the app credentials to be configured: %+v", cfg)
+	}
+
+	// A key file wins over the inline value (secrets mounted as files).
+	file := filepath.Join(t.TempDir(), "app.pem")
+	if err := os.WriteFile(file, []byte("PEM FROM FILE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_FILE", file)
+	cfg, err = config.LoadFromEnv()
+	if err != nil || cfg.GitHubAppPrivateKey != "PEM FROM FILE" {
+		t.Fatalf("expected the file's content, got %q, %v", cfg.GitHubAppPrivateKey, err)
+	}
+
+	t.Setenv("GITHUB_APP_PRIVATE_KEY_FILE", filepath.Join(t.TempDir(), "missing.pem"))
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatal("an unreadable key file must fail loudly, not leave the app silently unconfigured")
+	}
+}
+
+func TestConfig_GitHubAppNeedsBothIDAndKey(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	cfg, _ := config.LoadFromEnv()
+	if cfg.GitHubAppConfigured() {
+		t.Fatal("an app id without a key cannot authenticate")
 	}
 }

@@ -86,7 +86,7 @@ func setup(followers ...uint64) (*changedfiles.UseCase, *fakeGitHub, *fakeStore,
 	gh := &fakeGitHub{files: []entity.ChangedFile{{Path: "src/a.ts", Additions: 1}}, errFor: map[string]error{}}
 	store := &fakeStore{saved: map[uint64]entity.PRChangedFiles{}}
 	tokens := &fakeTokens{broken: map[uint64]error{}}
-	return changedfiles.NewUseCase(tokens, gh, store, fakeFollowers{ids: followers}), gh, store, tokens
+	return changedfiles.NewUseCase(tokens, gh, store, fakeFollowers{ids: followers}, nil), gh, store, tokens
 }
 
 func TestSyncWithToken_StoresTheFilesOfTheHeadCommit(t *testing.T) {
@@ -224,7 +224,7 @@ func TestSyncAsFollower_ReportsWhenNobodyCanRead(t *testing.T) {
 		t.Fatalf("outage: err=%v calls=%v", err, gh.calls)
 	}
 
-	failing := changedfiles.NewUseCase(fakeTokens{}, &fakeGitHub{}, &fakeStore{saved: map[uint64]entity.PRChangedFiles{}}, fakeFollowers{err: boom})
+	failing := changedfiles.NewUseCase(fakeTokens{}, &fakeGitHub{}, &fakeStore{saved: map[uint64]entity.PRChangedFiles{}}, fakeFollowers{err: boom}, nil)
 	if err := failing.SyncAsFollower(ctx, repo, pr); !errors.Is(err, boom) {
 		t.Fatalf("expected the followers failure, got %v", err)
 	}

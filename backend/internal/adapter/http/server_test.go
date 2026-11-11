@@ -248,7 +248,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
-	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo)
+	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo, nil)
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
