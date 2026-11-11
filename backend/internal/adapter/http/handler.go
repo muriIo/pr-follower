@@ -436,19 +436,37 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+// writeDomainError answers with a status and a stable "code" the client translates, plus the
+// error text (GitHub's own explanation when it refused an action).
 func writeDomainError(w http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
+	status, code := http.StatusInternalServerError, "internal"
 	switch {
 	case errors.Is(err, entity.ErrOperationCanceled), errors.Is(err, context.Canceled):
-		status = StatusClientClosedRequest
+		status, code = StatusClientClosedRequest, "canceled"
+	case errors.Is(err, entity.ErrOwnPullRequest):
+		status, code = http.StatusUnprocessableEntity, "own_pull_request"
+	case errors.Is(err, entity.ErrOutcomeUnknown):
+		status, code = http.StatusBadGateway, "outcome_unknown"
+	case errors.Is(err, entity.ErrForbidden):
+		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, entity.ErrInvalidInput):
-		status = http.StatusBadRequest
+		status, code = http.StatusBadRequest, "invalid_input"
 	case errors.Is(err, entity.ErrUnauthorized):
-		status = http.StatusUnauthorized
+		status, code = http.StatusUnauthorized, "unauthorized"
 	case errors.Is(err, entity.ErrNotFound):
-		status = http.StatusNotFound
+		status, code = http.StatusNotFound, "not_found"
 	case errors.Is(err, entity.ErrConflict):
-		status = http.StatusConflict
+		status, code = http.StatusConflict, "conflict"
 	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	writeJSON(w, status, map[string]string{"error": displayMessage(err), "code": code})
+}
+
+// displayMessage is the error text for the client: GitHub's own explanation without the
+// internal category it was wrapped in ("resource conflict: Pull Request is not mergeable").
+func displayMessage(err error) string {
+	msg := err.Error()
+	for _, sentinel := range []error{entity.ErrForbidden, entity.ErrConflict, entity.ErrNotFound, entity.ErrUnauthorized} {
+		msg = strings.TrimPrefix(msg, sentinel.Error()+": ")
+	}
+	return msg
 }

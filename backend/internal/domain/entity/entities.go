@@ -13,6 +13,14 @@ var (
 	ErrOperationCanceled = errors.New("operation canceled by caller")
 	ErrConflict          = errors.New("resource conflict")
 	ErrUnauthorized      = errors.New("unauthorized")
+	// ErrForbidden means GitHub refused the signed-in user's token for this action (permissions).
+	ErrForbidden = errors.New("forbidden by github")
+	// ErrOutcomeUnknown means a write may or may not have been applied on GitHub (a timeout, a
+	// dropped connection, a 5xx): the caller must check GitHub, never assume either way.
+	ErrOutcomeUnknown = errors.New("could not confirm the outcome on github")
+	// ErrOwnPullRequest means the user tried to approve a pull request they authored: GitHub
+	// does not allow it.
+	ErrOwnPullRequest = errors.New("you cannot approve your own pull request")
 )
 
 type PRState string

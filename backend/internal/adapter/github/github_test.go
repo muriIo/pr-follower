@@ -107,13 +107,13 @@ func TestGateway_AllEndpointsWithBackoffAndCancellation(t *testing.T) {
 		t.Fatalf("unexpected tarball bytes: %q", string(tarBytes))
 	}
 
-	if err := gw.ApprovePullRequest(ctx, repo, 42, "LGTM"); err != nil {
+	if _, err := gw.ApprovePullRequest(ctx, "ghu_user", repo, 42, "LGTM"); err != nil {
 		t.Fatalf("ApprovePullRequest() err = %v", err)
 	}
-	if err := gw.MergePullRequest(ctx, repo, 42, "squash"); err != nil {
+	if err := gw.MergePullRequest(ctx, "ghu_user", repo, 42, "squash"); err != nil {
 		t.Fatalf("MergePullRequest() err = %v", err)
 	}
-	if err := gw.CreatePRComment(ctx, repo, 42, "@dependabot rebase"); err != nil {
+	if err := gw.CreatePRComment(ctx, "ghu_user", repo, 42, "@dependabot rebase"); err != nil {
 		t.Fatalf("CreatePRComment() err = %v", err)
 	}
 
@@ -164,16 +164,16 @@ func TestGateway_NonIdempotentWritesAreNotRepeatedOnAmbiguousFailures(t *testing
 	repo := entity.Repository{ID: 1, Owner: "acme", Name: "web"}
 	ctx := context.Background()
 
-	if err := gw.ApprovePullRequest(ctx, repo, 1, "LGTM"); err == nil || reviews.Load() != 1 {
+	if _, err := gw.ApprovePullRequest(ctx, "ghu_user", repo, 1, "LGTM"); err == nil || reviews.Load() != 1 {
 		t.Fatalf("approve on 502: err=%v attempts=%d, want an error after exactly 1 attempt", err, reviews.Load())
 	}
-	if err := gw.CreatePRComment(ctx, repo, 1, "@dependabot rebase"); err == nil || comments.Load() != 1 {
+	if err := gw.CreatePRComment(ctx, "ghu_user", repo, 1, "@dependabot rebase"); err == nil || comments.Load() != 1 {
 		t.Fatalf("comment on 502: err=%v attempts=%d, want an error after exactly 1 attempt", err, comments.Load())
 	}
-	if err := gw.ApprovePullRequest(ctx, repo, 2, "LGTM"); err != nil || reviews.Load() != 3 {
+	if _, err := gw.ApprovePullRequest(ctx, "ghu_user", repo, 2, "LGTM"); err != nil || reviews.Load() != 3 {
 		t.Fatalf("approve after Retry-After: err=%v attempts=%d, want success on the retry", err, reviews.Load())
 	}
-	if err := gw.MergePullRequest(ctx, repo, 3, "squash"); err != nil || merges.Load() != 2 {
+	if err := gw.MergePullRequest(ctx, "ghu_user", repo, 3, "squash"); err != nil || merges.Load() != 2 {
 		t.Fatalf("merge on 502: err=%v attempts=%d, want success on the retry", err, merges.Load())
 	}
 }

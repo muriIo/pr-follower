@@ -124,3 +124,11 @@ type PRChangedFiles struct {
 func (f PRChangedFiles) IsCurrentFor(pr PullRequest) bool {
 	return f.HeadSHA != "" && f.HeadSHA == pr.HeadSHA
 }
+
+// RemotePullRequestState is a PR's live state on GitHub, read before acting on it.
+type RemotePullRequestState struct {
+	Open        bool
+	Merged      bool
+	HeadSHA     string
+	AuthorLogin string
+}

@@ -128,9 +128,20 @@ type GitHubGateway interface {
 	GetFileContent(ctx context.Context, repo entity.Repository, ref, filePath string) ([]byte, error)
 	ListPRChangedFiles(ctx context.Context, repo entity.Repository, prNumber int) ([]entity.ChangedFile, error)
 	StreamRepoTarball(ctx context.Context, repo entity.Repository, ref string) (io.ReadCloser, error)
-	ApprovePullRequest(ctx context.Context, repo entity.Repository, prNumber int, body string) error
-	MergePullRequest(ctx context.Context, repo entity.Repository, prNumber int, method string) error
-	CreatePRComment(ctx context.Context, repo entity.Repository, prNumber int, comment string) error
+	// The writes act as the user whose accessToken is given (never as the app). An outcome GitHub
+	// did not answer for is entity.ErrOutcomeUnknown; a refusal is ErrForbidden, ErrNotFound or
+	// ErrConflict with GitHub's explanation.
+	// ApprovePullRequest returns the review GitHub recorded.
+	ApprovePullRequest(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, body string) (entity.PullRequestReview, error)
+	MergePullRequest(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, method string) error
+	CreatePRComment(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, comment string) error
+}
+
+// PullRequestStateReader reads a PR's live state and reviews with a user's token, so an action
+// can check what GitHub says now (and confirm an ambiguous outcome) before and after writing.
+type PullRequestStateReader interface {
+	GetPullRequest(ctx context.Context, accessToken, owner, name string, number int) (entity.RemotePullRequestState, error)
+	ListPullRequestReviews(ctx context.Context, accessToken, owner, name string, number int) ([]entity.PullRequestReview, error)
 }
 
 type DependencyAnalysisInput struct {

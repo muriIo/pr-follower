@@ -91,15 +91,15 @@ func TestGateway_ReadsUseTheInstallationTokenButActionsNeverDo(t *testing.T) {
 
 	// Writes must act as the user (a later change), never as the app: they never ask for the app's token.
 	before := len(tokens.calls)
-	_ = gw.ApprovePullRequest(ctx, appRepo, 7, "")
-	_ = gw.MergePullRequest(ctx, appRepo, 7, "squash")
-	_ = gw.CreatePRComment(ctx, appRepo, 7, "hi")
+	_, _ = gw.ApprovePullRequest(ctx, "ghu_user", appRepo, 7, "")
+	_ = gw.MergePullRequest(ctx, "ghu_user", appRepo, 7, "squash")
+	_ = gw.CreatePRComment(ctx, "ghu_user", appRepo, 7, "hi")
 	if len(tokens.calls) != before {
 		t.Fatalf("approve, merge and comment must not use the installation token: %v", tokens.calls)
 	}
 	for _, key := range []string{"POST /repos/acme/web/pulls/7/reviews", "PUT /repos/acme/web/pulls/7/merge", "POST /repos/acme/web/issues/7/comments"} {
-		if got := rec.auth[key]; got != "" {
-			t.Errorf("%s sent %q: an action must not carry the app's identity", key, got)
+		if got := rec.auth[key]; got != "Bearer ghu_user" {
+			t.Errorf("%s sent %q: an action must carry the user's identity", key, got)
 		}
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,7 +37,26 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
 
-type noopGHGateway struct{}
+// noopGHGateway stands in for GitHub's write API: it records who wrote what and can be told to
+// answer with an error.
+type noopGHGateway struct {
+	mu     sync.Mutex
+	writes []string // "approve:<token>:<pr number>", "merge:...", "comment:..."
+	err    error
+}
+
+func (n *noopGHGateway) record(kind, token string, number int) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.writes = append(n.writes, fmt.Sprintf("%s:%s:%d", kind, token, number))
+	return n.err
+}
+
+func (n *noopGHGateway) written() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.writes...)
+}
 
 func (n *noopGHGateway) GetFileContent(_ context.Context, _ entity.Repository, _, _ string) ([]byte, error) {
 	return nil, nil
@@ -47,14 +67,18 @@ func (n *noopGHGateway) ListPRChangedFiles(_ context.Context, _ entity.Repositor
 func (n *noopGHGateway) StreamRepoTarball(_ context.Context, _ entity.Repository, _ string) (io.ReadCloser, error) {
 	return nil, nil
 }
-func (n *noopGHGateway) ApprovePullRequest(_ context.Context, _ entity.Repository, _ int, _ string) error {
-	return nil
+func (n *noopGHGateway) ApprovePullRequest(_ context.Context, token string, _ entity.Repository, number int, _ string) (entity.PullRequestReview, error) {
+	if err := n.record("approve", token, number); err != nil {
+		return entity.PullRequestReview{}, err
+	}
+	return entity.PullRequestReview{GitHubReviewID: int64(9000 + number), ReviewerLogin: "octocat", State: entity.ReviewApproved,
+		CommitSHA: fmt.Sprintf("live-%d", number), SubmittedAt: time.Now().UTC()}, nil
 }
-func (n *noopGHGateway) MergePullRequest(_ context.Context, _ entity.Repository, _ int, _ string) error {
-	return nil
+func (n *noopGHGateway) MergePullRequest(_ context.Context, token string, _ entity.Repository, number int, _ string) error {
+	return n.record("merge", token, number)
 }
-func (n *noopGHGateway) CreatePRComment(_ context.Context, _ entity.Repository, _ int, _ string) error {
-	return nil
+func (n *noopGHGateway) CreatePRComment(_ context.Context, token string, _ entity.Repository, number int, _ string) error {
+	return n.record("comment", token, number)
 }
 
 // fakeGitHubOAuth stands in for github.com: any code except "bad" signs in as octocat.
@@ -121,6 +145,11 @@ func (fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner
 		HTMLURL: "https://github.com/acme/web/pull/42", HeadSHA: "sha42", BaseRef: "main"}}, nil
 }
 
+// GetPullRequest: every PR is open on GitHub, written by bianca-dev, at "live-<number>".
+func (fakeGitHubUserAPI) GetPullRequest(_ context.Context, _ string, _, _ string, number int) (entity.RemotePullRequestState, error) {
+	return entity.RemotePullRequestState{Open: true, HeadSHA: fmt.Sprintf("live-%d", number), AuthorLogin: "bianca-dev"}, nil
+}
+
 func (fakeGitHubUserAPI) ListPullRequestReviews(context.Context, string, string, string, int) ([]entity.PullRequestReview, error) {
 	return nil, nil
 }
@@ -156,6 +185,7 @@ type testServer struct {
 	authUC *auth.UseCase
 	repos  *persistence.RepositoryRepository
 	prs    *persistence.PullRequestRepository
+	gh     *noopGHGateway
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -246,8 +276,9 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	opReg := operation.NewRegistry()
 	ghGw := &noopGHGateway{}
 
-	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
+	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
+		GitHub: ghGw, State: fakeGitHubUserAPI{}, Reviews: prRepo, Pub: sseHub})
 	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo, nil)
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC)
@@ -275,7 +306,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		FilesUC:        filesUC,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -1276,5 +1307,87 @@ func TestTurnEngine_ReviewWebhooksMovePRsAwayFromMinhaVez(t *testing.T) {
 
 	if rec := ts.postWebhook(t, "pull_request_review", `{not json`); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a malformed payload is rejected, got %d", rec.Code)
+	}
+}
+
+func TestActions_ActAsTheSignedInUserAndNeverApproveTheirOwnPR(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, session)
+
+	first, err := ts.prs.GetByID(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own := &entity.PullRequest{RepositoryID: first.RepositoryID, RepositoryName: "arvore/hive-web", GitHubPRID: 70001, Number: 501, Title: "mine",
+		AuthorLogin: "octocat", State: entity.PRStateOpen, MergeableState: entity.MergeableStateClean, CIStatus: entity.CIStatusSuccess, HeadSHA: "live-501", BaseRef: "main"}
+	if err := ts.prs.Upsert(context.Background(), own); err != nil {
+		t.Fatal(err)
+	}
+	ownID := strconv.FormatUint(own.ID, 10)
+
+	rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+ownID+"/approve", `{}`, session)
+	var body map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if rec.Code != http.StatusUnprocessableEntity || body["code"] != "own_pull_request" {
+		t.Fatalf("approving your own PR: status %d body %v, want 422 own_pull_request", rec.Code, body)
+	}
+	if got := ts.gh.written(); len(got) != 0 {
+		t.Fatalf("nothing may reach GitHub: %v", got)
+	}
+
+	// Someone else's PR goes through, with the user's own token, and the review is kept.
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/1/approve", `{"body":"LGTM"}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("approve: %d %s", rec.Code, rec.Body.String())
+	}
+	got := ts.gh.written()
+	if len(got) != 1 || !strings.HasPrefix(got[0], "approve:ghu_test:") {
+		t.Fatalf("expected one approval written with the signed-in user's token: %v", got)
+	}
+
+	// Merging your own PR is allowed.
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+ownID+"/merge", `{}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("merge own PR: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// A batch containing the user's own PR is refused as a whole.
+	ts.gh.writes = nil
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/batch-merge", `{"pr_ids":[2,`+ownID+`]}`, session); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("batch with an own PR: %d", rec.Code)
+	}
+	if got := ts.gh.written(); len(got) != 0 {
+		t.Fatalf("the batch must be refused before any write: %v", got)
+	}
+}
+
+func TestActions_SurfaceGitHubsAnswerHonestly(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, session)
+
+	for name, tc := range map[string]struct {
+		err     error
+		status  int
+		code    string
+		message string
+	}{
+		"no answer from GitHub":  {entity.ErrOutcomeUnknown, http.StatusBadGateway, "outcome_unknown", ""},
+		"GitHub refused (perms)": {fmt.Errorf("%w: Resource not accessible", entity.ErrForbidden), http.StatusForbidden, "forbidden", "Resource not accessible"},
+		"GitHub refused (state)": {fmt.Errorf("%w: Pull Request is not mergeable", entity.ErrConflict), http.StatusConflict, "conflict", "Pull Request is not mergeable"},
+	} {
+		ts.gh.mu.Lock()
+		ts.gh.err = tc.err
+		ts.gh.mu.Unlock()
+		rec := ts.do(t, http.MethodPost, "/api/v1/prs/1/merge", `{}`, session)
+		var body map[string]string
+		_ = json.NewDecoder(rec.Body).Decode(&body)
+		if rec.Code != tc.status || body["code"] != tc.code {
+			t.Errorf("%s: status %d body %v, want %d %s", name, rec.Code, body, tc.status, tc.code)
+		}
+		if tc.message != "" && body["error"] != tc.message {
+			t.Errorf("%s: the client shows GitHub's explanation alone, got %q", name, body["error"])
+		}
 	}
 }

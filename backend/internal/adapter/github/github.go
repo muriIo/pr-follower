@@ -206,89 +206,126 @@ func (g *Gateway) StreamRepoTarball(ctx context.Context, repo entity.Repository,
 	})
 }
 
-func (g *Gateway) ApprovePullRequest(ctx context.Context, repo entity.Repository, prNumber int, body string) error {
+// ApprovePullRequest approves the PR as the user. The POST is never repeated blindly (ADR-0011):
+// an answer that never came is entity.ErrOutcomeUnknown. It returns the review GitHub recorded.
+func (g *Gateway) ApprovePullRequest(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, body string) (entity.PullRequestReview, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews", g.baseURL, repo.Owner, repo.Name, prNumber)
-	payload, _ := json.Marshal(map[string]string{
-		"event": "APPROVE",
-		"body":  body,
+	payload, _ := json.Marshal(map[string]string{"event": "APPROVE", "body": body})
+	var review entity.PullRequestReview
+	err := g.write(ctx, accessToken, http.MethodPost, url, payload, false, func(respBody io.Reader) {
+		var raw struct {
+			ID          int64  `json:"id"`
+			State       string `json:"state"`
+			CommitID    string `json:"commit_id"`
+			SubmittedAt string `json:"submitted_at"`
+			User        *struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		if json.NewDecoder(io.LimitReader(respBody, 1<<20)).Decode(&raw) != nil {
+			return
+		}
+		review = entity.PullRequestReview{GitHubReviewID: raw.ID, State: entity.ReviewStateFromGitHub(raw.State), CommitSHA: raw.CommitID}
+		if raw.User != nil {
+			review.ReviewerLogin = raw.User.Login
+		}
+		review.SubmittedAt, _ = time.Parse(time.RFC3339, raw.SubmittedAt)
 	})
-	_, err := resilience.RetryNonIdempotent(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(payload))
-		if err != nil {
-			return false, resilience.Permanent(err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		g.applyAuth(req)
-
-		resp, err := g.httpClient.Do(req)
-		if err != nil {
-			return false, err
-		}
-		defer resp.Body.Close()
-		if err := classifyHTTPStatus(resp); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
-	return err
+	return review, err
 }
 
-func (g *Gateway) MergePullRequest(ctx context.Context, repo entity.Repository, prNumber int, method string) error {
+// MergePullRequest merges the PR as the user. PUT merge is idempotent, so it is retried.
+func (g *Gateway) MergePullRequest(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, method string) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/merge", g.baseURL, repo.Owner, repo.Name, prNumber)
-	payload, _ := json.Marshal(map[string]string{
-		"merge_method": method,
-	})
-	_, err := resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodPut, url, bytes.NewReader(payload))
-		if err != nil {
-			return false, resilience.Permanent(err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		g.applyAuth(req)
-
-		resp, err := g.httpClient.Do(req)
-		if err != nil {
-			return false, err
-		}
-		defer resp.Body.Close()
-		if err := classifyHTTPStatus(resp); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
-	return err
+	payload, _ := json.Marshal(map[string]string{"merge_method": method})
+	return g.write(ctx, accessToken, http.MethodPut, url, payload, true, nil)
 }
 
-func (g *Gateway) CreatePRComment(ctx context.Context, repo entity.Repository, prNumber int, comment string) error {
+// CreatePRComment comments as the user; like a review, the POST is never repeated blindly.
+func (g *Gateway) CreatePRComment(ctx context.Context, accessToken string, repo entity.Repository, prNumber int, comment string) error {
 	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", g.baseURL, repo.Owner, repo.Name, prNumber)
-	payload, _ := json.Marshal(map[string]string{
-		"body": comment,
-	})
-	_, err := resilience.RetryNonIdempotent(ctx, g.backoff, func(reqCtx context.Context) (bool, error) {
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(payload))
+	payload, _ := json.Marshal(map[string]string{"body": comment})
+	return g.write(ctx, accessToken, http.MethodPost, url, payload, false, nil)
+}
+
+// write sends a change to GitHub with the user's token and classifies the answer: a refusal is a
+// definite error that keeps GitHub's explanation; no answer (transport failure, 5xx) is
+// entity.ErrOutcomeUnknown because the change may have been applied.
+func (g *Gateway) write(ctx context.Context, accessToken, method, url string, payload []byte, idempotent bool, onSuccess func(io.Reader)) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	if strings.TrimSpace(accessToken) == "" {
+		return fmt.Errorf("%w: a signed-in user's token is required to act on github", entity.ErrUnauthorized)
+	}
+	attempt := func(reqCtx context.Context) (struct{}, error) {
+		req, err := http.NewRequestWithContext(reqCtx, method, url, bytes.NewReader(payload))
 		if err != nil {
-			return false, resilience.Permanent(err)
+			return struct{}{}, resilience.Permanent(err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		g.applyAuth(req)
+		req.Header.Set("Accept", "application/vnd.github+json")
+		setBearer(req, accessToken)
 
 		resp, err := g.httpClient.Do(req)
 		if err != nil {
-			return false, err
+			if reqCtx.Err() != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, fmt.Errorf("%w: %v", entity.ErrOutcomeUnknown, err)
 		}
 		defer resp.Body.Close()
-		if err := classifyHTTPStatus(resp); err != nil {
-			return false, err
+		if err := classifyWrite(resp); err != nil {
+			return struct{}{}, err
 		}
-		return true, nil
-	})
+		if onSuccess != nil {
+			onSuccess(resp.Body)
+		}
+		return struct{}{}, nil
+	}
+	var err error
+	if idempotent {
+		_, err = resilience.Retry(ctx, g.backoff, attempt)
+	} else {
+		_, err = resilience.RetryNonIdempotent(ctx, g.backoff, attempt)
+	}
 	return err
 }
 
-func (g *Gateway) applyAuth(req *http.Request) {
-	if g.token != "" {
-		req.Header.Set("Authorization", "Bearer "+g.token)
+// classifyWrite maps GitHub's answer to a change. Retry-After answers mean "not processed" and
+// are retried; the final error of a 4xx is permanent and carries GitHub's message.
+func classifyWrite(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
 	}
+	message := githubMessage(resp)
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrUnauthorized, message))
+	case resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != ""):
+		return classifyHTTPStatus(resp)
+	case resp.StatusCode == http.StatusForbidden:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrForbidden, message))
+	case resp.StatusCode == http.StatusNotFound:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrNotFound, message))
+	case resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusUnprocessableEntity:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrConflict, message))
+	case resp.StatusCode >= 500:
+		return fmt.Errorf("%w: github server error (%d)", entity.ErrOutcomeUnknown, resp.StatusCode)
+	default:
+		return resilience.Permanent(fmt.Errorf("github refused the change (%d): %s", resp.StatusCode, message))
+	}
+}
+
+// githubMessage reads the explanation GitHub puts in an error body ({"message": "..."}).
+func githubMessage(resp *http.Response) string {
+	var body struct {
+		Message string `json:"message"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&body) != nil || body.Message == "" {
+		return http.StatusText(resp.StatusCode)
+	}
+	return body.Message
 }
 
 func classifyHTTPStatus(resp *http.Response) error {
