@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-11 (after the checks panel and drawer state).
+Last reviewed: 2026-11-11 (after persisting activity).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,8 +12,8 @@ Last reviewed: 2026-11-11 (after the checks panel and drawer state).
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses): the open "not verified" items below.
-2. **P2** Persist activity and fan out across replicas ([Live updates](#7-live-updates--timeline)).
+1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses, sync after downtime): the open "not verified" items below. Step-by-step: [`real-github-verification.md`](real-github-verification.md).
+2. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
 
 ## 1. Identity & sessions
 
@@ -94,7 +94,8 @@ No P1 item is open. In order of value:
 - [x] Timeline scoped to followed repositories on workspace load too (the P0 leak), newest first.
 - [x] Timeline views: all activity or only mine (who acted: the webhook sender, the user behind an app action), filtered by a repository of the Seats; one icon per activity type (merge, approval, open, close, commit, CI, claim, access...).
 - [x] Merged PRs are reported as merged (`pr.merged`, state `MERGED`), not as closed.
-- [ ] **P2** Activity is kept in memory only: it is lost on restart and limits the API to one replica (also the operation-cancellation registry). Persist activity, and fan out across replicas.
+- [x] Activity is persisted and shared: every published event is appended to the `activity_events` table (migration 00009) and each API replica delivers what it reads back from that log, in order, to its own SSE subscribers; the workspace timeline reads the same table (newest 200 of the followed repositories). Restarts lose nothing, and replicas wake each other with Postgres `LISTEN/NOTIFY` (no payload; readers go to the log), with a 5s poll as the safety net, a catch-up read after every listener reconnect, and a re-read of the newest 64 positions so a row that commits late is not missed. Activity older than 7 days is pruned hourly. A publish fails if the event cannot be recorded; a failed wake-up only delays delivery.
+- [ ] **P2** Not verified with two running replicas yet: the signal is tested against a real Postgres (notify, reconnect after the connection is killed) and the hub against a shared log, but not two API processes behind one proxy. Also, a stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
 
 ## 8. Inspection drawer
 
@@ -123,6 +124,7 @@ No P1 item is open. In order of value:
 - [x] Go 1.27 + chi, goose forward-only migrations + sqlc, full-jitter backoff (ADR-0003, 0004, 0006).
 - [x] Docker images, dev compose, production runbook (#1, #5).
 - [ ] **P2** Bound concurrent GitHub requests and honour `X-RateLimit-Reset` (only `Retry-After` today).
+- [ ] **P2** Several API replicas: sync jobs (`/sync`) and the operation-cancellation registry (`X-Operation-ID`) are still in one replica's memory, so a poll or a cancel that lands on another replica does not find them. Move them to the database, or route by session (sticky), before running more than one replica.
 - [ ] **P2** Continuous integration: no GitHub Actions workflow runs `make check` on PRs yet.
 - [ ] **P2** Gates from the plan not in the Makefile: `golangci-lint run`, frontend coverage.
 
