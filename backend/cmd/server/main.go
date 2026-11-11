@@ -26,6 +26,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
+	"github.com/murilo/pr-follower/backend/internal/usecase/codeowners"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
@@ -104,6 +105,8 @@ func main() {
 	var filesUC *prfiles.UseCase
 	// Reads PR changed files with user tokens; nil without sign-in, which leaves PRs "not evaluated".
 	var filesSyncer port.ChangedFilesSyncer
+	// Keeps the cached CODEOWNERS current on pushes; nil without sign-in.
+	var pushUC *webhook.PushIngestUseCase
 	if cfg.GitHubLoginConfigured() {
 		authUC = auth.NewUseCase(auth.Deps{
 			OAuth: github.NewOAuthClient(github.OAuthConfig{
@@ -121,6 +124,7 @@ func main() {
 		filesSyncer = changedFilesUC
 		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo, importOpts...)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
+		pushUC = webhook.NewPushIngestUseCase(repoRepo, codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, installations, sseHub))
 		actionUC = action.NewUseCase(action.Deps{
 			PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
 			GitHub: ghGateway, State: userAPI, Reviews: prRepo, Pub: sseHub,
@@ -141,6 +145,7 @@ func main() {
 		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
 		ReviewUC:       reviewUC,
+		PushUC:         pushUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,
 		WebhookSecret:  cfg.GitHubWebhookSecret,
