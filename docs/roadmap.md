@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after turn engine phase 2).
+Last reviewed: 2026-11-10 (after the installation token).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,10 +12,9 @@ Last reviewed: 2026-11-10 (after turn engine phase 2).
 ## Next up
 
 In order:
-1. **P1** GitHub App installation token for background reads ([Dependabot](#5-dependabot-radar--analysis)); it replaces the follower token of the turn engine's file reads.
-2. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
-3. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
-4. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
+1. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
+2. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)); its reads can now use the installation token.
+3. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
 
 ## 1. Identity & sessions
 
@@ -54,7 +53,7 @@ In order:
 - [x] CODEOWNERS matcher follows GitHub's pattern rules (root anchoring, `**`, `dir/*`, trailing slash), checked against GitHub's documented examples.
 - [x] Turn engine phase 2: "approved by me", "teammate approved" and "waiting on author" are derived on read from the stored reviews, per head commit: each reviewer's latest decision stands, comments never undo one, the author's own approval counts for nobody, and a new commit makes every older review stale, so the PR returns to "Minha Vez".
 - [ ] **P2** "Approved by me" made in the app is still a stored state, not tied to the commit; once actions reach GitHub as the user (module 6) it should come only from the review GitHub records.
-- [ ] **P2** Webhook-time file reads use a follower's user token; switch to the installation token once it exists (module 5), so they no longer depend on a follower being signed in.
+- [x] Webhook-time file reads use the GitHub App's installation token first, so they no longer depend on a follower being signed in; a follower's token is only the fallback (app not configured, uninstalled or rejected).
 - [ ] **P2** Team ownership uses the teams read at sign-in; refresh them periodically.
 
 ## 5. Dependabot radar & analysis
@@ -63,7 +62,8 @@ In order:
 - [x] Radar by risk tier, impact drawer, safe batch merge limited to analysed low-risk bumps with green CI.
 - [x] Unanalysed bumps show only what their title says, sit in "Sem análise" and are never batch-merged (#13).
 - [ ] **P1** Run the analysis: `AnalyzeUseCase` is wired but never called. Trigger it on Dependabot `pull_request` webhooks (and on demand, cancellable) and store the result.
-- [ ] **P1** Installation token (GitHub App ID + private key) for background reads: tarballs and lockfiles cannot be fetched without it.
+- [x] Installation token: the server signs an app JWT (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` or `_FILE`) and exchanges it for a per-installation token, cached and renewed five minutes before expiry, one exchange shared by concurrent callers. The gateway's reads (file contents, PR files, tarballs) use it; approve, merge and comment never do, so nothing acts as the app. Without credentials the server warns and falls back to followers' tokens; invalid credentials stop it at start.
+- [ ] **P2** Not verified against real GitHub yet: exchange a token with the dev app's key and read a PR's files through it (see the production runbook).
 - [ ] **P2** yarn / pnpm lockfiles: accepted by `CanAnalyze`, but path reconstruction only covers npm v2/v3.
 
 ## 6. Actions on GitHub
