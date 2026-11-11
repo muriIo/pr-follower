@@ -29,9 +29,12 @@ type UseCase struct {
 	checks  port.CheckRunRecorder
 	users   port.UserRepository
 	events  port.EventPublisher
+	files   port.ChangedFilesSyncer
 	nowFunc func() time.Time
 }
 
+// NewUseCase wires the import. files (optional) reads each open PR's changed files, so the
+// importer's turn is known as soon as the repository shows up.
 func NewUseCase(
 	tokens port.UserTokenSource,
 	github port.GitHubUserAPI,
@@ -40,8 +43,9 @@ func NewUseCase(
 	checks port.CheckRunRecorder,
 	users port.UserRepository,
 	events port.EventPublisher,
+	files port.ChangedFilesSyncer,
 ) *UseCase {
-	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, nowFunc: time.Now}
+	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, files: files, nowFunc: time.Now}
 }
 
 // ListAccounts returns the installations (user and organization accounts) the user can reach.
@@ -165,7 +169,10 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 		if err := ctx.Err(); err != nil {
 			return context.Cause(ctx)
 		}
-		if _, err := uc.prs.GetByRepoAndNumber(ctx, repo.ID, remote.Number); err == nil {
+		if existing, err := uc.prs.GetByRepoAndNumber(ctx, repo.ID, remote.Number); err == nil {
+			if err := uc.syncChangedFiles(ctx, token, repo, existing); err != nil {
+				return err
+			}
 			continue
 		} else if !errors.Is(err, entity.ErrNotFound) {
 			return err
@@ -197,8 +204,20 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 		if err := uc.prs.Upsert(ctx, pr); err != nil {
 			return err
 		}
+		if err := uc.syncChangedFiles(ctx, token, repo, pr); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// syncChangedFiles reads the files of an open, human PR when the repository has CODEOWNERS (only
+// then can they give someone a turn). Already-stored commits are skipped by the syncer.
+func (uc *UseCase) syncChangedFiles(ctx context.Context, token string, repo *entity.Repository, pr *entity.PullRequest) error {
+	if uc.files == nil || pr.IsDependabot || pr.State != entity.PRStateOpen || repo.CodeownersStatus != entity.CodeownersPresent {
+		return nil
+	}
+	return uc.files.SyncWithToken(ctx, token, *repo, *pr)
 }
 
 // recordCheckRuns reads a commit's check runs from GitHub, keeps those not behind what a webhook

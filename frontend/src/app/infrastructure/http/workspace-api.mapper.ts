@@ -123,6 +123,8 @@ export interface ApiWorkspaceResponseDto {
       failing_ci_count: number;
       pull_requests: readonly ApiPullRequestDto[];
     }[];
+    /** PRs (by id) whose changed files are not known yet: nobody can say whose turn they are. */
+    readonly ownership_pending_pr_ids?: readonly number[];
   };
   readonly timeline?: readonly ApiActivityEventDto[];
 }
@@ -158,12 +160,17 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   const approvedMap: Record<number, boolean> = {};
   const silencedMap: Record<number, I18nText> = {};
 
+  // Each PR is listed once. The inbox holds only PRs touching the user's files, the radar holds
+  // Dependabot's; every other open PR comes from its seat, outside the inbox.
+  const listed = new Set<number>();
   for (const item of snapshot.inbox_waiting_on_me ?? []) {
+    listed.add(item.pull_request.id);
     const mapped = mapInboxPrToModel(item.pull_request, item.user_state, true, repoRulesMap, codeownersOf(item.pull_request.repository_name));
     prs.push(mapped);
   }
 
   for (const item of snapshot.inbox_dimmed ?? []) {
+    listed.add(item.pull_request.id);
     const mapped = mapInboxPrToModel(item.pull_request, item.user_state, false, repoRulesMap, codeownersOf(item.pull_request.repository_name));
     prs.push(mapped);
     if (item.user_state.turn_state === 'APPROVED_BY_ME') {
@@ -176,7 +183,18 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   }
 
   for (const item of snapshot.dependabot_prs ?? []) {
+    listed.add(item.pull_request.id);
     prs.push(mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name)));
+  }
+
+  const pending = new Set(snapshot.ownership_pending_pr_ids ?? []);
+  for (const seat of seats) {
+    for (const pr of seat.pull_requests ?? []) {
+      if (!listed.has(pr.id)) {
+        listed.add(pr.id);
+        prs.push(mapSeatPrToModel(pr, codeownersOf(pr.repository_name), pending.has(pr.id)));
+      }
+    }
   }
 
   const events: TimelineEventItem[] = (dto.timeline ?? []).map((ev, index) => ({
@@ -330,7 +348,8 @@ function mapInboxPrToModel(
       : `@${st.approved_by_login}`
     : undefined;
 
-  const owners: OwnersState = isActionable ? 'voce' : ownersForNonOwner(codeowners, approvedBy);
+  // Mine when it is my turn, or when it touches my files but the gate is closed.
+  const owners: OwnersState = isActionable || ownedFiles.length > 0 ? 'voce' : ownersForNonOwner(codeowners, approvedBy);
   const ownersText: I18nText = {
     voce: ownedFiles.length > 0 ? pluralText('owners.voce.count', ownedFiles.length) : { key: 'owners.voce' },
     ok: { key: 'owners.approvedBy', params: { login: approvedBy ?? '' } },
@@ -354,6 +373,12 @@ function mapInboxPrToModel(
     } else if (st.turn_state === 'HIDDEN_GATE' && pr.ci_status === 'PENDING') {
       muteBadge = { key: 'inbox.mute.ci' };
       muteTip = { key: 'inbox.mute.ciTip' };
+    } else if (st.turn_state === 'HIDDEN_GATE' && pr.ci_status === 'FAILURE') {
+      muteBadge = { key: 'inbox.mute.ciFail' };
+      muteTip = { key: 'inbox.mute.ciFailTip' };
+    } else if (st.turn_state === 'HIDDEN_GATE' && pr.mergeable_state === 'CONFLICTING') {
+      muteBadge = { key: 'inbox.mute.conflict' };
+      muteTip = { key: 'inbox.mute.conflictTip' };
     }
   }
 
@@ -386,6 +411,17 @@ function mapInboxPrToModel(
     })),
     focusRule: isActionable ? repoRulesMap.get(pr.repository_name) : undefined,
   };
+}
+
+/**
+ * An open PR that is not in the user's inbox: it touches none of their files, or (pending) its
+ * changed files are not known yet. It shows in its seat only, with no inbox badge.
+ */
+function mapSeatPrToModel(pr: ApiPullRequestDto, codeowners: CodeownersState | undefined, pending: boolean): PullRequestItem {
+  const state: ApiUserPrStateDto = { pull_request_id: pr.id, user_id: 0, turn_state: 'HIDDEN_GATE', team_already_approved: false };
+  const item: PullRequestItem = { ...mapInboxPrToModel(pr, state, false, new Map(), codeowners), muteBadge: undefined, muteTip: undefined };
+  // Not evaluated is not "other owners": say that the files were not checked.
+  return pending ? { ...item, owners: 'unknown', ownersText: '', why: { key: 'drawer.why.pending' } } : item;
 }
 
 /** Dependabot titles look like "chore(deps): bump axios from 1.7.7 to 2.0.0". */

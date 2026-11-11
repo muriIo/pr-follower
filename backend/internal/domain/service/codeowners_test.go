@@ -69,3 +69,67 @@ func TestFilterOwnedChangedFiles_LastMatchingRuleWins(t *testing.T) {
 		t.Errorf("expected @arvore/checkout-team to be recognized as co-owner group, got %#v", match.CoOwners)
 	}
 }
+
+// The pattern rules GitHub documents for CODEOWNERS (gitignore-like, with its own exceptions).
+func TestEvaluateCodeowners_FollowsGitHubPatternRules(t *testing.T) {
+	t.Parallel()
+	me := entity.User{Login: "me"}
+	owns := func(pattern, file string) bool {
+		rules := []entity.CodeownerRule{{Pattern: pattern, Owners: []string{"@me"}}}
+		return len(service.EvaluateCodeownersForUser(rules, []entity.ChangedFile{{Path: file}}, me).OwnedFiles) == 1
+	}
+	for _, tc := range []struct {
+		pattern, file string
+		want          bool
+	}{
+		// "*" owns everything.
+		{"*", "README.md", true},
+		{"*", "src/deep/nested/file.go", true},
+		// "*.js" owns that extension at any depth.
+		{"*.js", "index.js", true},
+		{"*.js", "src/app/index.js", true},
+		{"*.js", "src/app/index.ts", false},
+		// "/build/logs/" owns only the root build/logs directory and what is under it.
+		{"/build/logs/", "build/logs/a.log", true},
+		{"/build/logs/", "build/logs/2026/a.log", true},
+		{"/build/logs/", "other/build/logs/a.log", false},
+		{"/build/logs/", "build/logs", false},
+		// "docs/*" owns files directly in docs, not nested ones.
+		{"docs/*", "docs/getting-started.md", true},
+		{"docs/*", "docs/build-app/troubleshooting.md", false},
+		// "apps/" owns any apps directory, anywhere.
+		{"apps/", "apps/web/main.ts", true},
+		{"apps/", "packages/apps/x.ts", true},
+		{"apps/", "packages/myapps/x.ts", false},
+		// "/docs/" owns the root docs directory only.
+		{"/docs/", "docs/a.md", true},
+		{"/docs/", "docs/deep/a.md", true},
+		{"/docs/", "src/docs/a.md", false},
+		{"/docs/", "docs-site/a.md", false},
+		// "**/logs" owns any logs directory at any depth.
+		{"**/logs", "build/logs/a.log", true},
+		{"**/logs", "deeply/nested/logs/a.log", true},
+		{"**/logs", "logs/a.log", true},
+		{"**/logs", "build/logsx/a.log", false},
+		// "/apps/github" owns that file or directory at the root.
+		{"/apps/github", "apps/github/x.go", true},
+		{"/apps/github", "apps/github", true},
+		{"/apps/github", "apps/github-enterprise/x.go", false},
+		// A path with a slash in the middle is anchored at the root.
+		{"src/app/", "src/app/x.ts", true},
+		{"src/app/", "lib/src/app/x.ts", false},
+		// "**" in the middle and at the end.
+		{"/src/**/test/", "src/a/b/test/x.ts", true},
+		{"/src/**/test/", "src/test/x.ts", true},
+		{"/src/**", "src/a/b.ts", true},
+		{"/src/**", "lib/src/a.ts", false},
+		// A file name without a slash matches at any depth.
+		{"Makefile", "Makefile", true},
+		{"Makefile", "tools/Makefile", true},
+		{"/Makefile", "tools/Makefile", false},
+	} {
+		if got := owns(tc.pattern, tc.file); got != tc.want {
+			t.Errorf("pattern %q, file %q: owned = %v, want %v", tc.pattern, tc.file, got, tc.want)
+		}
+	}
+}

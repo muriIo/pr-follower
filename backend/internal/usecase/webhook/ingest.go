@@ -35,20 +35,19 @@ type IngestUseCase struct {
 	prRepo   port.PullRequestRepository
 	checks   port.CheckRunStore
 	pub      port.EventPublisher
+	files    port.ChangedFilesSyncer
 }
 
+// NewIngestUseCase wires webhook ingestion. files (optional) reads a PR's changed files with a
+// follower's token, so each follower's turn can be derived as soon as they reload.
 func NewIngestUseCase(
 	repoRepo port.RepositoryRepository,
 	prRepo port.PullRequestRepository,
 	checks port.CheckRunStore,
 	pub port.EventPublisher,
+	files port.ChangedFilesSyncer,
 ) *IngestUseCase {
-	return &IngestUseCase{
-		repoRepo: repoRepo,
-		prRepo:   prRepo,
-		checks:   checks,
-		pub:      pub,
-	}
+	return &IngestUseCase{repoRepo: repoRepo, prRepo: prRepo, checks: checks, pub: pub, files: files}
 }
 
 func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullRequestEventPayload) error {
@@ -105,6 +104,9 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 	if err := uc.prRepo.Upsert(ctx, pr); err != nil {
 		return err
 	}
+	if err := uc.syncChangedFiles(ctx, repo, pr); err != nil {
+		return err
+	}
 
 	return uc.pub.Publish(ctx, entity.ActivityEvent{
 		ID:             fmt.Sprintf("wh-pr-%d-%d", p.Number, time.Now().UnixNano()),
@@ -117,6 +119,21 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		Params:         map[string]string{"title": pr.Title},
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// syncChangedFiles reads the files of an open, human PR when the repository has CODEOWNERS:
+// only then can they give someone a turn. A failed read never loses the webhook (GitHub does not
+// redeliver on its own); the files are read later, when a follower loads the workspace. Only
+// cancellation is returned.
+func (uc *IngestUseCase) syncChangedFiles(ctx context.Context, repo *entity.Repository, pr *entity.PullRequest) error {
+	if uc.files == nil || pr.State != entity.PRStateOpen || pr.IsDependabot || repo.CodeownersStatus != entity.CodeownersPresent {
+		return nil
+	}
+	_ = uc.files.SyncAsFollower(ctx, *repo, *pr)
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return nil
 }
 
 // sameWebhookState reports whether a pull_request webhook carries nothing new for a stored PR.

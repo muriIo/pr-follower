@@ -496,3 +496,99 @@ func TestPullRequestRepository_HeadSHA(t *testing.T) {
 		t.Fatal("unknown PR must report no head")
 	}
 }
+
+func TestPullRequestRepository_ChangedFilesReplaceOnNewCommit(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	newPR := func(n int) *entity.PullRequest {
+		pr := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: int64(n), Number: n, Title: "t", State: entity.PRStateOpen,
+			MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "sha1", BaseRef: "main"}
+		if err := prs.Upsert(ctx, pr); err != nil {
+			t.Fatal(err)
+		}
+		return pr
+	}
+	one, two := newPR(1), newPR(2)
+
+	if got, err := prs.ListChangedFiles(ctx, []uint64{one.ID, two.ID}); err != nil || len(got) != 0 {
+		t.Fatalf("nothing stored yet: %+v, %v", got, err)
+	}
+	first := entity.PRChangedFiles{PullRequestID: one.ID, HeadSHA: "sha1", Files: []entity.ChangedFile{
+		{Path: "src/a.ts", Status: "modified", Additions: 3, Deletions: 1, Patch: "@@ big patch"}, {Path: "docs/b.md", Status: "added", Additions: 9}}}
+	if err := prs.SaveChangedFiles(ctx, first); err != nil {
+		t.Fatalf("SaveChangedFiles() error: %v", err)
+	}
+	_ = prs.SaveChangedFiles(ctx, first) // idempotent: same row
+	_ = prs.SaveChangedFiles(ctx, entity.PRChangedFiles{PullRequestID: two.ID, HeadSHA: "sha1"})
+
+	got, err := prs.ListChangedFiles(ctx, []uint64{one.ID, two.ID, 999})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("ListChangedFiles() = %+v, %v", got, err)
+	}
+	if f := got[one.ID]; f.HeadSHA != "sha1" || len(f.Files) != 2 || f.Files[0].Path != "src/a.ts" || f.Files[0].Additions != 3 || f.Files[1].Status != "added" {
+		t.Fatalf("unexpected files: %+v", f)
+	}
+	if got[one.ID].Files[0].Patch != "" {
+		t.Fatal("patches are not stored: ownership needs only the paths")
+	}
+	if f := got[two.ID]; f.HeadSHA != "sha1" || len(f.Files) != 0 {
+		t.Fatalf("a PR that changes no file is still evaluated: %+v", f)
+	}
+
+	// A new commit replaces the PR's files instead of adding a second row.
+	_ = prs.SaveChangedFiles(ctx, entity.PRChangedFiles{PullRequestID: one.ID, HeadSHA: "sha2", Files: []entity.ChangedFile{{Path: "src/c.ts"}}})
+	got, _ = prs.ListChangedFiles(ctx, []uint64{one.ID})
+	if f := got[one.ID]; f.HeadSHA != "sha2" || len(f.Files) != 1 || f.Files[0].Path != "src/c.ts" {
+		t.Fatalf("expected the files of the new commit: %+v", f)
+	}
+	if empty, err := prs.ListChangedFiles(ctx, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("no ids: %+v, %v", empty, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := prs.SaveChangedFiles(canceled, first); err == nil {
+		t.Error("SaveChangedFiles: expected cancellation error")
+	}
+	if _, err := prs.ListChangedFiles(canceled, []uint64{one.ID}); err == nil {
+		t.Error("ListChangedFiles: expected cancellation error")
+	}
+}
+
+func TestRepositoryRepository_ListFollowerIDs(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	users := persistence.NewUserRepository(db, testCipher(t))
+	repos := persistence.NewRepositoryRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	var ids []uint64
+	for i, login := range []string{"ana", "bia", "caio"} {
+		u := &entity.User{GitHubID: int64(100 + i), Login: login}
+		if err := users.Upsert(ctx, u); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, u.ID)
+	}
+	_ = repos.SetUserFollow(ctx, ids[2], repo.ID, true)
+	_ = repos.SetUserFollow(ctx, ids[0], repo.ID, true)
+
+	got, err := repos.ListFollowerIDs(ctx, repo.ID)
+	if err != nil || len(got) != 2 || got[0] != ids[0] || got[1] != ids[2] {
+		t.Fatalf("ListFollowerIDs() = %v, %v (want %v and %v)", got, err, ids[0], ids[2])
+	}
+	if none, err := repos.ListFollowerIDs(ctx, 999); err != nil || len(none) != 0 {
+		t.Fatalf("unknown repository: %v, %v", none, err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := repos.ListFollowerIDs(canceled, repo.ID); err == nil {
+		t.Error("expected cancellation error")
+	}
+}

@@ -61,6 +61,8 @@ A pluggable `port.DependencyAnalyzer` per ecosystem (npm today, in `adapter/anal
 
 Implemented in `domain/service` (`codeowners.go`, `turnstate.go`). Only PRs touching files the user owns enter the machine.
 
+The turn is **derived when the workspace is read**, not stored. The stored facts are: the PR row (kept current by webhooks), the files it changes at its head commit (`pr_changed_files`, one row per PR, read from GitHub by `usecase/changedfiles`), the repository's cached CODEOWNERS rules, and what the user did (snooze, claim, approval in the app). `triage.GetWorkspaceSnapshot` evaluates ownership and calls `ComputeTurnState` for the reader, so CI, draft and conflict changes need no recomputation. A PR whose files are not known for its head commit is reported in `ownership_pending_pr_ids` and is never a turn.
+
 ```mermaid
 stateDiagram-v2
     [*] --> HiddenGate: opened (draft / CI failing / conflicts)

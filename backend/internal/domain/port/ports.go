@@ -149,3 +149,29 @@ type BlastRadiusScanner interface {
 type EventPublisher interface {
 	Publish(ctx context.Context, event entity.ActivityEvent) error
 }
+
+// ChangedFilesStore keeps the files each PR changes at its head commit (one row per PR).
+type ChangedFilesStore interface {
+	SaveChangedFiles(ctx context.Context, files entity.PRChangedFiles) error
+	ListChangedFiles(ctx context.Context, prIDs []uint64) (map[uint64]entity.PRChangedFiles, error)
+}
+
+// RepositoryFollowers lists who follows a repository.
+type RepositoryFollowers interface {
+	ListFollowerIDs(ctx context.Context, repositoryID uint64) ([]uint64, error)
+}
+
+// PullRequestFilesReader reads a PR's changed files from GitHub with a user token.
+type PullRequestFilesReader interface {
+	ListPullRequestFiles(ctx context.Context, accessToken, owner, name string, number int) ([]entity.ChangedFile, error)
+}
+
+// ChangedFilesSyncer makes sure a PR's changed files are stored for its current head commit.
+type ChangedFilesSyncer interface {
+	// SyncWithToken reads them with the given user token.
+	SyncWithToken(ctx context.Context, accessToken string, repo entity.Repository, pr entity.PullRequest) error
+	// SyncAsUser reads them with that user's token.
+	SyncAsUser(ctx context.Context, userID uint64, repo entity.Repository, pr entity.PullRequest) error
+	// SyncAsFollower reads them with the token of any user who follows the repository.
+	SyncAsFollower(ctx context.Context, repo entity.Repository, pr entity.PullRequest) error
+}

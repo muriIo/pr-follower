@@ -84,7 +84,7 @@ func TestIngestWebhookUseCase_HandlesPullRequestEventAndPublishesSSE(t *testing.
 	}
 	pub := &fakePub{}
 
-	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub, nil)
 
 	err := uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{
 		Action:       "opened",
@@ -116,7 +116,7 @@ func TestIngestPullRequestEvent_RedeliveryIsIdempotent(t *testing.T) {
 	prRepo := &fakePRRepo{}
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "arvore/hive-web"}}
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub, nil)
 	ctx := context.Background()
 
 	payload := webhook.PullRequestEventPayload{
@@ -180,15 +180,15 @@ func TestIngestPullRequestEvent_PropagatesFailures(t *testing.T) {
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "arvore/hive-web"}}
 	payload := webhook.PullRequestEventPayload{Action: "opened", GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, HeadSHA: "a"}
 
-	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{getErr: boom}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
+	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{getErr: boom}, newFakeChecks(), &fakePub{}, nil).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
 		t.Errorf("lookup failure: got %v", err)
 	}
-	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{upsertErr: boom}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
+	if err := webhook.NewIngestUseCase(repoRepo, &failingPRRepo{upsertErr: boom}, newFakeChecks(), &fakePub{}, nil).IngestPullRequestEvent(context.Background(), payload); !errors.Is(err, boom) {
 		t.Errorf("upsert failure: got %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), &fakePub{}).IngestPullRequestEvent(ctx, payload); !errors.Is(err, context.Canceled) {
+	if err := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), &fakePub{}, nil).IngestPullRequestEvent(ctx, payload); !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled: got %v", err)
 	}
 }
@@ -197,7 +197,7 @@ func TestIngestPullRequestEvent_ActorIsWhoActedNotTheAuthor(t *testing.T) {
 	t.Parallel()
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub)
+	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub, nil)
 
 	payload := webhook.PullRequestEventPayload{Action: "closed", GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "t",
 		AuthorLogin: "bianca", SenderLogin: "murilo", State: entity.PRStateClosed, HeadSHA: "h"}
@@ -220,7 +220,7 @@ func TestIngestPullRequestEvent_MergedIsNotJustClosed(t *testing.T) {
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
 	prRepo := &fakePRRepo{}
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub)
+	uc := webhook.NewIngestUseCase(repoRepo, prRepo, newFakeChecks(), pub, nil)
 
 	_ = uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{Action: "closed", Merged: true,
 		GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "t", State: entity.PRStateClosed, HeadSHA: "h", SenderLogin: "murilo"})
@@ -236,7 +236,7 @@ func TestIngestPullRequestEvent_PublishesTheTitleAsAParam(t *testing.T) {
 	t.Parallel()
 	repoRepo := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "acme/web"}}
 	pub := &fakePub{}
-	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub)
+	uc := webhook.NewIngestUseCase(repoRepo, &fakePRRepo{}, newFakeChecks(), pub, nil)
 
 	_ = uc.IngestPullRequestEvent(context.Background(), webhook.PullRequestEventPayload{Action: "opened",
 		GitHubRepoID: 9001, GitHubPRID: 1, Number: 1, Title: "feat: x", State: entity.PRStateOpen, HeadSHA: "h"})

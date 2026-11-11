@@ -282,8 +282,18 @@ func setupBackfill() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents
 	repos := newFakeRepos()
 	events := &fakeEvents{}
 	prs, checks := newFakePRs(), newFakeChecks()
-	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, prs, checks, fakeUsers{}, events)
+	syncer := &fakeFilesSyncer{}
+	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, prs, checks, fakeUsers{}, events, syncer)
+	syncers.Store(uc, syncer)
 	return uc, api, repos, events, prs, checks
+}
+
+// syncers finds the files syncer wired into a use case built by setupBackfill.
+var syncers sync.Map
+
+func syncerOf(uc *repoimport.UseCase) *fakeFilesSyncer {
+	s, _ := syncers.Load(uc)
+	return s.(*fakeFilesSyncer)
 }
 
 func TestListAccounts_UsesTheUsersToken(t *testing.T) {
@@ -414,7 +424,7 @@ func TestUseCase_PropagatesFailures(t *testing.T) {
 	ctx := context.Background()
 
 	_, api, repos, events := setup()
-	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, newFakePRs(), newFakeChecks(), fakeUsers{}, events)
+	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, newFakePRs(), newFakeChecks(), fakeUsers{}, events, nil)
 	if _, err := expired.ListAccounts(ctx, userID); !errors.Is(err, entity.ErrUnauthorized) {
 		t.Errorf("ListAccounts with expired token: got %v", err)
 	}
@@ -685,5 +695,84 @@ func TestImport_RepositoryWithoutOpenPullRequestsStoresNone(t *testing.T) {
 	}
 	if len(prs.prs) != 0 {
 		t.Fatalf("nothing to backfill, got %d PRs", len(prs.prs))
+	}
+}
+
+// fakeFilesSyncer records which PRs the import handed over to have their files read.
+type fakeFilesSyncer struct {
+	synced []string // "token:number@sha"
+	err    error
+}
+
+func (f *fakeFilesSyncer) SyncAsUser(context.Context, uint64, entity.Repository, entity.PullRequest) error {
+	return nil
+}
+func (f *fakeFilesSyncer) SyncAsFollower(context.Context, entity.Repository, entity.PullRequest) error {
+	return nil
+}
+func (f *fakeFilesSyncer) SyncWithToken(_ context.Context, token string, repo entity.Repository, pr entity.PullRequest) error {
+	if pr.ID == 0 || repo.ID == 0 {
+		return errors.New("the PR and repository must be stored before their files are read")
+	}
+	f.synced = append(f.synced, token+":"+repo.FullName+"#"+string(rune('0'+pr.Number))+"@"+pr.HeadSHA)
+	return f.err
+}
+
+func TestImport_ReadsChangedFilesOfOpenHumanPRsWhenThereIsCodeowners(t *testing.T) {
+	t.Parallel()
+	uc, api, _, _, prs, _ := setupBackfill()
+	twoOpenPRs(api)
+	api.files = map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}
+	syncer := syncerOf(uc)
+	ctx := context.Background()
+
+	repo, err := uc.Import(ctx, userID, 20, 200)
+	if err != nil {
+		t.Fatalf("Import() error: %v", err)
+	}
+	want := []string{"ghu_user_1:acme/web#7@sha7", "ghu_user_1:acme/web#9@sha9"} // #8 is Dependabot's
+	if len(syncer.synced) != 2 || syncer.synced[0] != want[0] || syncer.synced[1] != want[1] {
+		t.Fatalf("synced %v, want %v", syncer.synced, want)
+	}
+
+	// Re-import: a PR already stored (and since moved on by a webhook) has its current commit handed over.
+	live := prs.prs[[2]uint64{repo.ID, 7}]
+	live.HeadSHA = "sha7b"
+	prs.prs[[2]uint64{repo.ID, 7}] = live
+	syncer.synced = nil
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil {
+		t.Fatal(err)
+	}
+	if len(syncer.synced) != 2 || syncer.synced[0] != "ghu_user_1:acme/web#7@sha7b" {
+		t.Fatalf("re-import hands over the stored commit: %v", syncer.synced)
+	}
+}
+
+func TestImport_SkipsChangedFilesWithoutCodeownersAndFailsRetryablyWhenTheyCannotBeRead(t *testing.T) {
+	t.Parallel()
+	uc, api, repos, events, _, _ := setupBackfill()
+	twoOpenPRs(api)
+	syncer := syncerOf(uc)
+	ctx := context.Background()
+
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil || len(syncer.synced) != 0 {
+		t.Fatalf("no CODEOWNERS: nothing to read, err=%v synced=%v", err, syncer.synced)
+	}
+
+	uc, api, repos, events, _, _ = setupBackfill()
+	twoOpenPRs(api)
+	api.files = map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}
+	syncer = syncerOf(uc)
+	syncer.err = errors.New("github is down")
+	if _, err := uc.Import(ctx, userID, 20, 200); !errors.Is(err, syncer.err) {
+		t.Fatalf("expected the files failure, got %v", err)
+	}
+	for key, on := range repos.follows {
+		if on {
+			t.Fatalf("a failed import follows nothing, so it can be retried: %v", key)
+		}
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("nothing is announced: %+v", events.events)
 	}
 }

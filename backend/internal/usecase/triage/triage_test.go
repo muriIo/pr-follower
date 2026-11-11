@@ -117,10 +117,11 @@ func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
 	repoRepo := &fakeRepoRepo{
 		repos: []entity.Repository{
 			{
-				ID:       10,
-				Owner:    "arvore",
-				Name:     "hive-web",
-				FullName: "arvore/hive-web",
+				ID:               10,
+				Owner:            "arvore",
+				Name:             "hive-web",
+				FullName:         "arvore/hive-web",
+				CodeownersStatus: entity.CodeownersPresent,
 				CachedCodeownersRules: []entity.CodeownerRule{
 					{Pattern: "/src/app/", Owners: []string{"@murilo", "@arvore/frontend"}},
 				},
@@ -183,7 +184,10 @@ func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
 	}
 	pub := &fakePublisher{}
 
-	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, pub)
+	files := &fakeFiles{byPR: map[uint64]entity.PRChangedFiles{
+		100: {PullRequestID: 100, HeadSHA: "sha-42", Files: []entity.ChangedFile{{Path: "src/app/seats.component.ts", Additions: 18}}},
+	}}
+	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, pub, files, &fakeSyncer{store: files})
 
 	snapshot, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
 	if err != nil {

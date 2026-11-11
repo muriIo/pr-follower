@@ -25,6 +25,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/server"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
+	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
@@ -71,7 +72,6 @@ func main() {
 		Backoff: resilience.DefaultBackoffConfig(),
 	})
 
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub)
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGateway, sseHub)
 	analyzeUC := dependabot.NewAnalyzeUseCase(
 		prRepo,
@@ -81,7 +81,6 @@ func main() {
 		blastradius.NewScanner(),
 		sseHub,
 	)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
@@ -89,6 +88,8 @@ func main() {
 	var authUC *auth.UseCase
 	var importUC *repoimport.UseCase
 	var filesUC *prfiles.UseCase
+	// Reads PR changed files with user tokens; nil without sign-in, which leaves PRs "not evaluated".
+	var filesSyncer port.ChangedFilesSyncer
 	if cfg.GitHubLoginConfigured() {
 		authUC = auth.NewUseCase(auth.Deps{
 			OAuth: github.NewOAuthClient(github.OAuthConfig{
@@ -101,11 +102,16 @@ func main() {
 			Sessions: sessionRepo,
 		})
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
-		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub)
+		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
+		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo)
+		filesSyncer = changedFilesUC
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer)
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
