@@ -9,6 +9,7 @@ import {
   MergeState,
   OwnersState,
   PullRequestItem,
+  ReviewItem,
   RepoInfo,
   RepositoryAccessState,
   RiskVerdictTier,
@@ -72,6 +73,25 @@ export interface ApiUserPrStateDto {
   readonly owned_files_changed?: readonly ApiChangedFileDto[];
 }
 
+export interface ApiReviewDecisionDto {
+  readonly reviewer: string;
+  readonly state: string;
+  readonly commit_sha: string;
+  readonly submitted_at: string;
+  readonly current: boolean;
+}
+
+const REVIEW_STATES: Readonly<Record<string, ReviewItem['state']>> = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes_requested',
+  COMMENTED: 'commented',
+  DISMISSED: 'dismissed',
+};
+
+function mapReviewDecision(d: ApiReviewDecisionDto): ReviewItem {
+  return { reviewer: d.reviewer, state: REVIEW_STATES[d.state] ?? 'commented', current: d.current };
+}
+
 export interface ApiDependabotAnalysisDto {
   readonly pull_request_id: number;
   readonly package_name: string;
@@ -132,6 +152,8 @@ export interface ApiWorkspaceResponseDto {
     }[];
     /** PRs (by id) whose changed files are not known yet: nobody can say whose turn they are. */
     readonly ownership_pending_pr_ids?: readonly number[];
+    /** Where each reviewer stands, by PR id, for the PRs somebody reviewed. */
+    readonly reviews?: Readonly<Record<string, readonly ApiReviewDecisionDto[]>>;
   };
   readonly timeline?: readonly ApiActivityEventDto[];
 }
@@ -217,7 +239,13 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
     t: Date.parse(ev.occurred_at) || Date.now(),
   }));
 
-  return { repos, prs, events, approvedMap, silencedMap };
+  const reviews = snapshot.reviews ?? {};
+  const withReviews = prs.map((pr) => {
+    const decisions = reviews[String(pr.id)];
+    return decisions?.length ? { ...pr, reviews: decisions.map(mapReviewDecision) } : pr;
+  });
+
+  return { repos, prs: withReviews, events, approvedMap, silencedMap };
 }
 
 export function mapActivityEventToTimelineItem(

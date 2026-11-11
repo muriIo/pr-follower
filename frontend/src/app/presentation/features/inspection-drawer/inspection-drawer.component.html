@@ -77,6 +77,8 @@
       </section>
     }
 
+    <app-review-list [reviews]="drawer().reviews" />
+
     @if (drawer().isDep) {
       <app-dependabot-impact
         [drawer]="drawer()"

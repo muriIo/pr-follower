@@ -79,6 +79,10 @@ h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .pf-note { color: var(--text-2); }
 .pf-note-ok { color: #34D399; }
 .pf-note-err { color: #FB7185; }
+.pf-reviews { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pf-review { display: flex; align-items: center; gap: 10px; }
+.pf-review.is-stale { opacity: .7; }
+.pf-review-stale { color: var(--text-2); font-size: 12px; }
 .pf-link { color: var(--text-2); font-size: 12px; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 .pf-link:hover { color: var(--text); text-decoration-color: currentColor; }
 

@@ -6,6 +6,7 @@ import { ChangedFilesComponent } from './changed-files/changed-files.component';
 import { RiskBadgeComponent } from '../../common/risk-badge/risk-badge.component';
 import { StatusDotComponent } from '../../common/status-dot/status-dot.component';
 import { DependabotImpactComponent } from './dependabot-impact/dependabot-impact.component';
+import { ReviewListComponent } from './review-list/review-list.component';
 
 @Component({
   selector: 'app-inspection-drawer',
@@ -16,6 +17,7 @@ import { DependabotImpactComponent } from './dependabot-impact/dependabot-impact
     CancellableActionComponent,
     ChangedFilesComponent,
     DependabotImpactComponent,
+    ReviewListComponent,
     TranslatePipe,
   ],
   templateUrl: './inspection-drawer.component.html',
