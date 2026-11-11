@@ -1601,3 +1601,40 @@ func TestActions_AnApprovedDependabotPRStaysApprovedWhenTheWorkspaceReloads(t *t
 		t.Fatal("an approval of an older commit must not count")
 	}
 }
+
+func TestWorkspace_ShowsWhoReviewedAPR(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	review := func(id int, login, state, sha string) string {
+		return fmt.Sprintf(`{"action":"submitted","review":{"id":%d,"user":{"login":%q},"state":%q,"commit_id":%q,"submitted_at":"2026-11-10T09:00:00Z"},`+
+			`"pull_request":{"number":42},"repository":{"id":900},"sender":{"login":%q}}`, id, login, state, sha, login)
+	}
+	for _, payload := range []string{review(1, "bob", "approved", "sha42"), review(2, "carol", "changes_requested", "older")} {
+		if rec := ts.postWebhook(t, "pull_request_review", payload); rec.Code != http.StatusAccepted {
+			t.Fatalf("review webhook: %d", rec.Code)
+		}
+	}
+
+	var body struct {
+		Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+	}
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+		t.Fatalf("workspace: %d", rec.Code)
+	}
+	var got []entity.ReviewDecision
+	for _, decisions := range body.Snapshot.Reviews {
+		got = decisions
+	}
+	if len(body.Snapshot.Reviews) != 1 || len(got) != 2 {
+		t.Fatalf("expected both reviewers on PR 42: %+v", body.Snapshot.Reviews)
+	}
+	if got[0].Reviewer != "bob" || got[0].State != entity.ReviewApproved || !got[0].Current ||
+		got[1].Reviewer != "carol" || got[1].State != entity.ReviewChangesRequested || got[1].Current {
+		t.Fatalf("expected bob's current approval, then carol's stale request: %+v", got)
+	}
+}

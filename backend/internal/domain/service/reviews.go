@@ -1,6 +1,7 @@
 package service
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -71,4 +72,56 @@ func later(a, b entity.PullRequestReview) bool {
 		return a.SubmittedAt.After(b.SubmittedAt)
 	}
 	return a.GitHubReviewID > b.GitHubReviewID
+}
+
+// LatestReviewDecisions lists where each reviewer stands on a PR, for display. A reviewer's latest
+// approval, change request or dismissal stands and a comment never replaces it; one who only
+// commented is listed as having commented. The author's own reviews and drafts are not reviews.
+// Current ones come first, then the newest.
+func LatestReviewDecisions(reviews []entity.PullRequestReview, pr entity.PullRequest) []entity.ReviewDecision {
+	author := strings.ToLower(pr.AuthorLogin)
+	type standing struct{ decision, comment *entity.PullRequestReview }
+	byReviewer := map[string]*standing{}
+	for i := range reviews {
+		r := &reviews[i]
+		login := strings.ToLower(r.ReviewerLogin)
+		if r.State == entity.ReviewUnknown || login == "" || login == author {
+			continue
+		}
+		st := byReviewer[login]
+		if st == nil {
+			st = &standing{}
+			byReviewer[login] = st
+		}
+		slot := &st.decision
+		if r.State == entity.ReviewCommented {
+			slot = &st.comment
+		}
+		if *slot == nil || later(*r, **slot) {
+			*slot = r
+		}
+	}
+
+	out := make([]entity.ReviewDecision, 0, len(byReviewer))
+	for _, st := range byReviewer {
+		shown := st.decision
+		if shown == nil {
+			shown = st.comment
+		}
+		out = append(out, entity.ReviewDecision{
+			Reviewer: shown.ReviewerLogin, State: shown.State, CommitSHA: shown.CommitSHA,
+			SubmittedAt: shown.SubmittedAt, Current: shown.CommitSHA == pr.HeadSHA,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Current != b.Current {
+			return a.Current
+		}
+		if !a.SubmittedAt.Equal(b.SubmittedAt) {
+			return a.SubmittedAt.After(b.SubmittedAt)
+		}
+		return strings.ToLower(a.Reviewer) < strings.ToLower(b.Reviewer)
+	})
+	return out
 }

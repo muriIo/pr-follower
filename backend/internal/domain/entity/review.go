@@ -49,3 +49,13 @@ type PullRequestReview struct {
 func (r PullRequestReview) Supersedes(prev PullRequestReview) bool {
 	return prev.State != ReviewDismissed || r.State == ReviewDismissed
 }
+
+// ReviewDecision is where one reviewer stands on a PR: the latest decision they recorded.
+type ReviewDecision struct {
+	Reviewer    string      `json:"reviewer"`
+	State       ReviewState `json:"state"`
+	CommitSHA   string      `json:"commit_sha"`
+	SubmittedAt time.Time   `json:"submitted_at"`
+	// Current is false when the PR has new commits since: the reviewer looked at older code.
+	Current bool `json:"current"`
+}
