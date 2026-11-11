@@ -124,6 +124,7 @@ No P1 item is open. In order of value:
 
 - [x] Go 1.27 + chi, goose forward-only migrations + sqlc, full-jitter backoff (ADR-0003, 0004, 0006).
 - [x] Docker images, dev compose, production runbook (#1, #5).
+- [x] The panel's nginx accepts webhook deliveries up to 5 MB, like the API: its 1 MB default refused a large `push` delivery with 413 before it reached the API. The production runbook was rechecked against the code and rewritten step by step.
 - [ ] **P2** Bound concurrent GitHub requests per token: nothing caps them today (rate-limit headers are honoured since #29, see [PR state](#3-pr-state-from-github)).
 - [ ] **P2** Several API replicas: sync jobs (`/sync`) and the operation-cancellation registry (`X-Operation-ID`) are still in one replica's memory, so a poll or a cancel that lands on another replica does not find them. Move them to the database, or route by session (sticky), before running more than one replica.
 - [ ] **P2** Continuous integration: no GitHub Actions workflow runs `make check` on PRs yet.
