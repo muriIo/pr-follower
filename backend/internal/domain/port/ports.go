@@ -57,6 +57,8 @@ type GitHubUserAPI interface {
 	ListOpenPullRequests(ctx context.Context, accessToken, owner, name string) ([]entity.RemotePullRequest, error)
 	// ListCommitCheckRuns lists the CI check runs GitHub reported for a commit (none when there is no CI).
 	ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error)
+	// ListCommitStatuses lists a commit's legacy statuses, the latest per context (Jenkins, Vercel).
+	ListCommitStatuses(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CommitStatus, error)
 	// ListPullRequestReviews lists the reviews recorded on a PR (drafts excluded).
 	ListPullRequestReviews(ctx context.Context, accessToken, owner, name string, number int) ([]entity.PullRequestReview, error)
 }
@@ -67,8 +69,16 @@ type PullRequestSnapshotStore interface {
 	Upsert(ctx context.Context, pr *entity.PullRequest) error
 }
 
+// CommitStatusStore keeps legacy commit statuses (Jenkins, Vercel), by GitHub's status id. Reading
+// a commit's checks (ListCheckRuns) returns its statuses too, shaped like checks.
+type CommitStatusStore interface {
+	UpsertCommitStatus(ctx context.Context, status entity.CommitStatus) error
+	GetCommitStatus(ctx context.Context, id int64) (*entity.CommitStatus, error)
+}
+
 // CheckRunRecorder keeps the check runs read at import so later check_run webhooks converge.
 type CheckRunRecorder interface {
+	CommitStatusStore
 	UpsertCheckRun(ctx context.Context, run entity.CheckRun) error
 	GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error)
 	ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error)
@@ -88,6 +98,7 @@ type FollowChecker interface {
 
 // CheckRunStore keeps CI check runs and finds the PRs a commit belongs to.
 type CheckRunStore interface {
+	CommitStatusStore
 	UpsertCheckRun(ctx context.Context, run entity.CheckRun) error
 	GetCheckRun(ctx context.Context, id int64) (*entity.CheckRun, error)
 	ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error)
@@ -142,6 +153,9 @@ type GitHubGateway interface {
 type PullRequestStateReader interface {
 	GetPullRequest(ctx context.Context, accessToken, owner, name string, number int) (entity.RemotePullRequestState, error)
 	ListPullRequestReviews(ctx context.Context, accessToken, owner, name string, number int) ([]entity.PullRequestReview, error)
+	// ListCommitCheckRuns and ListCommitStatuses read what GitHub shows as a commit's checks right now.
+	ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error)
+	ListCommitStatuses(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CommitStatus, error)
 }
 
 type DependencyAnalysisInput struct {
@@ -181,6 +195,12 @@ type ReviewStore interface {
 	// UpsertReview stores a review and reports whether anything changed (false on a redelivery).
 	UpsertReview(ctx context.Context, review entity.PullRequestReview) (bool, error)
 	ListReviews(ctx context.Context, prIDs []uint64) (map[uint64][]entity.PullRequestReview, error)
+}
+
+// CheckRunBatchReader reads the check runs of many commits in one query: every run whose repository
+// and commit are both among those given (callers group the result by repository and commit).
+type CheckRunBatchReader interface {
+	ListCheckRunsForCommits(ctx context.Context, repositoryIDs []uint64, headSHAs []string) ([]entity.CheckRun, error)
 }
 
 // RepositoryFollowers lists who follows a repository.

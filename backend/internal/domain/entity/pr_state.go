@@ -1,6 +1,9 @@
 package entity
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // The PR state shown to users comes from GitHub: these helpers translate GitHub's
 // vocabulary and never invent a value we were not told.
@@ -33,6 +36,49 @@ type CheckRun struct {
 	Name         string `json:"name"`
 	Status       string `json:"status"`     // queued | in_progress | completed
 	Conclusion   string `json:"conclusion"` // set when completed
+	// Title is the short result GitHub shows beside the check ("Sem mudanças em apps/web").
+	Title string `json:"title"`
+	// DetailsURL is where the check reports in full (the CI provider's page).
+	DetailsURL string `json:"details_url"`
+	// Source says where the check came from: a check run, or a legacy commit status (Jenkins,
+	// Vercel). The two have separate id spaces. Empty means a check run.
+	Source string `json:"source"`
+}
+
+// Where a CheckRun came from.
+const (
+	CheckSourceCheckRun = "check_run"
+	CheckSourceStatus   = "status"
+)
+
+// CommitStatus is a legacy commit status (the `status` webhook, the combined-status API): one state
+// a CI provider reported for a commit under a context. Each update is a new status with a new id.
+type CommitStatus struct {
+	ID           int64
+	RepositoryID uint64
+	HeadSHA      string
+	Context      string
+	State        string // pending | success | failure | error
+	Description  string
+	TargetURL    string
+}
+
+// AsCheckRun shows a status the way GitHub lists it among a commit's checks: pending is running,
+// success passes, and failure or error fail.
+func (s CommitStatus) AsCheckRun() CheckRun {
+	run := CheckRun{
+		ID: s.ID, RepositoryID: s.RepositoryID, HeadSHA: s.HeadSHA, Name: s.Context,
+		Title: s.Description, DetailsURL: s.TargetURL, Source: CheckSourceStatus,
+	}
+	switch s.State {
+	case "success":
+		run.Status, run.Conclusion = "completed", "success"
+	case "failure", "error":
+		run.Status, run.Conclusion = "completed", "failure"
+	default: // pending, or a state nobody reported
+		run.Status = "in_progress"
+	}
+	return run
 }
 
 func checkRunRank(status string) int {
@@ -52,10 +98,45 @@ func (r CheckRun) Supersedes(prev CheckRun) bool {
 	return checkRunRank(r.Status) >= checkRunRank(prev.Status)
 }
 
-// DeriveCIStatus aggregates the check runs of one commit. No runs means no CI reported.
+// LatestCheckRuns keeps, for each check name, only its latest run, which is how GitHub shows a
+// commit: re-running a check creates a new run with the same name and the old one no longer counts.
+// Runs GitHub marked stale are dropped. Runs without a name cannot be matched and are all kept.
+// A status and a check run with the same name are different checks (their ids are unrelated). The
+// result is ordered by name (then id).
+func LatestCheckRuns(runs []CheckRun) []CheckRun {
+	latest := make(map[string]CheckRun, len(runs))
+	key := func(r CheckRun) string { return r.Source + "\x00" + r.Name } // a status and a check run never replace each other
+	var unnamed []CheckRun
+	for _, r := range runs {
+		if r.Status == "completed" && r.Conclusion == "stale" {
+			continue
+		}
+		if r.Name == "" {
+			unnamed = append(unnamed, r)
+			continue
+		}
+		if cur, ok := latest[key(r)]; !ok || r.ID > cur.ID {
+			latest[key(r)] = r
+		}
+	}
+	out := append(unnamed, make([]CheckRun, 0, len(latest))...)
+	for _, r := range latest {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// DeriveCIStatus aggregates the check runs of one commit, counting only the latest run of each
+// check. No runs means no CI reported.
 func DeriveCIStatus(runs []CheckRun) CIStatus {
 	counted, running := 0, false
-	for _, r := range runs {
+	for _, r := range LatestCheckRuns(runs) {
 		if r.Status != "completed" {
 			running = true
 			counted++

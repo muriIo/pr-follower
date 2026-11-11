@@ -196,6 +196,10 @@ func (fakeGitHubUserAPI) GetPullRequest(_ context.Context, _ string, _, _ string
 	return entity.RemotePullRequestState{Open: true, HeadSHA: fmt.Sprintf("live-%d", number), AuthorLogin: "bianca-dev"}, nil
 }
 
+func (fakeGitHubUserAPI) ListCommitStatuses(context.Context, string, string, string, string) ([]entity.CommitStatus, error) {
+	return nil, nil
+}
+
 func (fakeGitHubUserAPI) ListPullRequestReviews(context.Context, string, string, string, int) ([]entity.PullRequestReview, error) {
 	return nil, nil
 }
@@ -329,7 +333,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
 		GitHub: ghGw, State: userAPI, Reviews: prRepo, Pub: sseHub})
 	changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, nil)
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo, triage.WithCheckRuns(prRepo))
 	analyzeUC := dependabot.NewAnalyzeUseCase(prRepo, repoRepo, ghGw, []port.DependencyAnalyzer{lowRiskAnalyzer{}}, blastradius.NewScanner(), sseHub)
 	runner := dependabot.NewRunner(analyzeUC, dependabot.RunnerConfig{Workers: 1})
 	runCtx, stopRunner := context.WithCancel(context.Background())
@@ -1432,6 +1436,7 @@ func TestActions_SurfaceGitHubsAnswerHonestly(t *testing.T) {
 		code    string
 		message string
 	}{
+		"checks still running":             {entity.ErrChecksRunning, http.StatusConflict, "checks_running", ""},
 		"no answer from GitHub":            {entity.ErrOutcomeUnknown, http.StatusBadGateway, "outcome_unknown", ""},
 		"GitHub refused (perms)":           {fmt.Errorf("%w: Resource not accessible", entity.ErrForbidden), http.StatusForbidden, "forbidden", "Resource not accessible"},
 		"the user's GitHub access is gone": {fmt.Errorf("%w: Bad credentials", entity.ErrGitHubTokenExpired), http.StatusUnauthorized, "github_token_expired", ""},
@@ -1759,5 +1764,133 @@ func TestPush_ARefreshNobodyCanDoFailsTheDeliveryInsteadOfKeepingStaleRulesQuiet
 	rec := ts.postWebhook(t, "push", `{"ref":"refs/heads/main","repository":{"id":900,"default_branch":"main"},"commits":[{"modified":[".github/CODEOWNERS"]}]}`)
 	if rec.Code < 500 {
 		t.Fatalf("expected the delivery to fail visibly, got %d", rec.Code)
+	}
+}
+
+func TestWorkspace_ShowsTheChecksOfAPRLikeGitHubDoes(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	check := func(id int, name, status, conclusion, title string) {
+		t.Helper()
+		payload := fmt.Sprintf(`{"action":"completed","check_run":{"id":%d,"name":%q,"head_sha":"sha42","status":%q,"conclusion":%q,`+
+			`"details_url":"https://ci.example.com/%d","output":{"title":%q}},"repository":{"id":900}}`, id, name, status, conclusion, id, title)
+		if rec := ts.postWebhook(t, "check_run", payload); rec.Code != http.StatusAccepted {
+			t.Fatalf("check_run webhook: %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	checksOf42 := func() (checks []entity.CheckRun, ci entity.CIStatus) {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		for _, seat := range body.Snapshot.Seats {
+			for _, pr := range seat.PullRequests {
+				if pr.Number == 42 {
+					return body.Snapshot.Checks[pr.ID], pr.CIStatus
+				}
+			}
+		}
+		t.Fatal("PR 42 not found")
+		return nil, ""
+	}
+
+	check(5001, "build", "completed", "failure", "Build failed")
+	check(5002, "test", "completed", "success", "42 tests passed")
+	check(5003, "lint", "in_progress", "", "")
+	checks, ci := checksOf42()
+	if len(checks) != 3 || ci != entity.CIStatusFailure {
+		t.Fatalf("expected three checks and a failing PR: %+v %q", checks, ci)
+	}
+	if checks[0].Name != "build" || checks[0].Title != "Build failed" || checks[0].DetailsURL != "https://ci.example.com/5001" {
+		t.Fatalf("each check carries its short result and its link: %+v", checks[0])
+	}
+
+	// build is re-run (a new run, same name) and passes; lint finishes: nothing failed any more.
+	check(5004, "build", "completed", "success", "Build passed")
+	check(5003, "lint", "completed", "success", "")
+	checks, ci = checksOf42()
+	if len(checks) != 3 || ci != entity.CIStatusSuccess {
+		t.Fatalf("the re-run replaces the failed run: %+v %q", checks, ci)
+	}
+	if checks[0].Name != "build" || checks[0].ID != 5004 {
+		t.Fatalf("only the latest run of build is shown: %+v", checks[0])
+	}
+}
+
+func TestWorkspace_AStatusFromVercelHoldsTheChecksPanelBack(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	post := func(event, payload string) {
+		t.Helper()
+		if rec := ts.postWebhook(t, event, payload); rec.Code != http.StatusAccepted {
+			t.Fatalf("%s webhook: %d %s", event, rec.Code, rec.Body.String())
+		}
+	}
+	status := func(id int, state, description string) {
+		t.Helper()
+		post("status", fmt.Sprintf(`{"id":%d,"sha":"sha42","context":"Vercel","state":%q,"description":%q,"target_url":"https://vercel.com/d/%d","repository":{"id":900}}`, id, state, description, id))
+	}
+	view := func() ([]entity.CheckRun, entity.CIStatus) {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		for _, seat := range body.Snapshot.Seats {
+			for _, pr := range seat.PullRequests {
+				if pr.Number == 42 {
+					return body.Snapshot.Checks[pr.ID], pr.CIStatus
+				}
+			}
+		}
+		t.Fatal("PR 42 not found")
+		return nil, ""
+	}
+
+	// Import already found a passing check run for the commit: green.
+	if checks, ci := view(); ci != entity.CIStatusSuccess || len(checks) != 1 {
+		t.Fatalf("before Vercel reports: %+v %q", checks, ci)
+	}
+
+	// Vercel starts deploying (a commit status, not a check run): the PR is no longer green.
+	status(7001, "pending", "Vercel is deploying your app")
+	checks, ci := view()
+	if ci != entity.CIStatusPending || len(checks) != 2 {
+		t.Fatalf("a pending status must show up and hold CI back: %+v %q", checks, ci)
+	}
+	var vercel entity.CheckRun
+	for _, c := range checks {
+		if c.Name == "Vercel" {
+			vercel = c
+		}
+	}
+	if vercel.Status != "in_progress" || vercel.Title != "Vercel is deploying your app" || vercel.DetailsURL != "https://vercel.com/d/7001" || vercel.Source != entity.CheckSourceStatus {
+		t.Fatalf("the status is listed like GitHub lists it: %+v", vercel)
+	}
+
+	// Redelivery changes nothing; the deployment finishing replaces the pending status.
+	status(7001, "pending", "Vercel is deploying your app")
+	if _, ci := view(); ci != entity.CIStatusPending {
+		t.Fatalf("redelivery: %q", ci)
+	}
+	status(7002, "success", "Deployment has completed")
+	checks, ci = view()
+	if ci != entity.CIStatusSuccess || len(checks) != 2 {
+		t.Fatalf("the latest status of the context decides: %+v %q", checks, ci)
 	}
 }

@@ -401,8 +401,9 @@ describe('WorkspaceStore truthful PR state', () => {
       store.openPr(id);
       return store.drawer()!.blockedText;
     };
-    // GitHub lets these merge (checks not required): CI is a signal, not a blocker we invent.
-    expect(blocked(21)).toBe('');
+    // Checks still running are blockers (approving and merging wait for them); a failing check is
+    // a signal GitHub lets through unless the branch requires it, so it is not a blocker we invent.
+    expect(blocked(21)).toBe('Há checks em andamento: aguarde terminarem para aprovar ou mesclar.');
     expect(blocked(22)).toBe('');
     expect(blocked(23)).toBe('Mesclagem bloqueada: há conflitos com a branch base.');
     expect(blocked(24)).toBe('Mesclagem bloqueada: a branch está desatualizada em relação à base.');
@@ -746,7 +747,8 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
     const { store, translate } = setup({});
     store.openPr(1);
     await store.mergePr(1);
-    expect(store.drawer()!.act.note).toBe(translate('actions.merged'));
+    // The drawer closes with the merge; what is left to say is the plain notice, with no commit made up.
+    expect(store.notice()).toBe(translate('notice.pr.mergedByYou', { pr: store.prs().find((p) => p.id === 1)!.number }));
   });
 
   it('does not wait on artificial delays: an action finishes as soon as the server answers', async () => {
@@ -878,5 +880,247 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
 
     store.openPr(2);
     expect(store.drawer()!.hasReviews).toBe(false);
+  });
+});
+
+describe('WorkspaceStore keeps the drawer true to its PR', () => {
+  const base = createInitialPrDataset().find((p) => !p.dep)!;
+  const prOf = (id: number, number: number, overrides: Partial<PullRequestItem> = {}): PullRequestItem => ({
+    ...base, id, number, repo: 'acme/web', author: '@bia', approvedBy: undefined, ...overrides,
+  });
+
+  function setup(fetchWorkspace: PullRequestGateway['fetchWorkspace'] = async () => null) {
+    const { prGateway } = createFakeGateways();
+    let emit!: (e: Omit<TimelineEventItem, 'key' | 't'>) => void;
+    const sse: LiveEventGateway = {
+      connect: (onEvent, onState) => {
+        emit = onEvent;
+        onState('conectado');
+        return () => undefined;
+      },
+    };
+    const gateway = {
+      ...prGateway,
+      fetchWorkspace,
+      snoozePullRequest: vi.fn(prGateway.snoozePullRequest),
+      approvePullRequest: vi.fn(prGateway.approvePullRequest),
+      mergePullRequest: vi.fn(prGateway.mergePullRequest),
+    };
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: gateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sse },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.startLiveSession('octocat');
+    store.repos.set([{ name: 'acme/web', branch: 'main', access: 'active' }]);
+    store.prs.set([prOf(1, 11), prOf(2, 12)]);
+    const t = (key: string, params?: Record<string, string | number>) => TestBed.inject(LocaleStore).translate(key, params);
+    return { store, emit: (e: Partial<TimelineEventItem>) => emit({ kind: 'info', text: '', repo: 'acme/web', ...e } as never), gateway, t };
+  }
+
+  it('closes the drawer, and says why, when its PR is no longer open after a reload', async () => {
+    const dataset = { repos: [{ name: 'acme/web', branch: 'main', access: 'active' as const }], prs: [prOf(2, 12)], events: [] };
+    const { store, t } = setup(async () => dataset);
+    store.openPr(1);
+    expect(store.drawer()).not.toBeNull();
+
+    await store.loadWorkspace(); // PR 1 was merged or closed meanwhile: it is not in the open list
+
+    expect(store.selectedPrId()).toBeNull(); // the layout must stop reserving room for it too
+    expect(store.drawer()).toBeNull();
+    expect(store.notice()).toBe(t('notice.pr.gone', { pr: 11 }));
+  });
+
+  it('keeps the drawer open, updated, when its PR is still open after a reload', async () => {
+    const updated = prOf(1, 11, { title: 'a new title after a push' });
+    const { store } = setup(async () => ({ repos: [{ name: 'acme/web', branch: 'main', access: 'active' as const }], prs: [updated], events: [] }));
+    store.openPr(1);
+
+    await store.loadWorkspace();
+
+    expect(store.selectedPrId()).toBe(1);
+    expect(store.drawer()!.title).toBe('a new title after a push');
+    expect(store.notice()).toBeNull();
+  });
+
+  it('closes the drawer the moment GitHub says its PR was merged or closed, without waiting for the reload', () => {
+    const merged = setup();
+    merged.store.openPr(1);
+    merged.emit({ type: 'pr.merged', pr: 1 });
+    expect(merged.store.selectedPrId()).toBeNull();
+    expect(merged.store.notice()).toBe(merged.t('notice.pr.merged', { pr: 11 }));
+
+    const closed = setup();
+    closed.store.openPr(1);
+    closed.emit({ type: 'pr.closed', pr: 1 });
+    expect(closed.store.drawer()).toBeNull();
+    expect(closed.store.notice()).toBe(closed.t('notice.pr.closed', { pr: 11 }));
+
+    // Activity about another PR leaves the open drawer alone.
+    const other = setup();
+    other.store.openPr(1);
+    other.emit({ type: 'pr.merged', pr: 2 });
+    expect(other.store.selectedPrId()).toBe(1);
+    expect(other.store.notice()).toBeNull();
+  });
+
+  it('closes the drawer after the user merges its PR, so nothing is left to approve or merge', async () => {
+    const { store, t } = setup();
+    store.openPr(1);
+    await store.mergePr(1);
+
+    expect(store.selectedPrId()).toBeNull();
+    expect(store.notice()).toBe(t('notice.pr.mergedByYou', { pr: 11 }));
+  });
+
+  it('lets the user dismiss the notice', () => {
+    const { store, emit } = setup();
+    store.openPr(1);
+    emit({ type: 'pr.merged', pr: 1 });
+    expect(store.notice()).not.toBeNull();
+    store.dismissNotice();
+    expect(store.notice()).toBeNull();
+  });
+
+  it('does not offer "silence until CI passes" once CI has passed, and says why', async () => {
+    const { store, gateway, t } = setup();
+    store.prs.set([prOf(1, 11, { ci: 'ok' }), prOf(2, 12, { ci: 'run' }), prOf(3, 13, { ci: 'fail' }), prOf(4, 14, { ci: 'none' })]);
+
+    const view = (id: number) => {
+      store.openPr(id);
+      const d = store.drawer()!;
+      return [d.silenceCiDis, d.silenceCiTip];
+    };
+    expect(view(1)).toEqual(['true', t('drawer.silenceCi.passed')]);
+    expect(view(4)).toEqual(['true', t('drawer.silenceCi.none')]); // nothing will ever report: it would never wake
+    expect(view(2)).toEqual(['false', '']);
+    expect(view(3)).toEqual(['false', '']);
+
+    // A disabled button can still be reached by keyboard: the store refuses too.
+    await store.silencePr(1, 'ci');
+    expect(gateway.snoozePullRequest).not.toHaveBeenCalled();
+    await store.silencePr(2, 'ci');
+    expect(gateway.snoozePullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a PR\'s checks like GitHub\'s panel: a verdict, the counts, and the failing ones first', () => {
+    const { store, t: translate } = setup();
+    const check = (name: string, state: 'failure' | 'pending' | 'success' | 'skipped', detail = '', url?: string) => ({ name, state, detail, url });
+    store.prs.set([
+      {
+        ...prOf(1, 11),
+        checks: [
+          check('api-iam', 'failure', 'Checks falharam', 'https://ci.example.com/iam'),
+          check('api-learning', 'failure'),
+          check('backoffice', 'success', 'Sem mudanças'),
+          check('tenant', 'success'),
+          check('web', 'success'),
+          check('slow', 'pending'),
+          check('docs', 'skipped'),
+        ],
+      },
+      { ...prOf(2, 12), checks: [check('build', 'success'), check('test', 'success')] },
+      { ...prOf(3, 13), checks: [check('build', 'success'), check('test', 'pending')] },
+      prOf(4, 14),
+    ]);
+
+    const view = (id: number) => {
+      store.openPr(id);
+      return store.drawer()!.checks;
+    };
+
+    const mixed = view(1);
+    expect(mixed.has).toBe(true);
+    expect(mixed.tone).toBe('fail');
+    expect(mixed.title).toBe(translate('drawer.checks.title.fail'));
+    expect(mixed.subtitle).toBe(
+      [translate('drawer.checks.count.failing', { count: 2 }), translate('drawer.checks.count.running', { count: 1 }),
+       translate('drawer.checks.count.successful', { count: 3 }), translate('drawer.checks.count.skipped', { count: 1 })].join(', '),
+    );
+    expect(mixed.groups.map((g) => [g.key, g.items.length, g.open])).toEqual([
+      ['failure', 2, true], ['pending', 1, true], ['success', 3, false], ['skipped', 1, false],
+    ]);
+    expect(mixed.groups[0].label).toBe(translate('drawer.checks.group.failure.other', { count: 2 }));
+    expect(mixed.groups[1].label).toBe(translate('drawer.checks.group.pending.one', { count: 1 }));
+    expect(mixed.groups[0].items[0]).toMatchObject({ name: 'api-iam', detail: 'Checks falharam', url: 'https://ci.example.com/iam' });
+
+    const allGreen = view(2);
+    expect(allGreen.tone).toBe('ok');
+    expect(allGreen.title).toBe(translate('drawer.checks.title.ok'));
+    expect(allGreen.groups.map((g) => g.key)).toEqual(['success']);
+
+    const running = view(3);
+    expect(running.tone).toBe('run');
+    expect(running.title).toBe(translate('drawer.checks.title.run'));
+
+    // Nothing reported: no panel, and nothing claimed.
+    expect(view(4).has).toBe(false);
+  });
+
+  it('never lets the CI signal contradict the checks panel: with checks listed, the signal says what the panel says', () => {
+    const { store, t } = setup();
+    const failing = [{ name: 'api-iam', state: 'failure' as const, detail: '' }, { name: 'web', state: 'success' as const, detail: '' }];
+    store.prs.set([prOf(1, 11, { ci: 'ok', checks: failing }), prOf(2, 12, { ci: 'ok' })]);
+
+    store.openPr(1);
+    const ci = store.drawer()!.signals.find((sig) => sig.k === 'CI')!;
+    expect(ci.v).toBe(t('drawer.checks.title.fail'));
+    expect(ci.dot).toContain('pf-dot-fail');
+
+    // Without checks the signal is the PR's own CI state, as before.
+    store.openPr(2);
+    expect(store.drawer()!.signals.find((sig) => sig.k === 'CI')!.dot).toContain('pf-dot-ok');
+  });
+
+  it('blocks approving and merging while checks are still running, and says why', async () => {
+    const { store, gateway, t } = setup();
+    store.prs.set([
+      prOf(1, 11, { ci: 'run' }),
+      prOf(2, 12, { ci: 'ok' }),
+      prOf(3, 13, { ci: 'fail' }), // a failure is a warning, not a blocker
+      prOf(4, 14, { ci: 'none' }),
+    ]);
+    const view = (id: number) => {
+      store.openPr(id);
+      const d = store.drawer()!;
+      return { approve: d.approveDis, approveTip: d.approveTip, merge: d.mergeDis, blocked: d.blocked, text: d.blockedText };
+    };
+
+    expect(view(1)).toEqual({ approve: 'true', approveTip: t('drawer.checksRunning'), merge: 'true', blocked: true, text: t('drawer.checksRunning') });
+    for (const id of [2, 3, 4]) {
+      expect(view(id)).toMatchObject({ approve: 'false', approveTip: '', merge: 'false' });
+    }
+
+    // A keyboard can still reach a disabled button: the store refuses, nothing is sent, the user is told.
+    store.openPr(1);
+    await store.approvePr(1);
+    expect(gateway.approvePullRequest).not.toHaveBeenCalled();
+    expect(store.drawer()!.act.note).toBe(t('actions.error.checks_running'));
+    await store.mergePr(1);
+    expect(gateway.mergePullRequest).not.toHaveBeenCalled();
+    expect(store.mergedMap()[1]).toBeUndefined();
+
+    await store.approvePr(2);
+    expect(gateway.approvePullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it('explains a "checks running" answer from the server, for checks that started after the screen was drawn', async () => {
+    const { store, t } = setup();
+    store.prs.set([prOf(1, 11, { ci: 'ok' })]); // the screen still says green
+    const gateway = TestBed.inject(PULL_REQUEST_GATEWAY) as PullRequestGateway;
+    (gateway as { approvePullRequest: unknown }).approvePullRequest = vi.fn(async () => {
+      throw new ActionError('checks_running');
+    });
+
+    store.openPr(1);
+    await store.approvePr(1);
+
+    expect(store.drawer()!.act.note).toBe(t('actions.error.checks_running'));
+    expect(store.approvedMap()[1]).toBeUndefined();
   });
 });

@@ -77,6 +77,8 @@
       </section>
     }
 
+    <app-checks-panel [checks]="drawer().checks" />
+
     <app-review-list [reviews]="drawer().reviews" />
 
     @if (drawer().isDep) {
@@ -108,7 +110,13 @@
       }
       <div class="pf-actions">
         @if (drawer().showApprove) {
-          <button type="button" class="pf-btn pf-btn-primary" (click)="store.approvePr(drawer().id)">
+          <button
+            type="button"
+            class="pf-btn pf-btn-primary"
+            [attr.aria-disabled]="drawer().approveDis === 'true' ? 'true' : null"
+            [attr.title]="drawer().approveTip || null"
+            (click)="drawer().approveDis !== 'true' && store.approvePr(drawer().id)"
+          >
             {{ 'drawer.approve' | t }}
           </button>
         }
@@ -119,6 +127,7 @@
           type="button"
           [class]="'pf-btn ' + drawer().mergeCls"
           [attr.aria-disabled]="drawer().mergeDis"
+          [attr.title]="drawer().mergeDis === 'true' ? drawer().mergeTip : null"
           (click)="drawer().mergeDis !== 'true' && store.mergePr(drawer().id)"
         >
           {{ 'drawer.mergeSquash' | t }}
@@ -189,8 +198,9 @@
           <button
             type="button"
             class="pf-btn"
-            [attr.aria-disabled]="drawer().busyDis"
-            (click)="store.silencePr(drawer().id, 'ci')"
+            [attr.aria-disabled]="drawer().silenceCiDis === 'true' ? 'true' : drawer().busyDis"
+            [attr.title]="drawer().silenceCiTip || null"
+            (click)="drawer().silenceCiDis !== 'true' && store.silencePr(drawer().id, 'ci')"
           >
             {{ 'drawer.silenceCi' | t }}
           </button>

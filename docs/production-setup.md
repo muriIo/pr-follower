@@ -48,7 +48,7 @@ GitHub → **Settings → Developer settings → GitHub Apps → New GitHub App*
 
 **Organization permissions:** Members *Read-only* (user teams for CODEOWNERS).
 
-**Subscribe to events:** Pull request, Pull request review, Push, Check suite, Check run, Issue comment. (`installation` and `installation_repositories` are always delivered.)
+**Subscribe to events:** Pull request, Pull request review, Push, Status, Check suite, Check run, Issue comment. (`installation` and `installation_repositories` are always delivered.)
 
 **Where can this GitHub App be installed?** **Any account**, so anyone can install it on their user or organization.
 
@@ -162,6 +162,8 @@ TLS proxy requirements:
 At start the API logs `GitHub App credentials not set` when background reads still depend on a follower's token, and `invalid GitHub App credentials` (then exits) when the key cannot be parsed. A PR's files stay "not evaluated" until read: if they never are, check that the app has *Contents* and *Pull requests* read access on that installation.
 
 The Dependabot analysis (Radar risk tiers, "Analisar agora") reads lockfiles and repository tarballs as the GitHub App, so it needs `GITHUB_APP_ID` and the private key: without them the API logs the warning above, the button answers "needs the GitHub App credentials" and PRs stay "Sem análise". The app needs *Contents* read on the installation. Analyses run in the background (at most two at once, two minutes each); failures are logged as `dependabot analysis failed` with the PR id.
+
+Legacy commit statuses (Jenkins, Vercel and other CI that does not use check runs) arrive as **Status** events and are listed beside check runs, so the app must be subscribed to Status too; the permission *Commit statuses: Read-only* is already in the list above. Statuses of PRs stored before the app was subscribed appear after that PR's next status event, or after the repository is imported again.
 
 CODEOWNERS is re-read when a push to a repository's default branch touches one of its CODEOWNERS files (`.github/CODEOWNERS`, `CODEOWNERS`, `docs/CODEOWNERS`), so the app must be subscribed to **Push** events. The refresh reads as the GitHub App, or as a follower when the app credentials are not set. If nobody can read, the delivery fails (red in **Recent Deliveries**) instead of keeping stale rules quietly: fix the credentials and redeliver it.
 

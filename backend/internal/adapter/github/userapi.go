@@ -313,19 +313,63 @@ func (c *UserClient) ListCommitCheckRuns(ctx context.Context, accessToken, owner
 				Status     string  `json:"status"`
 				Conclusion *string `json:"conclusion"`
 				HeadSHA    string  `json:"head_sha"`
+				DetailsURL string  `json:"details_url"`
+				Output     struct {
+					Title *string `json:"title"`
+				} `json:"output"`
 			} `json:"check_runs"`
 		}
 		if err := json.Unmarshal(raw, &page); err != nil {
 			return 0, 0, err
 		}
 		for _, r := range page.CheckRuns {
-			run := entity.CheckRun{ID: r.ID, HeadSHA: r.HeadSHA, Name: r.Name, Status: r.Status}
+			run := entity.CheckRun{ID: r.ID, HeadSHA: r.HeadSHA, Name: r.Name, Status: r.Status, DetailsURL: r.DetailsURL}
 			if r.Conclusion != nil {
 				run.Conclusion = *r.Conclusion
+			}
+			if r.Output.Title != nil {
+				run.Title = *r.Output.Title
 			}
 			out = append(out, run)
 		}
 		return page.TotalCount, len(page.CheckRuns), nil
+	})
+	return out, err
+}
+
+// ListCommitStatuses lists a commit's legacy statuses from GitHub's combined-status endpoint: the
+// latest status of each context. Jenkins, Vercel and other CI report this way instead of check runs.
+func (c *UserClient) ListCommitStatuses(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CommitStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var out []entity.CommitStatus
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/status", owner, name, sha)
+	err := c.paginate(ctx, accessToken, path, func(raw json.RawMessage) (int, int, error) {
+		var page struct {
+			TotalCount int `json:"total_count"`
+			Statuses   []struct {
+				ID          int64   `json:"id"`
+				Context     string  `json:"context"`
+				State       string  `json:"state"`
+				Description *string `json:"description"`
+				TargetURL   *string `json:"target_url"`
+			} `json:"statuses"`
+		}
+		if err := json.Unmarshal(raw, &page); err != nil {
+			return 0, 0, err
+		}
+		for _, s := range page.Statuses {
+			status := entity.CommitStatus{ID: s.ID, Context: s.Context, State: s.State}
+			if s.Description != nil {
+				status.Description = *s.Description
+			}
+			if s.TargetURL != nil {
+				status.TargetURL = *s.TargetURL
+			}
+			out = append(out, status)
+		}
+		return page.TotalCount, len(page.Statuses), nil
 	})
 	return out, err
 }

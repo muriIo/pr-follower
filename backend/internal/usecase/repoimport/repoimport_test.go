@@ -34,6 +34,15 @@ type fakeUserAPI struct {
 	onCheckRuns   func()                                // called before each check-run read, to cancel mid-backfill
 	reviews       map[string][]entity.PullRequestReview // "owner/name#number" -> reviews
 	reviewsErr    error
+	statuses      map[string][]entity.CommitStatus // head SHA -> statuses
+	statusesErr   error
+}
+
+func (f *fakeUserAPI) ListCommitStatuses(_ context.Context, _ string, _, _, sha string) ([]entity.CommitStatus, error) {
+	if f.statusesErr != nil {
+		return nil, f.statusesErr
+	}
+	return f.statuses[sha], nil
 }
 
 func (f *fakeUserAPI) ListPullRequestReviews(_ context.Context, _ string, owner, name string, number int) ([]entity.PullRequestReview, error) {
@@ -264,11 +273,31 @@ func (f *fakePRs) Upsert(_ context.Context, pr *entity.PullRequest) error {
 }
 
 type fakeChecks struct {
-	mu   sync.Mutex
-	runs map[int64]entity.CheckRun
+	mu       sync.Mutex
+	runs     map[int64]entity.CheckRun
+	statuses map[int64]entity.CommitStatus
 }
 
-func newFakeChecks() *fakeChecks { return &fakeChecks{runs: map[int64]entity.CheckRun{}} }
+func newFakeChecks() *fakeChecks {
+	return &fakeChecks{runs: map[int64]entity.CheckRun{}, statuses: map[int64]entity.CommitStatus{}}
+}
+
+func (f *fakeChecks) UpsertCommitStatus(_ context.Context, s entity.CommitStatus) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statuses[s.ID] = s
+	return nil
+}
+
+func (f *fakeChecks) GetCommitStatus(_ context.Context, id int64) (*entity.CommitStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.statuses[id]
+	if !ok {
+		return nil, entity.ErrNotFound
+	}
+	return &s, nil
+}
 
 func (f *fakeChecks) UpsertCheckRun(_ context.Context, run entity.CheckRun) error {
 	f.mu.Lock()
@@ -294,6 +323,11 @@ func (f *fakeChecks) ListCheckRuns(_ context.Context, repoID uint64, sha string)
 	for _, r := range f.runs {
 		if r.RepositoryID == repoID && r.HeadSHA == sha {
 			out = append(out, r)
+		}
+	}
+	for _, s := range f.statuses {
+		if s.RepositoryID == repoID && s.HeadSHA == sha {
+			out = append(out, s.AsCheckRun())
 		}
 	}
 	return out, nil
@@ -874,5 +908,49 @@ func TestImport_SkipsReviewsWithoutCodeownersAndFailsRetryablyWhenTheyCannotBeRe
 	}
 	if len(events.events) != 0 {
 		t.Fatalf("nothing is announced: %+v", events.events)
+	}
+}
+
+func TestImport_BackfillCountsLegacyCommitStatusesLikeChecks(t *testing.T) {
+	t.Parallel()
+	uc, api, _, _, prs, checks := setupBackfill()
+	twoOpenPRs(api) // #7's commit has a passing check run
+	api.statuses = map[string][]entity.CommitStatus{
+		"sha7": {{ID: 700, Context: "Vercel", State: "pending", Description: "Vercel is deploying your app", TargetURL: "https://vercel.com/d/1"}},
+	}
+
+	repo, err := uc.Import(context.Background(), userID, 20, 200)
+	if err != nil {
+		t.Fatalf("Import() error: %v", err)
+	}
+	web := prs.prs[[2]uint64{repo.ID, 7}]
+	if web.CIStatus != entity.CIStatusPending {
+		t.Fatalf("a pending Vercel status must hold the PR back although its check run passed, got %q", web.CIStatus)
+	}
+	got, err := checks.GetCommitStatus(context.Background(), 700)
+	if err != nil || got.RepositoryID != repo.ID || got.Context != "Vercel" || got.HeadSHA != "sha7" {
+		t.Fatalf("the status is kept for the repository and the commit, so later webhooks converge: %+v, %v", got, err)
+	}
+
+	// Importing again stores nothing new.
+	before := len(checks.statuses)
+	if _, err := uc.Import(context.Background(), userID, 20, 200); err != nil || len(checks.statuses) != before {
+		t.Fatalf("re-import converges: err=%v statuses=%d", err, len(checks.statuses))
+	}
+}
+
+func TestImport_BackfillFailsRetryablyWhenStatusesCannotBeRead(t *testing.T) {
+	t.Parallel()
+	uc, api, repos, _, _, _ := setupBackfill()
+	twoOpenPRs(api)
+	api.statusesErr = errors.New("github is down")
+
+	if _, err := uc.Import(context.Background(), userID, 20, 200); !errors.Is(err, api.statusesErr) {
+		t.Fatalf("expected the statuses failure (never guess CI without them), got %v", err)
+	}
+	for key, on := range repos.follows {
+		if on {
+			t.Fatalf("a failed import follows nothing, so it can be retried: %v", key)
+		}
 	}
 }

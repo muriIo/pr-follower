@@ -319,6 +319,10 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 				HeadSHA    string `json:"head_sha"`
 				Status     string `json:"status"`
 				Conclusion string `json:"conclusion"`
+				DetailsURL string `json:"details_url"`
+				Output     struct {
+					Title string `json:"title"`
+				} `json:"output"`
 			} `json:"check_run"`
 			Repository struct {
 				ID int64 `json:"id"`
@@ -335,6 +339,37 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			Name:         raw.CheckRun.Name,
 			Status:       raw.CheckRun.Status,
 			Conclusion:   raw.CheckRun.Conclusion,
+			Title:        raw.CheckRun.Output.Title,
+			DetailsURL:   raw.CheckRun.DetailsURL,
+		}); err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
+	if eventType == "status" {
+		var raw struct {
+			ID          int64  `json:"id"`
+			SHA         string `json:"sha"`
+			Context     string `json:"context"`
+			State       string `json:"state"`
+			Description string `json:"description"`
+			TargetURL   string `json:"target_url"`
+			Repository  struct {
+				ID int64 `json:"id"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			writeDomainError(w, entity.ErrInvalidInput)
+			return
+		}
+		if err := h.deps.WebhookUC.IngestStatusEvent(r.Context(), webhook.StatusEventPayload{
+			StatusID:     raw.ID,
+			GitHubRepoID: raw.Repository.ID,
+			SHA:          raw.SHA,
+			Context:      raw.Context,
+			State:        raw.State,
+			Description:  raw.Description,
+			TargetURL:    raw.TargetURL,
 		}); err != nil {
 			writeDomainError(w, err)
 			return
@@ -516,6 +551,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, entity.ErrOperationCanceled), errors.Is(err, context.Canceled):
 		status, code = StatusClientClosedRequest, "canceled"
+	case errors.Is(err, entity.ErrChecksRunning):
+		status, code = http.StatusConflict, "checks_running"
 	case errors.Is(err, entity.ErrOwnPullRequest):
 		status, code = http.StatusUnprocessableEntity, "own_pull_request"
 	case errors.Is(err, entity.ErrOutcomeUnknown):

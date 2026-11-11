@@ -6,6 +6,7 @@ import { ChangedFilesComponent } from './changed-files/changed-files.component';
 import { RiskBadgeComponent } from '../../common/risk-badge/risk-badge.component';
 import { StatusDotComponent } from '../../common/status-dot/status-dot.component';
 import { DependabotImpactComponent } from './dependabot-impact/dependabot-impact.component';
+import { ChecksPanelComponent } from './checks-panel/checks-panel.component';
 import { ReviewListComponent } from './review-list/review-list.component';
 
 @Component({
@@ -18,6 +19,7 @@ import { ReviewListComponent } from './review-list/review-list.component';
     ChangedFilesComponent,
     DependabotImpactComponent,
     ReviewListComponent,
+    ChecksPanelComponent,
     TranslatePipe,
   ],
   templateUrl: './inspection-drawer.component.html',

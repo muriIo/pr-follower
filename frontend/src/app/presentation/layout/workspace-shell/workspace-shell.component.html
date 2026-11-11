@@ -16,6 +16,9 @@
 
     <main class="pf-main">
       <div class="pf-canvas" [class.pf-canvas-narrow]="store.view() !== 'seats'">
+        @if (store.notice(); as notice) {
+          <app-notice-bar [text]="notice" (dismissed)="store.dismissNotice()" />
+        }
         @switch (store.view()) {
           @case ('seats') {
             <app-seats-view />

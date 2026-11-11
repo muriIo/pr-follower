@@ -15,13 +15,15 @@ import (
 type fakeChecks struct {
 	mu                          sync.Mutex
 	runs                        map[int64]entity.CheckRun
+	statuses                    map[int64]entity.CommitStatus
 	prs                         []*entity.PullRequest
 	err                         error
 	upsertErr, listErr, openErr error
+	statusWrites                int
 }
 
 func newFakeChecks(prs ...*entity.PullRequest) *fakeChecks {
-	return &fakeChecks{runs: map[int64]entity.CheckRun{}, prs: prs}
+	return &fakeChecks{runs: map[int64]entity.CheckRun{}, statuses: map[int64]entity.CommitStatus{}, prs: prs}
 }
 
 func (f *fakeChecks) UpsertCheckRun(_ context.Context, run entity.CheckRun) error {
@@ -62,8 +64,40 @@ func (f *fakeChecks) ListCheckRuns(_ context.Context, repoID uint64, head string
 			out = append(out, r)
 		}
 	}
+	for _, st := range f.statuses {
+		if st.RepositoryID == repoID && st.HeadSHA == head {
+			out = append(out, st.AsCheckRun())
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func (f *fakeChecks) UpsertCommitStatus(_ context.Context, s entity.CommitStatus) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	if f.upsertErr != nil {
+		return f.upsertErr
+	}
+	f.statuses[s.ID] = s
+	f.statusWrites++
+	return nil
+}
+
+func (f *fakeChecks) GetCommitStatus(_ context.Context, id int64) (*entity.CommitStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	s, ok := f.statuses[id]
+	if !ok {
+		return nil, entity.ErrNotFound
+	}
+	return &s, nil
 }
 
 func (f *fakeChecks) ListOpenByHeadSHA(_ context.Context, repoID uint64, head string) ([]entity.PullRequest, error) {
@@ -293,5 +327,51 @@ func TestIngestCheckRunEvent_EachStoreFailureIsReturned(t *testing.T) {
 	repoFailure := build(func(*fakeChecks, *savingPRRepo) {}, boom, &fakePub{})
 	if err := repoFailure.IngestPullRequestEvent(ctx, webhook.PullRequestEventPayload{GitHubRepoID: 9001, Number: 9}); !errors.Is(err, boom) {
 		t.Errorf("PR ingest repository lookup failure: got %v", err)
+	}
+}
+
+func TestIngestCheckRunEvent_StoresWhatGitHubShowsBesideTheCheck(t *testing.T) {
+	t.Parallel()
+	uc, checks, _ := checkRunSetup()
+	payload := run(1, "completed", "success")
+	payload.Name, payload.Title, payload.DetailsURL = "jenkins/pr-validate-web", "Sem mudanças em apps/web", "https://ci.example.com/job/1"
+
+	if err := uc.IngestCheckRunEvent(context.Background(), payload); err != nil {
+		t.Fatal(err)
+	}
+	got := checks.runs[1]
+	if got.Name != "jenkins/pr-validate-web" || got.Title != "Sem mudanças em apps/web" || got.DetailsURL != "https://ci.example.com/job/1" {
+		t.Fatalf("the short result and the link must be kept: %+v", got)
+	}
+}
+
+func TestIngestCheckRunEvent_AReRunReplacesTheFailedRunOfTheSameCheck(t *testing.T) {
+	t.Parallel()
+	uc, checks, _ := checkRunSetup()
+	ctx := context.Background()
+	named := func(id int64, status, conclusion string) webhook.CheckRunEventPayload {
+		p := run(id, status, conclusion)
+		p.Name = "build"
+		return p
+	}
+
+	if err := uc.IngestCheckRunEvent(ctx, named(1, "completed", "failure")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ciOf(checks); got != entity.CIStatusFailure {
+		t.Fatalf("the first run failed: %q", got)
+	}
+	// Someone re-runs the failed job: GitHub creates a new run (a new id) with the same name.
+	if err := uc.IngestCheckRunEvent(ctx, named(2, "in_progress", "")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ciOf(checks); got != entity.CIStatusPending {
+		t.Fatalf("the re-run is going: the old failure no longer counts, got %q", got)
+	}
+	if err := uc.IngestCheckRunEvent(ctx, named(2, "completed", "success")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ciOf(checks); got != entity.CIStatusSuccess {
+		t.Fatalf("the re-run passed, so CI passes: %q", got)
 	}
 }

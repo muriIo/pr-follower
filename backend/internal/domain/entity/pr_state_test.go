@@ -121,3 +121,106 @@ func TestPRChangedFiles_IsCurrentOnlyForTheHeadCommit(t *testing.T) {
 		t.Error("files of another commit, or none, are not current")
 	}
 }
+
+func TestLatestCheckRuns_KeepsOnlyTheLatestRunOfEachCheck(t *testing.T) {
+	t.Parallel()
+	runs := []entity.CheckRun{
+		{ID: 1, Name: "build", Status: "completed", Conclusion: "failure"},
+		{ID: 9, Name: "build", Status: "completed", Conclusion: "success"}, // a re-run of "build"
+		{ID: 4, Name: "test", Status: "in_progress"},
+		{ID: 3, Name: "lint", Status: "completed", Conclusion: "stale"}, // superseded by GitHub itself
+		{ID: 5, Name: "", Status: "completed", Conclusion: "success"},   // no name: cannot be matched, kept
+		{ID: 6, Name: "", Status: "completed", Conclusion: "success"},
+	}
+
+	got := entity.LatestCheckRuns(runs)
+
+	var ids []int64
+	for _, r := range got {
+		ids = append(ids, r.ID)
+	}
+	want := []int64{5, 6, 9, 4} // by name: the unnamed ones, then build, then test (lint was stale)
+	if len(ids) != len(want) {
+		t.Fatalf("LatestCheckRuns() ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("LatestCheckRuns() ids = %v, want %v", ids, want)
+		}
+	}
+}
+
+func TestDeriveCIStatus_AReRunThatPassesClearsTheEarlierFailure(t *testing.T) {
+	t.Parallel()
+	failedThenPassed := []entity.CheckRun{
+		{ID: 1, Name: "build", Status: "completed", Conclusion: "failure"},
+		{ID: 2, Name: "build", Status: "completed", Conclusion: "success"},
+		{ID: 3, Name: "test", Status: "completed", Conclusion: "success"},
+	}
+	if got := entity.DeriveCIStatus(failedThenPassed); got != entity.CIStatusSuccess {
+		t.Fatalf("a passing re-run replaces the failed run: got %q", got)
+	}
+
+	// The other way round: a re-run that is still going is pending, not "failed before".
+	rerunning := []entity.CheckRun{
+		{ID: 1, Name: "build", Status: "completed", Conclusion: "failure"},
+		{ID: 2, Name: "build", Status: "in_progress"},
+	}
+	if got := entity.DeriveCIStatus(rerunning); got != entity.CIStatusPending {
+		t.Fatalf("a re-run in progress is pending: got %q", got)
+	}
+
+	// A later failure still fails it.
+	passedThenFailed := []entity.CheckRun{
+		{ID: 1, Name: "build", Status: "completed", Conclusion: "success"},
+		{ID: 2, Name: "build", Status: "completed", Conclusion: "failure"},
+	}
+	if got := entity.DeriveCIStatus(passedThenFailed); got != entity.CIStatusFailure {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestCommitStatus_AsCheckRun(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct{ status, conclusion string }{
+		"pending": {"in_progress", ""},
+		"success": {"completed", "success"},
+		"failure": {"completed", "failure"},
+		"error":   {"completed", "failure"}, // GitHub shows an errored status as failing
+		"":        {"in_progress", ""},      // a state nobody reported is not a result
+	}
+	for state, want := range cases {
+		s := entity.CommitStatus{ID: 7, RepositoryID: 3, HeadSHA: "abc", Context: "Vercel", State: state, Description: "Vercel is deploying your app", TargetURL: "https://vercel.com/x"}
+		got := s.AsCheckRun()
+		if got.Status != want.status || got.Conclusion != want.conclusion {
+			t.Errorf("state %q: status/conclusion = %q/%q, want %q/%q", state, got.Status, got.Conclusion, want.status, want.conclusion)
+		}
+		if got.ID != 7 || got.RepositoryID != 3 || got.HeadSHA != "abc" || got.Name != "Vercel" ||
+			got.Title != "Vercel is deploying your app" || got.DetailsURL != "https://vercel.com/x" || got.Source != entity.CheckSourceStatus {
+			t.Errorf("state %q: unexpected mapping %+v", state, got)
+		}
+	}
+}
+
+func TestLatestCheckRuns_AStatusAndACheckRunWithTheSameNameAreDifferentChecks(t *testing.T) {
+	t.Parallel()
+	runs := []entity.CheckRun{
+		{ID: 5, Name: "Vercel", Status: "completed", Conclusion: "success", Source: entity.CheckSourceCheckRun},
+		{ID: 2, Name: "Vercel", Status: "in_progress", Source: entity.CheckSourceStatus}, // a different id space
+		{ID: 1, Name: "Vercel", Status: "completed", Conclusion: "failure", Source: entity.CheckSourceStatus},
+		{ID: 9, Name: "legacy", Status: "completed", Conclusion: "success"}, // no source: a check run
+	}
+	got := entity.LatestCheckRuns(runs)
+	if len(got) != 3 {
+		t.Fatalf("expected the check run, the latest status and legacy: %+v", got)
+	}
+	for _, r := range got {
+		if r.Source == entity.CheckSourceStatus && r.ID != 2 {
+			t.Fatalf("the latest status wins within its own source: %+v", r)
+		}
+	}
+	// And a pending status keeps CI from claiming success, whatever the check runs said.
+	if ci := entity.DeriveCIStatus(runs[:2]); ci != entity.CIStatusPending {
+		t.Fatalf("a check run that passed and a status still pending is pending, got %q", ci)
+	}
+}

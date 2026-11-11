@@ -483,6 +483,8 @@ func (r *PullRequestRepository) UpsertCheckRun(ctx context.Context, run entity.C
 		Name:         run.Name,
 		Status:       run.Status,
 		Conclusion:   run.Conclusion,
+		Title:        run.Title,
+		DetailsUrl:   run.DetailsURL,
 	})
 }
 
@@ -497,10 +499,11 @@ func (r *PullRequestRepository) GetCheckRun(ctx context.Context, id int64) (*ent
 		}
 		return nil, err
 	}
-	return &entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion}, nil
+	return &entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion, Title: row.Title, DetailsURL: row.DetailsUrl}, nil
 }
 
-// ListCheckRuns returns the check runs reported for one commit of a repository.
+// ListCheckRuns returns everything GitHub lists as a check of one commit: its check runs and its
+// legacy commit statuses (shaped like checks, marked by Source).
 func (r *PullRequestRepository) ListCheckRuns(ctx context.Context, repositoryID uint64, headSHA string) ([]entity.CheckRun, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
@@ -511,9 +514,46 @@ func (r *PullRequestRepository) ListCheckRuns(ctx context.Context, repositoryID 
 	}
 	out := make([]entity.CheckRun, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion})
+		out = append(out, entity.CheckRun{ID: row.CheckRunID, RepositoryID: uint64(row.RepositoryID), HeadSHA: row.HeadSha, Name: row.Name, Status: row.Status, Conclusion: row.Conclusion, Title: row.Title, DetailsURL: row.DetailsUrl, Source: entity.CheckSourceCheckRun})
+	}
+	statuses, err := r.q.ListCommitStatusesByHead(ctx, sqlcgen.ListCommitStatusesByHeadParams{RepositoryID: int64(repositoryID), HeadSha: headSHA})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range statuses {
+		out = append(out, statusFromRow(row.StatusID, row.RepositoryID, row.HeadSha, row.Context, row.State, row.Description, row.TargetUrl).AsCheckRun())
 	}
 	return out, nil
+}
+
+func statusFromRow(id, repoID int64, sha, context, state, description, targetURL string) entity.CommitStatus {
+	return entity.CommitStatus{ID: id, RepositoryID: uint64(repoID), HeadSHA: sha, Context: context, State: state, Description: description, TargetURL: targetURL}
+}
+
+// UpsertCommitStatus stores a commit status by its GitHub id (idempotent, ADR-0011).
+func (r *PullRequestRepository) UpsertCommitStatus(ctx context.Context, s entity.CommitStatus) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.UpsertCommitStatus(ctx, sqlcgen.UpsertCommitStatusParams{
+		StatusID: s.ID, RepositoryID: int64(s.RepositoryID), HeadSha: s.HeadSHA, Context: s.Context,
+		State: s.State, Description: s.Description, TargetUrl: s.TargetURL,
+	})
+}
+
+func (r *PullRequestRepository) GetCommitStatus(ctx context.Context, id int64) (*entity.CommitStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetCommitStatus(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, entity.ErrNotFound
+		}
+		return nil, err
+	}
+	s := statusFromRow(row.StatusID, row.RepositoryID, row.HeadSha, row.Context, row.State, row.Description, row.TargetUrl)
+	return &s, nil
 }
 
 // SaveChangedFiles stores the files a PR changes at a commit, replacing those of an older commit.
@@ -898,4 +938,66 @@ FROM pr_reviews WHERE pull_request_id IN (%s) ORDER BY github_review_id ASC`, st
 		out[review.PullRequestID] = append(out[review.PullRequestID], review)
 	}
 	return out, rows.Err()
+}
+
+// ListCheckRunsForCommits returns the check runs of many commits in one query: every run whose
+// repository and commit are both among the ones given. Callers group the result by repository and
+// commit (a commit id can in principle appear in two repositories).
+func (r *PullRequestRepository) ListCheckRunsForCommits(ctx context.Context, repositoryIDs []uint64, headSHAs []string) ([]entity.CheckRun, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	if len(repositoryIDs) == 0 || len(headSHAs) == 0 {
+		return []entity.CheckRun{}, nil
+	}
+	args := make([]any, 0, len(repositoryIDs)+len(headSHAs))
+	repoMarks := make([]string, len(repositoryIDs))
+	for i, id := range repositoryIDs {
+		repoMarks[i] = fmt.Sprintf("$%d", len(args)+1)
+		args = append(args, int64(id))
+	}
+	shaMarks := make([]string, len(headSHAs))
+	for i, sha := range headSHAs {
+		shaMarks[i] = fmt.Sprintf("$%d", len(args)+1)
+		args = append(args, sha)
+	}
+	query := fmt.Sprintf(`SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
+FROM pr_check_runs WHERE repository_id IN (%s) AND head_sha IN (%s) ORDER BY check_run_id ASC`,
+		strings.Join(repoMarks, ","), strings.Join(shaMarks, ","))
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []entity.CheckRun{}
+	for rows.Next() {
+		var run entity.CheckRun
+		var repoID int64
+		if err := rows.Scan(&run.ID, &repoID, &run.HeadSHA, &run.Name, &run.Status, &run.Conclusion, &run.Title, &run.DetailsURL); err != nil {
+			return nil, err
+		}
+		run.RepositoryID, run.Source = uint64(repoID), entity.CheckSourceCheckRun
+		out = append(out, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	statusQuery := fmt.Sprintf(`SELECT status_id, repository_id, head_sha, context, state, description, target_url
+FROM pr_commit_statuses WHERE repository_id IN (%s) AND head_sha IN (%s) ORDER BY status_id ASC`,
+		strings.Join(repoMarks, ","), strings.Join(shaMarks, ","))
+	statusRows, err := r.db.QueryContext(ctx, statusQuery, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer statusRows.Close()
+	for statusRows.Next() {
+		var id, repoID int64
+		var sha, contextName, state, description, targetURL string
+		if err := statusRows.Scan(&id, &repoID, &sha, &contextName, &state, &description, &targetURL); err != nil {
+			return nil, err
+		}
+		out = append(out, statusFromRow(id, repoID, sha, contextName, state, description, targetURL).AsCheckRun())
+	}
+	return out, statusRows.Err()
 }

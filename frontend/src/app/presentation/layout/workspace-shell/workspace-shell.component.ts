@@ -4,6 +4,7 @@ import { RepositoryImportStore } from '../../../application/stores/repository-im
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { CodeownersInboxViewComponent } from '../../features/codeowners-inbox-view/codeowners-inbox-view.component';
 import { DependabotRadarViewComponent } from '../../features/dependabot-radar-view/dependabot-radar-view.component';
+import { NoticeBarComponent } from '../../common/notice-bar/notice-bar.component';
 import { InspectionDrawerComponent } from '../../features/inspection-drawer/inspection-drawer.component';
 import { LoginViewComponent } from '../../features/login-view/login-view.component';
 import { RepositoryImportViewComponent } from '../../features/repository-import-view/repository-import-view.component';
@@ -23,6 +24,7 @@ import { SidebarNavComponent } from '../sidebar-nav/sidebar-nav.component';
     TimelineViewComponent,
     RepositoryImportViewComponent,
     InspectionDrawerComponent,
+    NoticeBarComponent,
   ],
   templateUrl: './workspace-shell.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -271,8 +271,8 @@ func (uc *UseCase) syncChangedFiles(ctx context.Context, token string, repo *ent
 	return uc.files.SyncWithToken(ctx, token, *repo, *pr)
 }
 
-// recordCheckRuns reads a commit's check runs from GitHub, keeps those not behind what a webhook
-// already reported, and derives the commit's CI from everything known.
+// recordCheckRuns reads a commit's check runs and legacy commit statuses from GitHub, keeps those
+// not behind what a webhook already reported, and derives the commit's CI from everything known.
 func (uc *UseCase) recordCheckRuns(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, sha string) (entity.CIStatus, error) {
 	runs, err := uc.github.ListCommitCheckRuns(ctx, token, target.Owner, target.Name, sha)
 	if err != nil {
@@ -290,6 +290,25 @@ func (uc *UseCase) recordCheckRuns(ctx context.Context, token string, repo *enti
 			return "", err
 		}
 		if err := uc.checks.UpsertCheckRun(ctx, run); err != nil {
+			return "", err
+		}
+	}
+	statuses, err := uc.github.ListCommitStatuses(ctx, token, target.Owner, target.Name, sha)
+	if err != nil {
+		return "", err
+	}
+	for _, status := range statuses {
+		status.RepositoryID, status.HeadSHA = repo.ID, sha
+		stored, err := uc.checks.GetCommitStatus(ctx, status.ID)
+		switch {
+		case err == nil:
+			if *stored == status {
+				continue
+			}
+		case !errors.Is(err, entity.ErrNotFound):
+			return "", err
+		}
+		if err := uc.checks.UpsertCommitStatus(ctx, status); err != nil {
 			return "", err
 		}
 	}

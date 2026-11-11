@@ -125,6 +125,9 @@ func (uc *UseCase) approve(ctx context.Context, t *target, live entity.RemotePul
 	if existing != nil { // converge: GitHub already has it, nothing to write or announce
 		return uc.recordReview(ctx, t, *existing)
 	}
+	if err := uc.requireChecksFinished(ctx, t, live); err != nil {
+		return err
+	}
 
 	review, err := uc.ghGateway.ApprovePullRequest(ctx, t.token, *t.repo, t.pr.Number, body)
 	if err != nil {
@@ -144,6 +147,28 @@ func (uc *UseCase) approve(ctx context.Context, t *target, live entity.RemotePul
 		}
 	}
 	return uc.publish(ctx, t, "approve", "pr.approved", nil)
+}
+
+// requireChecksFinished refuses to approve or merge while any check or commit status of the head
+// commit is still running: those are blockers. It asks GitHub now (check runs and legacy statuses,
+// the latest run of each check) instead of trusting stored CI, and never lets an action through on
+// checks it could not read. A failed check is not a blocker here; only an unfinished one is.
+func (uc *UseCase) requireChecksFinished(ctx context.Context, t *target, live entity.RemotePullRequestState) error {
+	runs, err := uc.state.ListCommitCheckRuns(ctx, t.token, t.repo.Owner, t.repo.Name, live.HeadSHA)
+	if err != nil {
+		return err
+	}
+	statuses, err := uc.state.ListCommitStatuses(ctx, t.token, t.repo.Owner, t.repo.Name, live.HeadSHA)
+	if err != nil {
+		return err
+	}
+	for _, s := range statuses {
+		runs = append(runs, s.AsCheckRun())
+	}
+	if entity.DeriveCIStatus(runs) == entity.CIStatusPending {
+		return entity.ErrChecksRunning
+	}
+	return nil
 }
 
 // myApprovalOnHead returns the user's standing approval of the PR's head commit, as GitHub
@@ -199,6 +224,9 @@ func (uc *UseCase) merge(ctx context.Context, t *target, live entity.RemotePullR
 	}
 	if !live.Open {
 		return fmt.Errorf("%w: the pull request is closed", entity.ErrConflict)
+	}
+	if err := uc.requireChecksFinished(ctx, t, live); err != nil {
+		return err
 	}
 	if method == "" {
 		method = "squash"

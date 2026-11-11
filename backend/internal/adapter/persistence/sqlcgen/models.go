@@ -44,6 +44,19 @@ type PrCheckRun struct {
 	Status       string    `json:"status"`
 	Conclusion   string    `json:"conclusion"`
 	UpdatedAt    time.Time `json:"updated_at"`
+	Title        string    `json:"title"`
+	DetailsUrl   string    `json:"details_url"`
+}
+
+type PrCommitStatus struct {
+	StatusID     int64     `json:"status_id"`
+	RepositoryID int64     `json:"repository_id"`
+	HeadSha      string    `json:"head_sha"`
+	Context      string    `json:"context"`
+	State        string    `json:"state"`
+	Description  string    `json:"description"`
+	TargetUrl    string    `json:"target_url"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type PrReview struct {

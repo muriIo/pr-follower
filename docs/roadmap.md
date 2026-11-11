@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-11 (after CODEOWNERS freshness).
+Last reviewed: 2026-11-11 (after the checks panel and drawer state).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,8 +12,8 @@ Last reviewed: 2026-11-11 (after CODEOWNERS freshness).
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh): the open "not verified" items below.
-2. **P2** Resync a followed repository on demand ([PR state](#3-pr-state-from-github)), which would also refill reviews of PRs stored before reviews existed.
+1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses): the open "not verified" items below.
+2. **P2** Resync a followed repository on demand ([PR state](#3-pr-state-from-github)), which would also refill the reviews and commit statuses of PRs stored before they were ingested.
 3. **P2** Persist activity and fan out across replicas ([Live updates](#7-live-updates--timeline)).
 
 ## 1. Identity & sessions
@@ -36,14 +36,16 @@ No P1 item is open. In order of value:
 ## 3. PR state from GitHub
 
 - [x] `pull_request` webhooks ingested idempotently: redelivery changes nothing, CI kept on the same commit (ADR-0011, #8).
-- [x] CI from `check_run` webhooks: running / passing / failing, `NONE` when nothing was reported (#12).
+- [x] CI from `check_run` webhooks: running / passing / failing, `NONE` when nothing was reported (#12). Only the latest run of each check name counts, as on GitHub: a re-run that passes clears the earlier failure, and one that is still going is pending.
 - [x] GitHub's `mergeable_state` stored and used as the only source of merge blockers (#12, #13).
 - [x] Backfill on import: the repository's open PRs (up to 1,000) and their check runs are read with the user's token before the follow is recorded, so existing PRs appear without waiting for a webhook. A failure leaves the repository unfollowed so the import can be retried; PRs already kept live by webhooks are never rewound; merge state stays `unknown` (the list does not carry it).
 - [ ] **P2** Resync a followed repository on demand (re-read open PRs, closing those GitHub no longer lists as open), for PRs that changed while the app was not receiving webhooks.
 - [x] Reviews ingested: `pull_request_review` webhooks (approved / changes requested / commented / dismissed) are stored by GitHub's review id, idempotently (a redelivery changes nothing, a dismissal is never revived), and the open human PRs' reviews are read at import for repositories with CODEOWNERS.
 - [ ] **P2** Reviews of PRs stored before this existed (imported earlier) are missing until the repository is imported again or a new review arrives: refresh them (resync, or the installation token).
 - [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown.
-- [ ] **P2** Legacy commit statuses (`status` event) are not ingested; CI that only reports statuses shows as "Sem CI".
+- [x] Legacy commit statuses (Jenkins, Vercel) count like checks: the `status` webhook and a commit's combined status at import are stored (own table, own id space), listed beside check runs, the latest status of each context decides, and a pending one keeps a PR from looking green. Needs the app subscribed to Status events.
+- [ ] **P2** Statuses of PRs stored before this existed appear after that PR's next status event or a re-import (see resync).
+- [ ] **P2** Not verified against real GitHub yet: a real Vercel or Jenkins status through the `status` webhook and the combined-status read at import.
 - [ ] **P2** Out-of-order webhooks: ignore a delivery older than the stored state (ADR-0011 consequence).
 
 ## 4. CODEOWNERS inbox ("Minha Vez")
@@ -76,6 +78,7 @@ No P1 item is open. In order of value:
 - [x] Non-idempotent calls never repeated blindly (`RetryNonIdempotent`, ADR-0011).
 - [x] Act as the user: approve, merge and `@dependabot` comments are written with the signed-in user's own token (never the app's), after checking what GitHub says now. Nobody approves their own PR (refused before anything is sent, also against GitHub's author; the UI does not offer it; merging your own PR is allowed); a closed PR is not approved or merged; an approval already on the head commit is not repeated and a merged PR converges to success; a batch containing the user's own PR is refused as a whole before any write.
 - [x] Ambiguous outcomes are never guessed: a timeout, dropped connection or 5xx on approve or merge is checked against GitHub (the review or the merge is there, so it succeeded; it is not, so the user is told "could not confirm, check GitHub" and nothing is recorded or announced). GitHub's refusals reach the user with its own explanation (403, 404, 405/409/422).
+- [x] Checks still running are blockers: approving and merging (and so the batch) are refused while any check run or commit status of the head commit has not finished, in the drawer (disabled, with the reason) and on the server (409 `checks_running`), which asks GitHub right now and never lets an action through on checks it could not read. Failing checks are not blockers (GitHub allows them unless the branch requires them); an approval GitHub already has, and a PR already merged, converge without being blocked.
 - [x] "Approved by me" is the review GitHub recorded for the head commit (stored from the approve response and from webhooks), no longer a flag set in the app; a new commit makes it stale, and every Radar item reports it (`approved_by_me`, plus the teammate who approved) so a reload after an action keeps it.
 - [x] The SPA shows action failures in the user's language instead of swallowing them (a 502 used to look like success), sends each write once, and no longer invents a merge commit.
 - [x] Artificial delays removed from every action: they finish when the server answers.
@@ -93,6 +96,9 @@ No P1 item is open. In order of value:
 ## 8. Inspection drawer
 
 - [x] Signals and blockers only from GitHub: CI, CODEOWNERS state, merge state (#12, #13).
+- [x] Checks panel like GitHub's: the drawer lists the head commit's checks (the latest run of each) under a verdict and counts ("Alguns checks não foram bem-sucedidos: 2 falhando, 3 bem-sucedidos"), failing and running groups open, successful and skipped collapsed, each check with its short result and a link to where it reports. The CI signal above it can never say something else. Not mirrored: the \"Required\" badge (needs branch-protection access the app does not have).
+- [x] The drawer follows its PR: when the PR is merged or closed (live event, a reload that no longer lists it, or the user's own merge) the drawer closes and a dismissible notice says why, so nobody is left able to approve or merge a PR that is gone.
+- [x] "Silenciar até CI passar" is disabled, with an explanation, once CI has passed or when no CI reports (it would never wake); the server refuses it too.
 - [x] Changed-files preview: every file from GitHub as a collapsible card, owned files first with "Seu", loading and error states (#14).
 - [x] Review state in the drawer: a "Revisões" section lists each reviewer's latest decision (approved, requested changes, commented, dismissed), current ones first and reviews of an older commit marked, from the stored reviews. The author's own comments are not reviews; it shows for every PR, whoever owns the files.
 

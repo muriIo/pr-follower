@@ -7,6 +7,7 @@ export type ActionErrorCode =
   | 'not_found'
   | 'unauthorized'
   | 'github_token_expired'
+  | 'checks_running'
   | 'invalid_input'
   | 'unavailable'
   | 'not_analysable'
@@ -21,6 +22,7 @@ const KNOWN_CODES: readonly string[] = [
   'not_found',
   'unauthorized',
   'github_token_expired',
+  'checks_running',
   'invalid_input',
   'unavailable',
   'not_analysable',
