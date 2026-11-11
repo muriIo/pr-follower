@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after the installation token).
+Last reviewed: 2026-11-10 (after acting on GitHub as the user).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,9 +12,9 @@ Last reviewed: 2026-11-10 (after the installation token).
 ## Next up
 
 In order:
-1. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
-2. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)); its reads can now use the installation token.
-3. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
+1. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)); its reads can now use the installation token.
+2. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
+3. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
 
 ## 1. Identity & sessions
 
@@ -52,7 +52,6 @@ In order:
 - [x] Turn engine phase 1: "Minha Vez" holds only PRs that touch files the user owns. Each PR's changed files are stored per head commit (read at import, on `pull_request` webhooks with a follower's token, and as a capped fallback when a follower loads the workspace); ownership and the turn are derived on read, never stored. A PR whose files are unknown is "not evaluated", never a turn; PRs the user does not own show only in Seats. Before this, every open PR was shown as the user's turn.
 - [x] CODEOWNERS matcher follows GitHub's pattern rules (root anchoring, `**`, `dir/*`, trailing slash), checked against GitHub's documented examples.
 - [x] Turn engine phase 2: "approved by me", "teammate approved" and "waiting on author" are derived on read from the stored reviews, per head commit: each reviewer's latest decision stands, comments never undo one, the author's own approval counts for nobody, and a new commit makes every older review stale, so the PR returns to "Minha Vez".
-- [ ] **P2** "Approved by me" made in the app is still a stored state, not tied to the commit; once actions reach GitHub as the user (module 6) it should come only from the review GitHub records.
 - [x] Webhook-time file reads use the GitHub App's installation token first, so they no longer depend on a follower being signed in; a follower's token is only the fallback (app not configured, uninstalled or rejected).
 - [ ] **P2** Team ownership uses the teams read at sign-in; refresh them periodically.
 
@@ -70,8 +69,12 @@ In order:
 
 - [x] Approve, merge (squash), batch merge, `@dependabot` commands, snooze, claim: UI and API (ADR-0007 cancellable end to end).
 - [x] Non-idempotent calls never repeated blindly (`RetryNonIdempotent`, ADR-0011).
-- [ ] **P1** Act as the user: approve / merge / comment use the user's token (today the gateway has none, so nothing reaches GitHub). Check the current state first (skip approving an approved PR, merging a merged one) and surface ambiguous failures as "could not confirm, check GitHub".
-- [ ] **P2** Remove the artificial delays in `runSync` (2.4 s) and `runBatchApprove` (0.7 s per PR) once real calls provide the latency.
+- [x] Act as the user: approve, merge and `@dependabot` comments are written with the signed-in user's own token (never the app's), after checking what GitHub says now. Nobody approves their own PR (refused before anything is sent, also against GitHub's author; the UI does not offer it; merging your own PR is allowed); a closed PR is not approved or merged; an approval already on the head commit is not repeated and a merged PR converges to success; a batch containing the user's own PR is refused as a whole before any write.
+- [x] Ambiguous outcomes are never guessed: a timeout, dropped connection or 5xx on approve or merge is checked against GitHub (the review or the merge is there, so it succeeded; it is not, so the user is told "could not confirm, check GitHub" and nothing is recorded or announced). GitHub's refusals reach the user with its own explanation (403, 404, 405/409/422).
+- [x] "Approved by me" is the review GitHub recorded for the head commit (stored from the approve response and from webhooks), no longer a flag set in the app; a new commit makes it stale.
+- [x] The SPA shows action failures in the user's language instead of swallowing them (a 502 used to look like success), sends each write once, and no longer invents a merge commit.
+- [x] Artificial delays removed from every action: they finish when the server answers.
+- [ ] **P2** Not verified against real GitHub yet: approve, merge and comment with a real user token, and the GitHub app's permission to write pull requests for the user (see the production runbook).
 
 ## 7. Live updates & timeline
 
