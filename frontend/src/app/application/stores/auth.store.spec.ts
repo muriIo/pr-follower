@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { AUTH_GATEWAY, AuthGateway } from '../../domain/gateways/workspace.gateways';
+import { AUTH_GATEWAY, AuthGateway, SessionCheck } from '../../domain/gateways/workspace.gateways';
+import { SessionExpiryMonitor } from '../use-cases/session-expiry.monitor';
 import { AuthErrorCode, AuthenticatedUser, buildAuthenticatedUser } from '../../domain/models/workspace.models';
 import { AuthStore } from './auth.store';
 import { WorkspaceStore } from './workspace.store';
@@ -13,6 +14,7 @@ function setup(current: AuthenticatedUser | null, authError: AuthErrorCode | nul
     startSignIn: vi.fn(),
     consumeAuthError: vi.fn(() => authError),
     logout: vi.fn(async () => undefined),
+    verifySession: vi.fn(async (): Promise<SessionCheck> => (current ? 'active' : 'expired')),
   } satisfies AuthGateway;
   const workspace = {
     startLiveSession: vi.fn(),
@@ -26,7 +28,7 @@ function setup(current: AuthenticatedUser | null, authError: AuthErrorCode | nul
       { provide: WorkspaceStore, useValue: workspace },
     ],
   });
-  return { store: TestBed.inject(AuthStore), gateway, workspace };
+  return { store: TestBed.inject(AuthStore), gateway, workspace, monitor: TestBed.inject(SessionExpiryMonitor) };
 }
 
 describe('AuthStore (GitHub-only sign-in, ADR-0010)', () => {
@@ -75,5 +77,80 @@ describe('AuthStore (GitHub-only sign-in, ADR-0010)', () => {
     expect(workspace.closeDrawer).toHaveBeenCalledTimes(1);
     expect(store.user()).toBeNull();
     expect(store.status()).toBe('signed-out');
+  });
+});
+
+describe('AuthStore when the session expires while the app is open', () => {
+  it('signs out at once, and clears the server session, when the user\'s GitHub access is gone', async () => {
+    const { store, gateway, workspace, monitor } = setup(octocat);
+    await store.restore();
+
+    monitor.report('github_token_expired'); // the session is valid, but GitHub no longer accepts this user
+    await vi.waitFor(() => expect(store.status()).toBe('signed-out'));
+
+    expect(gateway.verifySession).not.toHaveBeenCalled(); // there is nothing to verify: the answer is known
+    expect(gateway.logout).toHaveBeenCalled(); // the stale session must not survive the next page load
+    expect(store.authError()).toBe('github_token_expired');
+    expect(store.user()).toBeNull();
+    expect(workspace.stopLiveSession).toHaveBeenCalled();
+  });
+
+  it('returns to the sign-in screen with an explanation when the server no longer knows the session', async () => {
+    const { store, gateway, workspace, monitor } = setup(octocat);
+    await store.restore();
+    gateway.verifySession.mockResolvedValue('expired');
+
+    monitor.report(); // an API call came back 401
+    await vi.waitFor(() => expect(store.status()).toBe('signed-out'));
+
+    expect(store.user()).toBeNull();
+    expect(store.isAuthenticated()).toBe(false);
+    expect(store.authError()).toBe('session_expired');
+    expect(workspace.stopLiveSession).toHaveBeenCalled();
+    expect(workspace.closeDrawer).toHaveBeenCalled();
+  });
+
+  it('stays signed in when the session is still valid: the 401 was something else (e.g. GitHub refusing the app)', async () => {
+    const { store, gateway, workspace, monitor } = setup(octocat);
+    await store.restore();
+
+    monitor.report();
+    await vi.waitFor(() => expect(gateway.verifySession).toHaveBeenCalled());
+
+    expect(store.status()).toBe('signed-in');
+    expect(store.authError()).toBeNull();
+    expect(workspace.stopLiveSession).not.toHaveBeenCalled();
+  });
+
+  it('does not sign the user out because the server could not be reached', async () => {
+    const { store, gateway, monitor } = setup(octocat);
+    await store.restore();
+    gateway.verifySession.mockResolvedValue('unreachable');
+
+    monitor.report();
+    await vi.waitFor(() => expect(gateway.verifySession).toHaveBeenCalled());
+    await Promise.resolve();
+
+    expect(store.status()).toBe('signed-in');
+    expect(store.authError()).toBeNull();
+  });
+
+  it('checks once for a burst of refused calls, and ignores them when nobody is signed in', async () => {
+    const { store, gateway, monitor } = setup(octocat);
+    monitor.report(); // not signed in yet: nothing to expire
+    expect(gateway.verifySession).not.toHaveBeenCalled();
+
+    await store.restore();
+    let release!: (v: SessionCheck) => void;
+    gateway.verifySession.mockImplementation(() => new Promise<SessionCheck>((resolve) => (release = resolve)));
+    monitor.report();
+    monitor.report();
+    monitor.report();
+    expect(gateway.verifySession).toHaveBeenCalledTimes(1);
+
+    release('expired');
+    await vi.waitFor(() => expect(store.status()).toBe('signed-out'));
+    monitor.report();
+    expect(gateway.verifySession).toHaveBeenCalledTimes(1);
   });
 });

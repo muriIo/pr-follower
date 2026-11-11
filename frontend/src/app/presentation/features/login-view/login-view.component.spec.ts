@@ -11,6 +11,7 @@ function setup(authError: string | null = null) {
     startSignIn: vi.fn(),
     consumeAuthError: () => authError,
     logout: async () => undefined,
+    verifySession: async () => 'expired' as const,
   };
   TestBed.configureTestingModule({
     imports: [LoginViewComponent],
@@ -54,5 +55,16 @@ describe('LoginViewComponent (GitHub-only sign-in)', () => {
     fixture.detectChanges();
     const error = (fixture.nativeElement as HTMLElement).querySelector('.pf-login-error');
     expect(error?.textContent).toContain('Você cancelou a autorização no GitHub.');
+  });
+
+  it('tells the user their session expired when the app sent them back here', async () => {
+    const { authStore } = setup();
+    await authStore.restore();
+    authStore.authError.set('session_expired');
+
+    const fixture = TestBed.createComponent(LoginViewComponent);
+    fixture.detectChanges();
+    const error = (fixture.nativeElement as HTMLElement).querySelector('.pf-login-error');
+    expect(error?.textContent).toContain('Sua sessão expirou. Entre de novo.');
   });
 });

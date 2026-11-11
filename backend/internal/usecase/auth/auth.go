@@ -204,7 +204,7 @@ func (uc *UseCase) AccessToken(ctx context.Context, userID uint64) (string, erro
 		return user.GitHubToken.AccessToken, nil
 	}
 	if !user.GitHubToken.CanRefresh(now) {
-		return "", fmt.Errorf("%w: github token expired, sign in again", entity.ErrUnauthorized)
+		return "", fmt.Errorf("%w: github token expired, sign in again", entity.ErrGitHubTokenExpired)
 	}
 
 	refreshed, err := uc.oauth.RefreshToken(ctx, user.GitHubToken.RefreshToken)
@@ -212,7 +212,7 @@ func (uc *UseCase) AccessToken(ctx context.Context, userID uint64) (string, erro
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", context.Cause(ctx)
 		}
-		return "", fmt.Errorf("%w: github token refresh failed: %v", entity.ErrUnauthorized, err)
+		return "", fmt.Errorf("%w: github token refresh failed: %v", entity.ErrGitHubTokenExpired, err)
 	}
 	user.GitHubToken = refreshed
 	if err := uc.users.Upsert(ctx, user); err != nil {

@@ -13,6 +13,10 @@ var (
 	ErrOperationCanceled = errors.New("operation canceled by caller")
 	ErrConflict          = errors.New("resource conflict")
 	ErrUnauthorized      = errors.New("unauthorized")
+	// ErrGitHubTokenExpired means the signed-in user's own GitHub access is gone (expired and not
+	// refreshable, or revoked): they must sign in again, even though their session is still valid.
+	// It is an ErrUnauthorized, and unlike a rejected app credential it is the user's to fix.
+	ErrGitHubTokenExpired = fmt.Errorf("%w: your GitHub access expired", ErrUnauthorized)
 	// ErrForbidden means GitHub refused the signed-in user's token for this action (permissions).
 	ErrForbidden = errors.New("forbidden by github")
 	// ErrOutcomeUnknown means a write may or may not have been applied on GitHub (a timeout, a

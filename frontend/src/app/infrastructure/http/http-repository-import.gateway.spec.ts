@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
 import { RepositoryImportError } from '../../domain/models/repository-import.models';
 import { BROWSER_WINDOW, BrowserWindow } from '../browser/browser-window';
 import { HttpRepositoryImportGateway } from './http-repository-import.gateway';
@@ -151,5 +152,19 @@ describe('HttpRepositoryImportGateway', () => {
 
     TestBed.resetTestingModule();
     expect(setup(fakeWindow('?installation_id=abc&setup_action=update').win).consumeSetupRedirect()).toBeNull();
+  });
+
+  it('reports an unauthenticated answer so the app can return to sign-in', async () => {
+    const gateway = setup();
+    const reported = vi.fn();
+    TestBed.inject(SessionExpiryMonitor).listen(reported);
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ error: 'boom' }, 500));
+    await expect(gateway.listAccounts()).rejects.toBeInstanceOf(RepositoryImportError);
+    expect(reported).not.toHaveBeenCalled();
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ error: 'unauthorized' }, 401));
+    await expect(gateway.listAccounts()).rejects.toEqual(new RepositoryImportError('unauthorized'));
+    expect(reported).toHaveBeenCalledTimes(1);
   });
 });

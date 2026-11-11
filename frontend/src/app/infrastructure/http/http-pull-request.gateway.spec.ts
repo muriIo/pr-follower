@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
 import { HttpPullRequestGateway } from './http-pull-request.gateway';
 
 describe('HttpPullRequestGateway', () => {
@@ -155,7 +156,7 @@ describe('HttpPullRequestGateway actions are never silent and never repeated', (
     vi.restoreAllMocks();
   });
 
-  const gateway = (): HttpPullRequestGateway => new HttpPullRequestGateway();
+  const gateway = (): HttpPullRequestGateway => TestBed.runInInjectionContext(() => new HttpPullRequestGateway());
 
   it('rejects with the server code and GitHub\'s explanation, after exactly one request', async () => {
     const cases: [number, string, string][] = [
@@ -206,5 +207,33 @@ describe('HttpPullRequestGateway actions are never silent and never repeated', (
 
     answer(503, { error: 'dependabot analysis needs the GitHub App credentials', code: 'unavailable' });
     await expect(gateway().analyzePullRequest(233)).rejects.toMatchObject({ code: 'unavailable' });
+  });
+
+  it('reports an unauthenticated answer, so the app can return to sign-in, and nothing else', async () => {
+    const monitor = TestBed.inject(SessionExpiryMonitor);
+    const reported = vi.fn();
+    monitor.listen(reported);
+    const g = gateway();
+
+    answer(403, { error: 'forbidden', code: 'forbidden' });
+    await expect(g.approvePullRequest(1)).rejects.toMatchObject({ code: 'forbidden' });
+    answer(502, { error: 'x', code: 'outcome_unknown' });
+    await expect(g.mergePullRequest(1)).rejects.toMatchObject({ code: 'outcome_unknown' });
+    expect(reported).not.toHaveBeenCalled();
+
+    answer(401, { error: 'unauthorized', code: 'unauthorized' });
+    await expect(g.approvePullRequest(1)).rejects.toMatchObject({ code: 'unauthorized' });
+    expect(reported).toHaveBeenCalledTimes(1);
+
+    expect(reported).toHaveBeenLastCalledWith('unauthorized');
+
+    answer(401, { error: 'unauthorized', code: 'unauthorized' });
+    await g.fetchWorkspace().catch(() => undefined); // a read refused as 401 reports too
+    expect(reported).toHaveBeenCalledTimes(2);
+
+    // The server says it is the user's own GitHub access that is gone: that is a different remedy.
+    answer(401, { error: 'github token expired', code: 'github_token_expired' });
+    await expect(g.mergePullRequest(1)).rejects.toMatchObject({ code: 'github_token_expired' });
+    expect(reported).toHaveBeenLastCalledWith('github_token_expired');
   });
 });

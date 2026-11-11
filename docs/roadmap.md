@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-11 (after review state in the drawer).
+Last reviewed: 2026-11-11 (after expired-session handling).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,15 +12,15 @@ Last reviewed: 2026-11-11 (after review state in the drawer).
 ## Next up
 
 In order:
-1. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
-2. **P1** CODEOWNERS freshness ([Repositories](#2-repositories--github-app-installation)): refresh the cached rules on `push` to the default branch.
+1. **P1** CODEOWNERS freshness ([Repositories](#2-repositories--github-app-installation)): refresh the cached rules on `push` to the default branch.
 
 ## 1. Identity & sessions
 
 - [x] GitHub-only sign-in: web flow with state + PKCE, server-side sessions in an HttpOnly cookie, tokens encrypted at rest and refreshed (ADR-0010, #4).
 - [x] Login screen with honest error messages and translated header (#4, #6).
 - [x] Identity only from the session; no `X-User-ID`, no password columns (gated by ADR-0010).
-- [ ] **P1** Expired session in the SPA: a 401 from any API call should return to the sign-in screen (today only `/auth/me` is checked at start-up).
+- [x] Expired session in the SPA: any API call refused as unauthenticated (401) makes the app ask `/auth/me`; if the server no longer knows the session it returns to the sign-in screen saying so, stopping the live stream and closing the drawer. A 401 that is not the session (GitHub refusing the app's own credentials) or a server that cannot be reached never signs anyone out.
+- [x] When the signed-in user's own GitHub access is gone (token expired and not refreshable, or revoked) the server answers `github_token_expired` and the app signs out at once, clearing the server session, instead of leaving a valid session that can do nothing.
 - [ ] **P2** Purge expired sessions (rows are only deleted when an expired token is used again).
 
 ## 2. Repositories & GitHub App installation

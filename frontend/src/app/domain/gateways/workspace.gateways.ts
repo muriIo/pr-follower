@@ -14,6 +14,9 @@ export interface ActionRequestOptions {
   readonly operationId?: string;
 }
 
+/** What the server says about the current session: `unreachable` means it could not tell. */
+export type SessionCheck = 'active' | 'expired' | 'unreachable';
+
 /** GitHub-only sign-in backed by a server-side session cookie (ADR-0010). */
 export interface AuthGateway {
   /** The session user, or null when signed out. */
@@ -23,6 +26,8 @@ export interface AuthGateway {
   /** Reads (once) why the last sign-in failed, if it did. */
   consumeAuthError(): AuthErrorCode | null;
   logout(): Promise<void>;
+  /** Asks the server whether the session is still valid, never treating "could not ask" as expired. */
+  verifySession(options?: ActionRequestOptions): Promise<SessionCheck>;
 }
 
 export interface PullRequestGateway {

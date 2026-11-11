@@ -351,16 +351,16 @@ func TestAccessToken_RequiresReloginWhenRefreshImpossible(t *testing.T) {
 	h := newHarness(t)
 	res, _ := h.uc.CompleteLogin(ctx, "c", "v")
 	*h.clock = now.Add(200 * 24 * time.Hour) // refresh token expired too
-	if _, err := h.uc.AccessToken(ctx, res.User.ID); !errors.Is(err, entity.ErrUnauthorized) {
-		t.Fatalf("expected ErrUnauthorized, got %v", err)
+	if _, err := h.uc.AccessToken(ctx, res.User.ID); !errors.Is(err, entity.ErrUnauthorized) || !errors.Is(err, entity.ErrGitHubTokenExpired) {
+		t.Fatalf("expected the user's GitHub access to be reported as gone, got %v", err)
 	}
 
 	h2 := newHarness(t)
 	res2, _ := h2.uc.CompleteLogin(ctx, "c", "v")
 	*h2.clock = now.Add(9 * time.Hour)
 	h2.oauth.refreshErr = errors.New("bad_refresh_token")
-	if _, err := h2.uc.AccessToken(ctx, res2.User.ID); !errors.Is(err, entity.ErrUnauthorized) {
-		t.Fatalf("expected ErrUnauthorized on refresh failure, got %v", err)
+	if _, err := h2.uc.AccessToken(ctx, res2.User.ID); !errors.Is(err, entity.ErrUnauthorized) || !errors.Is(err, entity.ErrGitHubTokenExpired) {
+		t.Fatalf("expected the user's GitHub access to be reported as gone on refresh failure, got %v", err)
 	}
 
 	if _, err := h2.uc.AccessToken(ctx, 9999); !errors.Is(err, entity.ErrNotFound) {

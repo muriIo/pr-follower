@@ -1394,9 +1394,10 @@ func TestActions_SurfaceGitHubsAnswerHonestly(t *testing.T) {
 		code    string
 		message string
 	}{
-		"no answer from GitHub":  {entity.ErrOutcomeUnknown, http.StatusBadGateway, "outcome_unknown", ""},
-		"GitHub refused (perms)": {fmt.Errorf("%w: Resource not accessible", entity.ErrForbidden), http.StatusForbidden, "forbidden", "Resource not accessible"},
-		"GitHub refused (state)": {fmt.Errorf("%w: Pull Request is not mergeable", entity.ErrConflict), http.StatusConflict, "conflict", "Pull Request is not mergeable"},
+		"no answer from GitHub":            {entity.ErrOutcomeUnknown, http.StatusBadGateway, "outcome_unknown", ""},
+		"GitHub refused (perms)":           {fmt.Errorf("%w: Resource not accessible", entity.ErrForbidden), http.StatusForbidden, "forbidden", "Resource not accessible"},
+		"the user's GitHub access is gone": {fmt.Errorf("%w: Bad credentials", entity.ErrGitHubTokenExpired), http.StatusUnauthorized, "github_token_expired", ""},
+		"GitHub refused (state)":           {fmt.Errorf("%w: Pull Request is not mergeable", entity.ErrConflict), http.StatusConflict, "conflict", "Pull Request is not mergeable"},
 	} {
 		ts.gh.mu.Lock()
 		ts.gh.err = tc.err

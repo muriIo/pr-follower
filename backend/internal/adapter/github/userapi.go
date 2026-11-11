@@ -142,7 +142,7 @@ func (c *UserClient) GetRepositoryFile(ctx context.Context, accessToken, owner, 
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, resilience.Permanent(fmt.Errorf("%w: github rejected the user token", entity.ErrUnauthorized))
+			return nil, resilience.Permanent(fmt.Errorf("%w: github rejected the user token", entity.ErrGitHubTokenExpired))
 		}
 		if err := classifyHTTPStatus(resp); err != nil {
 			return nil, err
@@ -369,7 +369,7 @@ func getUserJSON(ctx context.Context, client *http.Client, backoff resilience.Ba
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized {
-			return struct{}{}, resilience.Permanent(fmt.Errorf("%w: github rejected the user token", entity.ErrUnauthorized))
+			return struct{}{}, resilience.Permanent(fmt.Errorf("%w: github rejected the user token", entity.ErrGitHubTokenExpired))
 		}
 		if err := classifyHTTPStatus(resp); err != nil {
 			return struct{}{}, err
