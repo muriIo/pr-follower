@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after turn engine phase 1).
+Last reviewed: 2026-11-10 (after turn engine phase 2).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,10 +12,10 @@ Last reviewed: 2026-11-10 (after turn engine phase 1).
 ## Next up
 
 In order:
-1. **P1** Turn engine phase 2: ingest reviews so approvals and "waiting on author" are real ([CODEOWNERS inbox](#4-codeowners-inbox--minha-vez)).
-2. **P1** GitHub App installation token for background reads ([Dependabot](#5-dependabot-radar--analysis)); it replaces the follower token of turn engine phase 1.
-3. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
-4. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
+1. **P1** GitHub App installation token for background reads ([Dependabot](#5-dependabot-radar--analysis)); it replaces the follower token of the turn engine's file reads.
+2. **P1** Act on GitHub as the user ([Actions](#6-actions-on-github)).
+3. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)).
+4. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
 
 ## 1. Identity & sessions
 
@@ -39,7 +39,8 @@ In order:
 - [x] GitHub's `mergeable_state` stored and used as the only source of merge blockers (#12, #13).
 - [x] Backfill on import: the repository's open PRs (up to 1,000) and their check runs are read with the user's token before the follow is recorded, so existing PRs appear without waiting for a webhook. A failure leaves the repository unfollowed so the import can be retried; PRs already kept live by webhooks are never rewound; merge state stays `unknown` (the list does not carry it).
 - [ ] **P2** Resync a followed repository on demand (re-read open PRs, closing those GitHub no longer lists as open), for PRs that changed while the app was not receiving webhooks.
-- [ ] **P1** Review state: ingest `pull_request_review` (approved / changes requested / dismissed) so the drawer can say who reviewed (turn engine phase 2, module 4).
+- [x] Reviews ingested: `pull_request_review` webhooks (approved / changes requested / commented / dismissed) are stored by GitHub's review id, idempotently (a redelivery changes nothing, a dismissal is never revived), and the open human PRs' reviews are read at import for repositories with CODEOWNERS.
+- [ ] **P2** Reviews of PRs stored before this existed (imported earlier) are missing until the repository is imported again or a new review arrives: refresh them (resync, or the installation token).
 - [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown.
 - [ ] **P2** Legacy commit statuses (`status` event) are not ingested; CI that only reports statuses shows as "Sem CI".
 - [ ] **P2** Out-of-order webhooks: ignore a delivery older than the stored state (ADR-0011 consequence).
@@ -51,7 +52,8 @@ In order:
 - [x] Honest CODEOWNERS signal: you own files / approved / other owners / no CODEOWNERS / not checked (#13).
 - [x] Turn engine phase 1: "Minha Vez" holds only PRs that touch files the user owns. Each PR's changed files are stored per head commit (read at import, on `pull_request` webhooks with a follower's token, and as a capped fallback when a follower loads the workspace); ownership and the turn are derived on read, never stored. A PR whose files are unknown is "not evaluated", never a turn; PRs the user does not own show only in Seats. Before this, every open PR was shown as the user's turn.
 - [x] CODEOWNERS matcher follows GitHub's pattern rules (root anchoring, `**`, `dir/*`, trailing slash), checked against GitHub's documented examples.
-- [ ] **P1** Turn engine phase 2: ingest `pull_request_review` (webhook + backfill at import) and derive "approved by me", "teammate approved" and "waiting on author" per head commit. Today "approved by me" comes only from approvals made in the app and is not tied to the commit.
+- [x] Turn engine phase 2: "approved by me", "teammate approved" and "waiting on author" are derived on read from the stored reviews, per head commit: each reviewer's latest decision stands, comments never undo one, the author's own approval counts for nobody, and a new commit makes every older review stale, so the PR returns to "Minha Vez".
+- [ ] **P2** "Approved by me" made in the app is still a stored state, not tied to the commit; once actions reach GitHub as the user (module 6) it should come only from the review GitHub records.
 - [ ] **P2** Webhook-time file reads use a follower's user token; switch to the installation token once it exists (module 5), so they no longer depend on a follower being signed in.
 - [ ] **P2** Team ownership uses the teams read at sign-in; refresh them periodically.
 
@@ -84,7 +86,7 @@ In order:
 
 - [x] Signals and blockers only from GitHub: CI, CODEOWNERS state, merge state (#12, #13).
 - [x] Changed-files preview: every file from GitHub as a collapsible card, owned files first with "Seu", loading and error states (#14).
-- [ ] **P1** Review state in the drawer (depends on review ingestion, module 3).
+- [ ] **P1** Review state in the drawer: who reviewed and what they decided (reviews are stored, module 3; not exposed to the drawer yet).
 
 ## 9. Frontend platform
 

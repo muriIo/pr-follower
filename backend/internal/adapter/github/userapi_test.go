@@ -322,3 +322,53 @@ func TestUserClient_ListCommitCheckRuns(t *testing.T) {
 		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
 	}
 }
+
+func TestUserClient_ListPullRequestReviews(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/repos/acme/web/pulls/7/reviews" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 1, "user": map[string]any{"login": "bob"}, "state": "APPROVED", "commit_id": "sha7", "submitted_at": "2026-11-10T09:00:00Z"},
+			{"id": 2, "user": map[string]any{"login": "carol"}, "state": "CHANGES_REQUESTED", "commit_id": "sha7", "submitted_at": "2026-11-10T09:05:00Z"},
+			{"id": 3, "user": map[string]any{"login": "dave"}, "state": "PENDING", "commit_id": "sha7"},
+			{"id": 4, "user": nil, "state": "COMMENTED", "commit_id": "sha7", "submitted_at": "2026-11-10T09:06:00Z"},
+		})
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	reviews, err := c.ListPullRequestReviews(context.Background(), "ghu_a", "acme", "web", 7)
+	if err != nil {
+		t.Fatalf("ListPullRequestReviews() error: %v", err)
+	}
+	if len(reviews) != 3 {
+		t.Fatalf("a draft (PENDING) review is nobody's decision and must be skipped: %+v", reviews)
+	}
+	first := reviews[0]
+	if first.GitHubReviewID != 1 || first.ReviewerLogin != "bob" || first.State != entity.ReviewApproved || first.CommitSHA != "sha7" ||
+		!first.SubmittedAt.Equal(time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected mapping: %+v", first)
+	}
+	if reviews[1].State != entity.ReviewChangesRequested || reviews[2].ReviewerLogin != "" {
+		t.Fatalf("unexpected mapping: %+v", reviews)
+	}
+
+	if _, err := c.ListPullRequestReviews(context.Background(), "ghu_a", "acme", "web", 8); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown PR: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.ListPullRequestReviews(context.Background(), "revoked", "acme", "web", 7); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.ListPullRequestReviews(canceled, "ghu_a", "acme", "web", 7); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}

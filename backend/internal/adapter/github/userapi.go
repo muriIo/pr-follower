@@ -227,6 +227,49 @@ func (c *UserClient) ListOpenPullRequests(ctx context.Context, accessToken, owne
 	return out, nil
 }
 
+// prReviewsMaxPages bounds the reviews read for one PR (1,000 reviews).
+const prReviewsMaxPages = 10
+
+// ListPullRequestReviews lists the reviews recorded on a PR with the user's token. Draft
+// (PENDING) reviews are skipped: they are visible only to their author and decide nothing yet.
+func (c *UserClient) ListPullRequestReviews(ctx context.Context, accessToken, owner, name string, number int) ([]entity.PullRequestReview, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	var out []entity.PullRequestReview
+	for page := 1; page <= prReviewsMaxPages; page++ {
+		var raw []struct {
+			ID          int64  `json:"id"`
+			State       string `json:"state"`
+			CommitID    string `json:"commit_id"`
+			SubmittedAt string `json:"submitted_at"`
+			User        *struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		target := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews?per_page=%d&page=%d", owner, name, number, userAPIPerPage, page)
+		if err := getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, target, &raw); err != nil {
+			return nil, err
+		}
+		for _, r := range raw {
+			state := entity.ReviewStateFromGitHub(r.State)
+			if state == entity.ReviewUnknown {
+				continue
+			}
+			review := entity.PullRequestReview{GitHubReviewID: r.ID, State: state, CommitSHA: r.CommitID}
+			if r.User != nil {
+				review.ReviewerLogin = r.User.Login
+			}
+			review.SubmittedAt, _ = time.Parse(time.RFC3339, r.SubmittedAt)
+			out = append(out, review)
+		}
+		if len(raw) < userAPIPerPage {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ListCommitCheckRuns lists the check runs GitHub reported for a commit; a repository without CI
 // returns none, never an invented run.
 func (c *UserClient) ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error) {

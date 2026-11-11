@@ -65,11 +65,12 @@ func (f *fakeSyncer) SyncAsUser(_ context.Context, _ uint64, _ entity.Repository
 }
 
 type turnFixture struct {
-	uc     *triage.UseCase
-	prs    *fakePRRepo
-	repos  *fakeRepoRepo
-	files  *fakeFiles
-	syncer *fakeSyncer
+	uc      *triage.UseCase
+	prs     *fakePRRepo
+	repos   *fakeRepoRepo
+	files   *fakeFiles
+	syncer  *fakeSyncer
+	reviews *fakeReviewStore
 }
 
 func openPR(id uint64, mutate ...func(*entity.PullRequest)) entity.PullRequest {
@@ -94,8 +95,9 @@ func newTurnFixture(prs ...entity.PullRequest) turnFixture {
 	files := &fakeFiles{byPR: map[uint64]entity.PRChangedFiles{}}
 	syncer := &fakeSyncer{store: files, github: map[uint64][]entity.ChangedFile{}}
 	users := &fakeUserRepo{user: &entity.User{ID: 1, Login: "murilo", Teams: []string{"@acme/platform"}}}
-	uc := triage.NewUseCase(users, repos, prRepo, &fakePublisher{}, files, syncer)
-	return turnFixture{uc: uc, prs: prRepo, repos: repos, files: files, syncer: syncer}
+	reviews := &fakeReviewStore{byPR: map[uint64][]entity.PullRequestReview{}}
+	uc := triage.NewUseCase(users, repos, prRepo, &fakePublisher{}, files, syncer, reviews)
+	return turnFixture{uc: uc, prs: prRepo, repos: repos, files: files, syncer: syncer, reviews: reviews}
 }
 
 func (f turnFixture) changes(prID uint64, sha string, paths ...string) {
@@ -296,7 +298,7 @@ func TestTurn_KeepsWhatIDidInTheApp(t *testing.T) {
 func TestTurn_WithoutAFilesStoreEverythingIsPending(t *testing.T) {
 	t.Parallel()
 	f := newTurnFixture(openPR(1))
-	uc := triage.NewUseCase(&fakeUserRepo{user: &entity.User{ID: 1, Login: "murilo"}}, f.repos, f.prs, &fakePublisher{}, nil, nil)
+	uc := triage.NewUseCase(&fakeUserRepo{user: &entity.User{ID: 1, Login: "murilo"}}, f.repos, f.prs, &fakePublisher{}, nil, nil, nil)
 
 	snap, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
 	if err != nil {

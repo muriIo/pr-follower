@@ -226,3 +226,16 @@ ON CONFLICT (pull_request_id) DO UPDATE SET
 SELECT user_id FROM user_repo_follows
 WHERE repository_id = $1
 ORDER BY user_id ASC;
+
+-- name: GetPullRequestReview :one
+SELECT github_review_id, pull_request_id, reviewer_login, state, commit_sha, submitted_at
+FROM pr_reviews
+WHERE github_review_id = $1;
+
+-- name: UpsertPullRequestReview :exec
+INSERT INTO pr_reviews (github_review_id, pull_request_id, reviewer_login, state, commit_sha, submitted_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+ON CONFLICT (github_review_id) DO UPDATE SET
+    state = EXCLUDED.state,
+    commit_sha = EXCLUDED.commit_sha,
+    updated_at = CURRENT_TIMESTAMP;

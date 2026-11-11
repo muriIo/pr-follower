@@ -6,6 +6,9 @@ describe('activityIconFor', () => {
     expect(activityIconFor('pr.merged', 'ok')).toEqual({ icon: 'merge', tone: 'merged' });
     expect(activityIconFor('pr.approved', 'ok')).toEqual({ icon: 'approve', tone: 'ok' });
     expect(activityIconFor('pr.opened', 'info')).toEqual({ icon: 'pr-open', tone: 'open' });
+    expect(activityIconFor('pr.changes_requested', 'info')).toEqual({ icon: 'comment', tone: 'warn' });
+    expect(activityIconFor('pr.reviewed', 'info')).toEqual({ icon: 'comment', tone: 'info' });
+    expect(activityIconFor('pr.review_dismissed', 'info')).toEqual({ icon: 'dot', tone: 'info' });
     expect(activityIconFor('pr.reopened', 'info')).toEqual({ icon: 'pr-open', tone: 'open' });
     expect(activityIconFor('pr.closed', 'info')).toEqual({ icon: 'pr-closed', tone: 'fail' });
     expect(activityIconFor('pr.synchronize', 'info')).toEqual({ icon: 'commit', tone: 'info' });

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -35,6 +36,7 @@ type HandlerDeps struct {
 	ActionUC      *action.UseCase
 	AnalyzeUC     *dependabot.AnalyzeUseCase
 	WebhookUC     *webhook.IngestUseCase
+	ReviewUC      *webhook.ReviewIngestUseCase
 	SSEHub        *sse.Hub
 	OpRegistry    *operation.Registry
 	WebhookSecret string
@@ -307,6 +309,43 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			Name:         raw.CheckRun.Name,
 			Status:       raw.CheckRun.Status,
 			Conclusion:   raw.CheckRun.Conclusion,
+		}); err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
+	if eventType == "pull_request_review" && h.deps.ReviewUC != nil {
+		var raw struct {
+			Action string `json:"action"`
+			Review struct {
+				ID          int64     `json:"id"`
+				State       string    `json:"state"`
+				CommitID    string    `json:"commit_id"`
+				SubmittedAt time.Time `json:"submitted_at"`
+				User        struct {
+					Login string `json:"login"`
+				} `json:"user"`
+			} `json:"review"`
+			PullRequest struct {
+				Number int `json:"number"`
+			} `json:"pull_request"`
+			Repository struct {
+				ID int64 `json:"id"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			writeDomainError(w, entity.ErrInvalidInput)
+			return
+		}
+		if err := h.deps.ReviewUC.IngestReviewEvent(r.Context(), webhook.ReviewEventPayload{
+			Action:        raw.Action,
+			GitHubRepoID:  raw.Repository.ID,
+			PRNumber:      raw.PullRequest.Number,
+			ReviewID:      raw.Review.ID,
+			ReviewerLogin: raw.Review.User.Login,
+			State:         raw.Review.State,
+			CommitSHA:     raw.Review.CommitID,
+			SubmittedAt:   raw.Review.SubmittedAt,
 		}); err != nil {
 			writeDomainError(w, err)
 			return

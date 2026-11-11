@@ -837,3 +837,65 @@ func toDomainUserPRState(m sqlcgen.PrUserState) *entity.UserPRState {
 		UpdatedAt:             m.UpdatedAt,
 	}
 }
+
+// UpsertReview stores a review by its GitHub id and reports whether anything changed. A
+// dismissed review stays dismissed (ADR-0011: redelivery and reordering converge).
+func (r *PullRequestRepository) UpsertReview(ctx context.Context, review entity.PullRequestReview) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, context.Cause(ctx)
+	}
+	row, err := r.q.GetPullRequestReview(ctx, review.GitHubReviewID)
+	switch {
+	case err == nil:
+		stored := entity.PullRequestReview{State: entity.ReviewState(row.State), CommitSHA: row.CommitSha}
+		if !review.Supersedes(stored) || (stored.State == review.State && stored.CommitSHA == review.CommitSHA) {
+			return false, nil
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return false, err
+	}
+	err = r.q.UpsertPullRequestReview(ctx, sqlcgen.UpsertPullRequestReviewParams{
+		GithubReviewID: review.GitHubReviewID,
+		PullRequestID:  int64(review.PullRequestID),
+		ReviewerLogin:  review.ReviewerLogin,
+		State:          string(review.State),
+		CommitSha:      review.CommitSHA,
+		SubmittedAt:    review.SubmittedAt,
+	})
+	return err == nil, err
+}
+
+// ListReviews returns the stored reviews of the given PRs, keyed by PR id.
+func (r *PullRequestRepository) ListReviews(ctx context.Context, prIDs []uint64) (map[uint64][]entity.PullRequestReview, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	out := make(map[uint64][]entity.PullRequestReview, len(prIDs))
+	if len(prIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(prIDs))
+	args := make([]any, 0, len(prIDs))
+	for i, id := range prIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args = append(args, int64(id))
+	}
+	query := fmt.Sprintf(`SELECT github_review_id, pull_request_id, reviewer_login, state, commit_sha, submitted_at
+FROM pr_reviews WHERE pull_request_id IN (%s) ORDER BY github_review_id ASC`, strings.Join(placeholders, ","))
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var review entity.PullRequestReview
+		var prID int64
+		var state string
+		if err := rows.Scan(&review.GitHubReviewID, &prID, &review.ReviewerLogin, &state, &review.CommitSHA, &review.SubmittedAt); err != nil {
+			return nil, err
+		}
+		review.PullRequestID, review.State = uint64(prID), entity.ReviewState(state)
+		out[review.PullRequestID] = append(out[review.PullRequestID], review)
+	}
+	return out, rows.Err()
+}

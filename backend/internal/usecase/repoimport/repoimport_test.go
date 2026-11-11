@@ -3,6 +3,7 @@ package repoimport_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -30,7 +31,44 @@ type fakeUserAPI struct {
 	prsErr        error
 	checkRuns     map[string][]entity.CheckRun // head SHA -> runs
 	checksErr     error
-	onCheckRuns   func() // called before each check-run read, to cancel mid-backfill
+	onCheckRuns   func()                                // called before each check-run read, to cancel mid-backfill
+	reviews       map[string][]entity.PullRequestReview // "owner/name#number" -> reviews
+	reviewsErr    error
+}
+
+func (f *fakeUserAPI) ListPullRequestReviews(_ context.Context, _ string, owner, name string, number int) ([]entity.PullRequestReview, error) {
+	if f.reviewsErr != nil {
+		return nil, f.reviewsErr
+	}
+	return f.reviews[fmt.Sprintf("%s/%s#%d", owner, name, number)], nil
+}
+
+// fakeReviewStore keeps reviews by GitHub id, like the real store.
+type fakeReviewStore struct {
+	mu   sync.Mutex
+	byID map[int64]entity.PullRequestReview
+}
+
+func (f *fakeReviewStore) UpsertReview(_ context.Context, r entity.PullRequestReview) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if stored, ok := f.byID[r.GitHubReviewID]; ok && (!r.Supersedes(stored) || stored.State == r.State) {
+		return false, nil
+	}
+	f.byID[r.GitHubReviewID] = r
+	return true, nil
+}
+
+func (f *fakeReviewStore) ListReviews(context.Context, []uint64) (map[uint64][]entity.PullRequestReview, error) {
+	return nil, nil
+}
+
+// reviewStores finds the review store wired into a use case built by setupBackfill.
+var reviewStores sync.Map
+
+func reviewsOf(uc *repoimport.UseCase) *fakeReviewStore {
+	s, _ := reviewStores.Load(uc)
+	return s.(*fakeReviewStore)
 }
 
 func (f *fakeUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
@@ -283,8 +321,10 @@ func setupBackfill() (*repoimport.UseCase, *fakeUserAPI, *fakeRepos, *fakeEvents
 	events := &fakeEvents{}
 	prs, checks := newFakePRs(), newFakeChecks()
 	syncer := &fakeFilesSyncer{}
-	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, prs, checks, fakeUsers{}, events, syncer)
+	reviews := &fakeReviewStore{byID: map[int64]entity.PullRequestReview{}}
+	uc := repoimport.NewUseCase(fakeTokens{}, api, repos, prs, checks, fakeUsers{}, events, syncer, reviews)
 	syncers.Store(uc, syncer)
+	reviewStores.Store(uc, reviews)
 	return uc, api, repos, events, prs, checks
 }
 
@@ -424,7 +464,7 @@ func TestUseCase_PropagatesFailures(t *testing.T) {
 	ctx := context.Background()
 
 	_, api, repos, events := setup()
-	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, newFakePRs(), newFakeChecks(), fakeUsers{}, events, nil)
+	expired := repoimport.NewUseCase(fakeTokens{err: entity.ErrUnauthorized}, api, repos, newFakePRs(), newFakeChecks(), fakeUsers{}, events, nil, nil)
 	if _, err := expired.ListAccounts(ctx, userID); !errors.Is(err, entity.ErrUnauthorized) {
 		t.Errorf("ListAccounts with expired token: got %v", err)
 	}
@@ -766,6 +806,66 @@ func TestImport_SkipsChangedFilesWithoutCodeownersAndFailsRetryablyWhenTheyCanno
 	syncer.err = errors.New("github is down")
 	if _, err := uc.Import(ctx, userID, 20, 200); !errors.Is(err, syncer.err) {
 		t.Fatalf("expected the files failure, got %v", err)
+	}
+	for key, on := range repos.follows {
+		if on {
+			t.Fatalf("a failed import follows nothing, so it can be retried: %v", key)
+		}
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("nothing is announced: %+v", events.events)
+	}
+}
+
+func TestImport_BackfillsTheReviewsOfOpenHumanPRsWhenThereIsCodeowners(t *testing.T) {
+	t.Parallel()
+	uc, api, _, _, prs, _ := setupBackfill()
+	twoOpenPRs(api)
+	api.files = map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}
+	api.reviews = map[string][]entity.PullRequestReview{
+		"acme/web#7": {{GitHubReviewID: 1, ReviewerLogin: "bob", State: entity.ReviewApproved, CommitSHA: "sha7"}},
+		"acme/web#8": {{GitHubReviewID: 2, ReviewerLogin: "bob", State: entity.ReviewApproved, CommitSHA: "sha8"}}, // Dependabot's
+		"acme/web#9": {{GitHubReviewID: 3, ReviewerLogin: "carol", State: entity.ReviewChangesRequested, CommitSHA: "sha9"}},
+	}
+	store := reviewsOf(uc)
+	ctx := context.Background()
+
+	repo, err := uc.Import(ctx, userID, 20, 200)
+	if err != nil {
+		t.Fatalf("Import() error: %v", err)
+	}
+	if len(store.byID) != 2 {
+		t.Fatalf("reviews of the two human PRs expected, got %+v", store.byID)
+	}
+	if got := store.byID[1]; got.PullRequestID != prs.prs[[2]uint64{repo.ID, 7}].ID || got.PullRequestID == 0 {
+		t.Fatalf("a review is stored against its PR: %+v", got)
+	}
+	if _, ok := store.byID[2]; ok {
+		t.Fatal("Dependabot PRs have no reviewer turn: their reviews are not read")
+	}
+
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil || len(store.byID) != 2 {
+		t.Fatalf("re-import converges: err=%v reviews=%+v", err, store.byID)
+	}
+}
+
+func TestImport_SkipsReviewsWithoutCodeownersAndFailsRetryablyWhenTheyCannotBeRead(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	uc, api, _, _, _, _ := setupBackfill()
+	twoOpenPRs(api)
+	api.reviews = map[string][]entity.PullRequestReview{"acme/web#7": {{GitHubReviewID: 1, State: entity.ReviewApproved}}}
+	if _, err := uc.Import(ctx, userID, 20, 200); err != nil || len(reviewsOf(uc).byID) != 0 {
+		t.Fatalf("no CODEOWNERS: no turn to derive, err=%v reviews=%v", err, reviewsOf(uc).byID)
+	}
+
+	uc, api, repos, events, _, _ := setupBackfill()
+	twoOpenPRs(api)
+	api.files = map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}
+	api.reviewsErr = errors.New("github is down")
+	if _, err := uc.Import(ctx, userID, 20, 200); !errors.Is(err, api.reviewsErr) {
+		t.Fatalf("expected the reviews failure, got %v", err)
 	}
 	for key, on := range repos.follows {
 		if on {

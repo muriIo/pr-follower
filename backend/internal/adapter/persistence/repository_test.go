@@ -592,3 +592,60 @@ func TestRepositoryRepository_ListFollowerIDs(t *testing.T) {
 		t.Error("expected cancellation error")
 	}
 }
+
+func TestPullRequestRepository_ReviewsAreUpsertedByGitHubID(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 901, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	pr := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: 1, Number: 1, Title: "t", State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "sha1", BaseRef: "main"}
+	if err := prs.Upsert(ctx, pr); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	approved := entity.PullRequestReview{GitHubReviewID: 77, PullRequestID: pr.ID, ReviewerLogin: "bob", State: entity.ReviewApproved, CommitSHA: "sha1", SubmittedAt: at}
+
+	if got, err := prs.ListReviews(ctx, []uint64{pr.ID}); err != nil || len(got) != 0 {
+		t.Fatalf("nothing stored yet: %+v, %v", got, err)
+	}
+	changed, err := prs.UpsertReview(ctx, approved)
+	if err != nil || !changed {
+		t.Fatalf("first UpsertReview() = %v, %v; want changed", changed, err)
+	}
+	if changed, err := prs.UpsertReview(ctx, approved); err != nil || changed {
+		t.Fatalf("redelivery UpsertReview() = %v, %v; want unchanged", changed, err)
+	}
+
+	dismissed := approved
+	dismissed.State = entity.ReviewDismissed
+	if changed, _ := prs.UpsertReview(ctx, dismissed); !changed {
+		t.Fatal("a dismissal changes the review")
+	}
+	if changed, _ := prs.UpsertReview(ctx, approved); changed {
+		t.Fatal("a late 'submitted' must not revive a dismissed review")
+	}
+
+	got, err := prs.ListReviews(ctx, []uint64{pr.ID, 999})
+	if err != nil || len(got[pr.ID]) != 1 {
+		t.Fatalf("ListReviews() = %+v, %v", got, err)
+	}
+	if r := got[pr.ID][0]; r.GitHubReviewID != 77 || r.ReviewerLogin != "bob" || r.State != entity.ReviewDismissed || r.CommitSHA != "sha1" || !r.SubmittedAt.Equal(at) {
+		t.Fatalf("unexpected review: %+v", r)
+	}
+	if empty, err := prs.ListReviews(ctx, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("no ids: %+v, %v", empty, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := prs.UpsertReview(canceled, approved); err == nil {
+		t.Error("UpsertReview: expected cancellation error")
+	}
+	if _, err := prs.ListReviews(canceled, []uint64{pr.ID}); err == nil {
+		t.Error("ListReviews: expected cancellation error")
+	}
+}

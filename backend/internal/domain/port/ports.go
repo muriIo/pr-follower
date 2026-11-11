@@ -50,6 +50,8 @@ type GitHubUserAPI interface {
 	ListOpenPullRequests(ctx context.Context, accessToken, owner, name string) ([]entity.RemotePullRequest, error)
 	// ListCommitCheckRuns lists the CI check runs GitHub reported for a commit (none when there is no CI).
 	ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error)
+	// ListPullRequestReviews lists the reviews recorded on a PR (drafts excluded).
+	ListPullRequestReviews(ctx context.Context, accessToken, owner, name string, number int) ([]entity.PullRequestReview, error)
 }
 
 // PullRequestSnapshotStore stores the PRs read from GitHub when a repository is imported.
@@ -154,6 +156,13 @@ type EventPublisher interface {
 type ChangedFilesStore interface {
 	SaveChangedFiles(ctx context.Context, files entity.PRChangedFiles) error
 	ListChangedFiles(ctx context.Context, prIDs []uint64) (map[uint64]entity.PRChangedFiles, error)
+}
+
+// ReviewStore keeps the reviews GitHub recorded, by GitHub's review id.
+type ReviewStore interface {
+	// UpsertReview stores a review and reports whether anything changed (false on a redelivery).
+	UpsertReview(ctx context.Context, review entity.PullRequestReview) (bool, error)
+	ListReviews(ctx context.Context, prIDs []uint64) (map[uint64][]entity.PullRequestReview, error)
 }
 
 // RepositoryFollowers lists who follows a repository.

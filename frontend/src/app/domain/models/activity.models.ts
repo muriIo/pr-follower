@@ -30,6 +30,9 @@ export interface ActivityIcon {
 const BY_TYPE: Readonly<Record<string, ActivityIcon>> = {
   'pr.merged': { icon: 'merge', tone: 'merged' },
   'pr.approved': { icon: 'approve', tone: 'ok' },
+  'pr.changes_requested': { icon: 'comment', tone: 'warn' },
+  'pr.reviewed': { icon: 'comment', tone: 'info' },
+  'pr.review_dismissed': { icon: 'dot', tone: 'info' },
   'pr.opened': { icon: 'pr-open', tone: 'open' },
   'pr.reopened': { icon: 'pr-open', tone: 'open' },
   'pr.ready_for_review': { icon: 'pr-open', tone: 'open' },

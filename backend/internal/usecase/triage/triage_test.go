@@ -187,7 +187,7 @@ func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
 	files := &fakeFiles{byPR: map[uint64]entity.PRChangedFiles{
 		100: {PullRequestID: 100, HeadSHA: "sha-42", Files: []entity.ChangedFile{{Path: "src/app/seats.component.ts", Additions: 18}}},
 	}}
-	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, pub, files, &fakeSyncer{store: files})
+	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, pub, files, &fakeSyncer{store: files}, nil)
 
 	snapshot, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
 	if err != nil {
