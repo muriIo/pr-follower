@@ -475,6 +475,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, entity.ErrInvalidInput):
 		status, code = http.StatusBadRequest, "invalid_input"
+	case errors.Is(err, entity.ErrGitHubTokenExpired):
+		status, code = http.StatusUnauthorized, "github_token_expired"
 	case errors.Is(err, entity.ErrUnauthorized):
 		status, code = http.StatusUnauthorized, "unauthorized"
 	case errors.Is(err, entity.ErrNotFound):
@@ -489,7 +491,7 @@ func writeDomainError(w http.ResponseWriter, err error) {
 // internal category it was wrapped in ("resource conflict: Pull Request is not mergeable").
 func displayMessage(err error) string {
 	msg := err.Error()
-	for _, sentinel := range []error{entity.ErrForbidden, entity.ErrConflict, entity.ErrNotFound, entity.ErrUnauthorized} {
+	for _, sentinel := range []error{entity.ErrGitHubTokenExpired, entity.ErrForbidden, entity.ErrConflict, entity.ErrNotFound, entity.ErrUnauthorized} {
 		msg = strings.TrimPrefix(msg, sentinel.Error()+": ")
 	}
 	return msg

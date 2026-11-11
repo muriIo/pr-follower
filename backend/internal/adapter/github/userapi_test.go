@@ -111,8 +111,8 @@ func TestUserClient_MapsAuthAndNotFoundErrors(t *testing.T) {
 	defer server.Close()
 	c := newUserClient(server)
 
-	if _, err := c.ListInstallations(context.Background(), "revoked"); !errors.Is(err, entity.ErrUnauthorized) {
-		t.Errorf("revoked token: expected ErrUnauthorized, got %v", err)
+	if _, err := c.ListInstallations(context.Background(), "revoked"); !errors.Is(err, entity.ErrUnauthorized) || !errors.Is(err, entity.ErrGitHubTokenExpired) {
+		t.Errorf("revoked token: expected the user's GitHub access reported as gone, got %v", err)
 	}
 	if _, err := c.ListInstallationRepositories(context.Background(), "ghu_a", 404); !errors.Is(err, entity.ErrNotFound) {
 		t.Errorf("unknown installation: expected ErrNotFound, got %v", err)
@@ -219,8 +219,8 @@ func TestUserClient_ListPullRequestFilesPaginates(t *testing.T) {
 	if _, err := c.ListPullRequestFiles(context.Background(), "ghu_a", "acme", "web", 404); !errors.Is(err, entity.ErrNotFound) {
 		t.Fatalf("unknown PR: expected ErrNotFound, got %v", err)
 	}
-	if _, err := c.ListPullRequestFiles(context.Background(), "revoked", "acme", "web", 7); !errors.Is(err, entity.ErrUnauthorized) {
-		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	if _, err := c.ListPullRequestFiles(context.Background(), "revoked", "acme", "web", 7); !errors.Is(err, entity.ErrGitHubTokenExpired) {
+		t.Fatalf("revoked token: expected the user's GitHub access reported as gone, got %v", err)
 	}
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()

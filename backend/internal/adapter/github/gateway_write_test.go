@@ -95,7 +95,7 @@ func TestGateway_MapsWhatGitHubRefusedAndKeepsItsExplanation(t *testing.T) {
 		message string
 		want    error
 	}{
-		{http.StatusUnauthorized, "Bad credentials", entity.ErrUnauthorized},
+		{http.StatusUnauthorized, "Bad credentials", entity.ErrGitHubTokenExpired},
 		{http.StatusForbidden, "Resource not accessible by integration", entity.ErrForbidden},
 		{http.StatusNotFound, "Not Found", entity.ErrNotFound},
 		{http.StatusMethodNotAllowed, "Pull Request is not mergeable", entity.ErrConflict},

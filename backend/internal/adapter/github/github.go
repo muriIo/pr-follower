@@ -313,7 +313,7 @@ func classifyWrite(resp *http.Response) error {
 	message := githubMessage(resp)
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
-		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrUnauthorized, message))
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrGitHubTokenExpired, message))
 	case resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && resp.Header.Get("Retry-After") != ""):
 		return classifyHTTPStatus(resp)
 	case resp.StatusCode == http.StatusForbidden:
