@@ -215,6 +215,21 @@ describe('workspace-api.mapper', () => {
     expect(item.text).toEqual({ key: 'timeline.event.pr.claimed', params: { repo: 'arvore/checkout-api', pr: 412, actor: '@murilo' } });
   });
 
+  it('phrases a CODEOWNERS refresh, with its own sentence when the file was removed', () => {
+    const event = (status: string, rules: string) =>
+      mapActivityEventToTimelineItem({
+        id: 'c', type: 'repository.codeowners_updated', repository_name: 'acme/web',
+        params: { status, rules }, occurred_at: '2026-11-10T12:00:00Z',
+      });
+
+    expect(event('present', '3').text).toEqual({
+      key: 'timeline.event.repository.codeowners_updated',
+      params: { repo: 'acme/web', pr: '', actor: '', status: 'present', rules: '3' },
+    });
+    expect(event('absent', '0').text).toMatchObject({ key: 'timeline.event.repository.codeowners_updated.absent' });
+    expect(event('present', '3')).toMatchObject({ refreshWorkspace: true, kind: 'info' });
+  });
+
   it('phrases activity from its type and params, so the timeline follows the locale', () => {
     const opened = mapActivityEventToTimelineItem({
       id: 'e1',
