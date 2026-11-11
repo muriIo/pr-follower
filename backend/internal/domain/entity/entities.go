@@ -22,6 +22,9 @@ var (
 	// ErrOutcomeUnknown means a write may or may not have been applied on GitHub (a timeout, a
 	// dropped connection, a 5xx): the caller must check GitHub, never assume either way.
 	ErrOutcomeUnknown = errors.New("could not confirm the outcome on github")
+	// ErrRateLimited means GitHub refused because a rate limit was reached; the error carries when it
+	// resets (see RateLimitedError). The same request works after that time.
+	ErrRateLimited = errors.New("github rate limit reached")
 	// ErrNotAnalysable means a Dependabot PR is one the analysis cannot read yet (several packages
 	// in one PR, or a lockfile format no analyzer understands). It is not the caller's mistake.
 	ErrNotAnalysable = errors.New("this pull request cannot be analysed")
@@ -265,3 +268,12 @@ type ActivityEvent struct {
 	Params     map[string]string `json:"params,omitempty"`
 	OccurredAt time.Time         `json:"occurred_at"`
 }
+
+// RateLimitedError is a GitHub rate limit, with the time it resets. It matches ErrRateLimited.
+type RateLimitedError struct{ ResetAt time.Time }
+
+func (e *RateLimitedError) Error() string {
+	return "github rate limit reached, resets at " + e.ResetAt.UTC().Format(time.RFC3339)
+}
+
+func (e *RateLimitedError) Is(target error) bool { return target == ErrRateLimited }

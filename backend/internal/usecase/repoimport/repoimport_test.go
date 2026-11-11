@@ -36,6 +36,16 @@ type fakeUserAPI struct {
 	reviewsErr    error
 	statuses      map[string][]entity.CommitStatus // head SHA -> statuses
 	statusesErr   error
+	pulls         map[string]entity.RemotePullRequestState // "owner/name#number" -> live state
+	listPRsErr    map[string]error                         // "owner/name" -> error listing its open PRs
+}
+
+func (f *fakeUserAPI) GetPullRequest(_ context.Context, _ string, owner, name string, number int) (entity.RemotePullRequestState, error) {
+	state, ok := f.pulls[fmt.Sprintf("%s/%s#%d", owner, name, number)]
+	if !ok {
+		return entity.RemotePullRequestState{}, entity.ErrNotFound
+	}
+	return state, nil
 }
 
 func (f *fakeUserAPI) ListCommitStatuses(_ context.Context, _ string, _, _, sha string) ([]entity.CommitStatus, error) {
@@ -83,6 +93,9 @@ func reviewsOf(uc *repoimport.UseCase) *fakeReviewStore {
 func (f *fakeUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner, name string) ([]entity.RemotePullRequest, error) {
 	if f.prsErr != nil {
 		return nil, f.prsErr
+	}
+	if err := f.listPRsErr[owner+"/"+name]; err != nil {
+		return nil, err
 	}
 	return f.openPRs[owner+"/"+name], nil
 }
@@ -241,9 +254,24 @@ func (f *fakeEvents) Publish(_ context.Context, e entity.ActivityEvent) error {
 }
 
 type fakePRs struct {
-	mu   sync.Mutex
-	prs  map[[2]uint64]entity.PullRequest // repository id + number
-	next uint64
+	mu      sync.Mutex
+	prs     map[[2]uint64]entity.PullRequest // repository id + number
+	next    uint64
+	upserts int
+}
+
+func (f *fakePRs) ListOpenByRepoIDs(_ context.Context, repoIDs []uint64) ([]entity.PullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []entity.PullRequest
+	for _, pr := range f.prs {
+		for _, id := range repoIDs {
+			if pr.RepositoryID == id && pr.State == entity.PRStateOpen {
+				out = append(out, pr)
+			}
+		}
+	}
+	return out, nil
 }
 
 func newFakePRs() *fakePRs { return &fakePRs{prs: map[[2]uint64]entity.PullRequest{}} }
@@ -269,6 +297,7 @@ func (f *fakePRs) Upsert(_ context.Context, pr *entity.PullRequest) error {
 		pr.ID = f.next
 	}
 	f.prs[key] = *pr
+	f.upserts++
 	return nil
 }
 

@@ -57,6 +57,8 @@ type GitHubUserAPI interface {
 	ListOpenPullRequests(ctx context.Context, accessToken, owner, name string) ([]entity.RemotePullRequest, error)
 	// ListCommitCheckRuns lists the CI check runs GitHub reported for a commit (none when there is no CI).
 	ListCommitCheckRuns(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CheckRun, error)
+	// GetPullRequest reads a PR's live state (open, merged, closed); entity.ErrNotFound when it is gone.
+	GetPullRequest(ctx context.Context, accessToken, owner, name string, number int) (entity.RemotePullRequestState, error)
 	// ListCommitStatuses lists a commit's legacy statuses, the latest per context (Jenkins, Vercel).
 	ListCommitStatuses(ctx context.Context, accessToken, owner, name, sha string) ([]entity.CommitStatus, error)
 	// ListPullRequestReviews lists the reviews recorded on a PR (drafts excluded).
@@ -67,6 +69,7 @@ type GitHubUserAPI interface {
 type PullRequestSnapshotStore interface {
 	GetByRepoAndNumber(ctx context.Context, repoID uint64, number int) (*entity.PullRequest, error)
 	Upsert(ctx context.Context, pr *entity.PullRequest) error
+	ListOpenByRepoIDs(ctx context.Context, repoIDs []uint64) ([]entity.PullRequest, error)
 }
 
 // CommitStatusStore keeps legacy commit statuses (Jenkins, Vercel), by GitHub's status id. Reading
@@ -243,4 +246,10 @@ type RepositoryFileReader interface {
 // CodeownersRefresher re-reads a repository's CODEOWNERS and updates the cached rules.
 type CodeownersRefresher interface {
 	RefreshCodeowners(ctx context.Context, repo entity.Repository) error
+}
+
+// WorkspaceSyncer brings a user's followed repositories in line with GitHub, telling report where it
+// is before each repository and when it is done.
+type WorkspaceSyncer interface {
+	ResyncReporting(ctx context.Context, userID uint64, report func(entity.SyncProgress)) (entity.SyncResult, error)
 }

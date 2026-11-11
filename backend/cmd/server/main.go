@@ -30,6 +30,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
+	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 	"github.com/murilo/pr-follower/backend/internal/usecase/webhook"
 )
@@ -102,6 +103,8 @@ func main() {
 	// Acts on GitHub as the signed-in user; nil without sign-in (every API route is 401 then).
 	var actionUC *action.UseCase
 	var importUC *repoimport.UseCase
+	// Runs the "sync with GitHub" in the background, one per user; nil without sign-in.
+	var syncJobs *syncjob.Manager
 	var filesUC *prfiles.UseCase
 	// Reads PR changed files with user tokens; nil without sign-in, which leaves PRs "not evaluated".
 	var filesSyncer port.ChangedFilesSyncer
@@ -123,6 +126,7 @@ func main() {
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
 		filesSyncer = changedFilesUC
 		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo, importOpts...)
+		syncJobs = syncjob.NewManager(ctx, importUC) // stops with the server
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 		pushUC = webhook.NewPushIngestUseCase(repoRepo, codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, installations, sseHub))
 		actionUC = action.NewUseCase(action.Deps{
@@ -145,6 +149,7 @@ func main() {
 		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
 		ReviewUC:       reviewUC,
+		SyncJobs:       syncJobs,
 		PushUC:         pushUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,

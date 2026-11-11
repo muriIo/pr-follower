@@ -156,7 +156,7 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 	}
 	// Read the open PRs before recording the follow: a failure leaves the repository unfollowed, so
 	// the user can simply import it again (every step converges, ADR-0011).
-	if err := uc.backfillOpenPullRequests(ctx, token, repo, *target); err != nil {
+	if _, err := uc.backfillOpenPullRequests(ctx, token, repo, *target, false); err != nil {
 		return nil, err
 	}
 	if err := uc.repos.SetUserFollow(ctx, userID, repo.ID, true); err != nil {
@@ -173,33 +173,52 @@ func (uc *UseCase) Import(ctx context.Context, userID uint64, installationID, gi
 	return repo, nil
 }
 
+// backfillStats says what a pass over a repository's open PRs found.
+type backfillStats struct {
+	added, updated int
+	// open holds the numbers of the PRs GitHub listed as open.
+	open map[int]bool
+}
+
 // backfillOpenPullRequests stores the repository's open PRs and their CI, so they show up without
-// waiting for their next webhook. A PR that is already stored is kept as is: webhooks keep it
-// current, and the older listing must never rewind it. Merge state stays unknown (the list does
-// not carry it) and no activity is published per PR.
-func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository) error {
+// waiting for their next webhook. With refresh false (import) a PR that is already stored is kept as
+// is: webhooks keep it current, and the older listing must never rewind it. With refresh true
+// (resync, the user asked GitHub's current word) a stored PR is brought in line with GitHub. Merge
+// state stays unknown (the list does not carry it) and no activity is published per PR.
+func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, refresh bool) (backfillStats, error) {
+	stats := backfillStats{open: map[int]bool{}}
 	open, err := uc.github.ListOpenPullRequests(ctx, token, target.Owner, target.Name)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	for _, remote := range open {
 		if err := ctx.Err(); err != nil {
-			return context.Cause(ctx)
+			return stats, context.Cause(ctx)
 		}
+		stats.open[remote.Number] = true
 		if existing, err := uc.prs.GetByRepoAndNumber(ctx, repo.ID, remote.Number); err == nil {
+			if refresh {
+				changed, err := uc.refreshPullRequest(ctx, token, repo, target, existing, remote)
+				if err != nil {
+					return stats, err
+				}
+				if changed {
+					stats.updated++
+				}
+			}
 			if err := uc.syncTurnFacts(ctx, token, repo, target, existing); err != nil {
-				return err
+				return stats, err
 			}
 			continue
 		} else if !errors.Is(err, entity.ErrNotFound) {
-			return err
+			return stats, err
 		}
 		ci, err := uc.recordCheckRuns(ctx, token, repo, target, remote.HeadSHA)
 		if err != nil {
-			return err
+			return stats, err
 		}
 		if err := ctx.Err(); err != nil {
-			return context.Cause(ctx)
+			return stats, context.Cause(ctx)
 		}
 		pr := &entity.PullRequest{
 			RepositoryID:   repo.ID,
@@ -219,13 +238,40 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 			UpdatedAt:      uc.nowFunc().UTC(),
 		}
 		if err := uc.prs.Upsert(ctx, pr); err != nil {
-			return err
+			return stats, err
 		}
+		stats.added++
 		if err := uc.syncTurnFacts(ctx, token, repo, target, pr); err != nil {
-			return err
+			return stats, err
 		}
 	}
-	return nil
+	return stats, nil
+}
+
+// refreshPullRequest brings a stored PR in line with what GitHub lists now: title, draft flag, base,
+// head commit (and the CI of that commit), and open again if it was reopened. A new head commit has
+// no known merge state yet. It writes only when something differs, and reports whether it did.
+func (uc *UseCase) refreshPullRequest(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, existing *entity.PullRequest, remote entity.RemotePullRequest) (bool, error) {
+	ci, err := uc.recordCheckRuns(ctx, token, repo, target, remote.HeadSHA)
+	if err != nil {
+		return false, err
+	}
+	next := *existing
+	next.Title, next.IsDraft, next.BaseRef = remote.Title, remote.IsDraft, remote.BaseRef
+	next.HeadSHA, next.CIStatus, next.State = remote.HeadSHA, ci, entity.PRStateOpen
+	if existing.HeadSHA != remote.HeadSHA || existing.State != entity.PRStateOpen {
+		next.MergeableState = entity.MergeableStateUnknown
+	}
+	if next.Title == existing.Title && next.IsDraft == existing.IsDraft && next.BaseRef == existing.BaseRef &&
+		next.HeadSHA == existing.HeadSHA && next.CIStatus == existing.CIStatus && next.State == existing.State {
+		return false, nil
+	}
+	next.UpdatedAt = uc.nowFunc().UTC()
+	if err := uc.prs.Upsert(ctx, &next); err != nil {
+		return false, err
+	}
+	*existing = next
+	return true, nil
 }
 
 // syncTurnFacts reads what decides a PR's turn: its changed files and its reviews. Both are only
