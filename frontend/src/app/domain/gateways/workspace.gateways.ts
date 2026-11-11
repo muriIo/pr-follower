@@ -32,6 +32,8 @@ export interface PullRequestGateway {
   mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha?: string }>;
   batchMergePullRequests?(prIds: readonly number[], options?: ActionRequestOptions): Promise<{ mergedIds: readonly number[] }>;
   commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void>;
+  /** Runs the Dependabot analysis for a PR; rejects with an ActionError (`unavailable` without the GitHub App credentials). */
+  analyzePullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;
   claimPullRequest?(prId: number, options?: ActionRequestOptions): Promise<void>;
   cancelServerOperation(operationId: string): Promise<void>;

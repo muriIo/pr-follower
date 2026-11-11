@@ -3,7 +3,7 @@
   [class]="'pf-card ' + (muted() ? 'is-muted ' : '') + card().sel"
   (click)="selected.emit(card().id)"
 >
-  <span class="pf-mono" style="color: #A3ACBD">{{ card().repo }} #{{ card().id }}</span>
+  <span class="pf-mono" style="color: #A3ACBD">{{ card().repo }} #{{ card().number }}</span>
   <span class="pf-card-title">{{ card().title }}</span>
 
   @if (!muted()) {

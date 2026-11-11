@@ -6,7 +6,8 @@ import { RadarPrCardComponent } from './radar-pr-card.component';
 describe('RadarPrCardComponent', () => {
   it('renders Dependabot radar card and emits selected PR id on click', () => {
     const card: RadarCardViewModel = {
-      id: 89,
+      id: 9089,
+      number: 89,
       repo: 'arvore/checkout-api',
       radarTitle: 'bump axios from 1.7.7 to 2.0.0',
       radarMeta: 'Major • Prod Transitiva via @nestjs/axios',
@@ -29,6 +30,6 @@ describe('RadarPrCardComponent', () => {
     expect(btn.textContent).toContain('bump axios from 1.7.7 to 2.0.0');
 
     btn.click();
-    expect(selectSpy).toHaveBeenCalledWith(89);
+    expect(selectSpy).toHaveBeenCalledWith(9089);
   });
 });

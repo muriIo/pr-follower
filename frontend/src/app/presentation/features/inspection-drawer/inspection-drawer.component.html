@@ -29,7 +29,7 @@
 
   <header class="pf-drawer-head">
     <div class="pf-drawer-top">
-      <span class="pf-mono">{{ drawer().repo }} #{{ drawer().id }}</span>
+      <span class="pf-mono">{{ drawer().repo }} #{{ drawer().number }}</span>
       <span class="pf-actions">
         <a class="pf-btn pf-btn-sm" [href]="drawer().ghUrl" target="_blank" rel="noopener">
           {{ 'drawer.openGithub' | t }}
@@ -138,6 +138,16 @@
     @if (drawer().showSecondary) {
       @if (drawer().isDep) {
         <div class="pf-actions">
+          @if (drawer().showAnalyze) {
+            <button
+              type="button"
+              class="pf-btn pf-btn-primary"
+              [attr.aria-disabled]="drawer().busyDis"
+              (click)="store.analyzePr(drawer().id)"
+            >
+              {{ 'drawer.analyze' | t }}
+            </button>
+          }
           <button
             type="button"
             class="pf-btn pf-mono"

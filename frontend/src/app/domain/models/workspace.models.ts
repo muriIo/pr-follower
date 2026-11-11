@@ -59,7 +59,10 @@ export interface ChangedFileItem {
 }
 
 export interface PullRequestItem {
+  /** The PR's unique id: the key of every map and the handle the API routes take. */
   readonly id: number;
+  /** GitHub's PR number, repeated across repositories: for display and GitHub URLs only. */
+  readonly number: number;
   readonly rank: number;
   readonly repo: string;
   readonly title: string;

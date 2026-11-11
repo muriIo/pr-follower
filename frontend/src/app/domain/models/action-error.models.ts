@@ -7,6 +7,8 @@ export type ActionErrorCode =
   | 'not_found'
   | 'unauthorized'
   | 'invalid_input'
+  | 'unavailable'
+  | 'not_analysable'
   | 'internal'
   | 'unknown';
 
@@ -18,6 +20,8 @@ const KNOWN_CODES: readonly string[] = [
   'not_found',
   'unauthorized',
   'invalid_input',
+  'unavailable',
+  'not_analysable',
   'internal',
 ];
 
