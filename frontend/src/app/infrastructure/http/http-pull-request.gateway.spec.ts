@@ -146,3 +146,52 @@ describe('HttpPullRequestGateway changed files', () => {
     vi.restoreAllMocks();
   });
 });
+
+describe('HttpPullRequestGateway actions are never silent and never repeated', () => {
+  const answer = (status: number, body: unknown) =>
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const gateway = (): HttpPullRequestGateway => new HttpPullRequestGateway();
+
+  it('rejects with the server code and GitHub\'s explanation, after exactly one request', async () => {
+    const cases: [number, string, string][] = [
+      [422, 'own_pull_request', 'you cannot approve your own pull request'],
+      [409, 'conflict', 'resource conflict: Pull Request is not mergeable'],
+      [403, 'forbidden', 'forbidden by github: Resource not accessible'],
+      [502, 'outcome_unknown', 'could not confirm the outcome on github'],
+      [401, 'unauthorized', 'unauthorized'],
+    ];
+    for (const [status, code, error] of cases) {
+      const spy = answer(status, { error, code });
+      await expect(gateway().approvePullRequest(1)).rejects.toMatchObject({ name: 'ActionError', code, detail: error });
+      expect(spy, `${status} must not be retried`).toHaveBeenCalledTimes(1);
+      spy.mockRestore();
+    }
+  });
+
+  it('treats a lost connection as an unknown outcome, because the request may have been applied', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('network down'));
+    const g = gateway();
+    await expect(g.approvePullRequest(1)).rejects.toMatchObject({ code: 'outcome_unknown' });
+    await expect(g.mergePullRequest(1)).rejects.toMatchObject({ code: 'outcome_unknown' });
+    await expect(g.commentOnPullRequest(1, '@dependabot rebase')).rejects.toMatchObject({ code: 'outcome_unknown' });
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a failure without a body readable, and lets a cancellation through as is', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('<html>bad gateway</html>', { status: 502 }));
+    await expect(gateway().mergePullRequest(1)).rejects.toMatchObject({ code: 'unknown' });
+
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new DOMException('Aborted', 'AbortError'));
+    await expect(gateway().mergePullRequest(1)).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('does not invent a merge commit when the server reports none', async () => {
+    answer(200, { ok: true, pr_id: 1 });
+    expect((await gateway().mergePullRequest(1)).sha).toBeUndefined();
+  });
+});

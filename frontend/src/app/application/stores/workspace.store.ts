@@ -24,6 +24,7 @@ import {
 } from '../../domain/models/workspace.models';
 import { ActionCancellationManager, ActionViewModel } from '../use-cases/action-cancellation.manager';
 import { ActivityIconName, ActivityTone, activityIconFor } from '../../domain/models/activity.models';
+import { ActionError } from '../../domain/models/action-error.models';
 import { LocaleStore } from './locale.store';
 
 /** i18n keys for the GitHub mergeable states that stop a merge; the others do not block. */
@@ -210,6 +211,8 @@ export interface DrawerViewModel {
   readonly blockedCls: string;
   readonly blockedText: string;
   readonly showApprove: boolean;
+  /** Why the user cannot approve this PR (they wrote it), or ''. */
+  readonly ownNote: string;
   readonly approvedMine: boolean;
   readonly mergeCls: string;
   readonly mergeDis: string;
@@ -439,7 +442,7 @@ export class WorkspaceStore {
               ? this.t('seats.approvedTip.mine')
               : this.t('seats.approvedTip.team'),
             approvedLabel: mine ? this.t('seats.approvedByYou') : this.t('seats.approvedByTeam', { login: p.approvedBy ?? '' }),
-            hasQuick: safe,
+            hasQuick: safe && (mine || !this.isOwnPr(p)),
             act: this.cancellation.getView(actionsMap, `merge:${p.id}`),
             quickTip: mine ? this.t('seats.quickTip.merge') : this.t('seats.quickTip.approve'),
             quickLabel: mine ? 'Squash' : this.t('seats.quick.approve'),
@@ -676,6 +679,7 @@ export class WorkspaceStore {
     const ci = this.effectiveCi(pr);
     const merged = Boolean(this.mergedMap()[pr.id]);
     const mine = Boolean(this.approvedMap()[pr.id]);
+    const own = this.isOwnPr(pr);
     const act = this.cancellation.getView(this.cancellation.actionsState(), `merge:${pr.id}`);
     const dotCi = {
       ok: 'pf-dot pf-dot-ok',
@@ -768,7 +772,8 @@ export class WorkspaceStore {
       blocked: Boolean(blockedText),
       blockedCls: 'pf-blocked',
       blockedText,
-      showApprove: !mine,
+      showApprove: !mine && !own,
+      ownNote: own ? this.t('drawer.ownPr') : '',
       approvedMine: mine,
       mergeCls: (mine || pr.approvedBy) && !blockedText ? 'pf-btn-primary' : '',
       mergeDis: blockedText ? 'true' : 'false',
@@ -945,7 +950,24 @@ export class WorkspaceStore {
     this.cancellation.cancel(key);
   }
 
-  async approvePr(prId: number, delayMs: number = 1200): Promise<void> {
+  /** Nobody approves a PR they wrote: GitHub refuses it, so it is not even offered. */
+  private isOwnPr(pr: PullRequestItem): boolean {
+    const viewer = this.viewerLogin().toLowerCase();
+    return viewer !== '' && pr.author.replace(/^@/, '').toLowerCase() === viewer;
+  }
+
+  /** The note shown when an action fails: what happened, in the user's language. */
+  private failureNote(err: unknown): string {
+    if (err instanceof ActionError) {
+      if (err.code === 'outcome_unknown' || err.code === 'conflict') {
+        this.scheduleWorkspaceRefresh(); // GitHub's state may differ from ours: look again
+      }
+      return this.t(`actions.error.${err.code}`, { detail: err.detail });
+    }
+    return this.t('actions.error.unknown', { detail: '' });
+  }
+
+  async approvePr(prId: number): Promise<void> {
     const pr = this.prs().find((x) => x.id === prId);
     if (!pr) return;
     await this.cancellation.run(
@@ -954,7 +976,9 @@ export class WorkspaceStore {
         {
           label: this.t('actions.approving'),
           execute: async (opts) => {
-            await this.waitWithSignal(delayMs, opts.signal);
+            if (this.isOwnPr(pr)) {
+              throw new ActionError('own_pull_request');
+            }
             await this.prGateway?.approvePullRequest(prId, opts);
           },
         },
@@ -964,10 +988,11 @@ export class WorkspaceStore {
         return null;
       },
       () => this.t('actions.canceled.nothingSent'),
+      (err) => this.failureNote(err),
     );
   }
 
-  async mergePr(prId: number, delayMs: number = 1600): Promise<void> {
+  async mergePr(prId: number): Promise<void> {
     const pr = this.prs().find((x) => x.id === prId);
     if (!pr) return;
     let mergedSha = '';
@@ -977,7 +1002,6 @@ export class WorkspaceStore {
         {
           label: this.t('actions.merging'),
           execute: async (opts) => {
-            await this.waitWithSignal(delayMs, opts.signal);
             const res = await this.prGateway?.mergePullRequest(prId, opts);
             if (res?.sha) {
               mergedSha = res.sha;
@@ -990,11 +1014,12 @@ export class WorkspaceStore {
         return mergedSha ? this.t('actions.mergedSha', { sha: mergedSha }) : this.t('actions.merged');
       },
       () => this.t('actions.canceled.mergeKeepsOpen'),
+      (err) => this.failureNote(err),
     );
   }
 
   /** Snooze a PR until its next commit, until CI passes, or (Dependabot) out of the Radar. */
-  async silencePr(prId: number, until: 'commit' | 'ci' | 'radar', delayMs: number = 1000): Promise<void> {
+  async silencePr(prId: number, until: 'commit' | 'ci' | 'radar'): Promise<void> {
     const condition = until === 'ci' ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
     const badge: I18nText = { key: `silenced.${until}` };
     await this.cancellation.run(
@@ -1003,7 +1028,6 @@ export class WorkspaceStore {
         {
           label: this.t('actions.silencing'),
           execute: async (opts) => {
-            await this.waitWithSignal(delayMs, opts.signal);
             await this.prGateway?.snoozePullRequest(prId, condition, opts);
           },
         },
@@ -1013,27 +1037,28 @@ export class WorkspaceStore {
         return this.t('actions.silenced');
       },
       () => this.t('actions.canceled.silence'),
+      (err) => this.failureNote(err),
     );
   }
 
-  async commentOnPr(prId: number, command: string, delayMs: number = 1000): Promise<void> {
+  async commentOnPr(prId: number, command: string): Promise<void> {
     await this.cancellation.run(
       `merge:${prId}`,
       [
         {
           label: this.t('actions.commenting', { command }),
           execute: async (opts) => {
-            await this.waitWithSignal(delayMs, opts.signal);
             await this.prGateway?.commentOnPullRequest(prId, command, opts);
           },
         },
       ],
       () => this.t('actions.commented', { command }),
       () => this.t('actions.canceled.nothingSent'),
+      (err) => this.failureNote(err),
     );
   }
 
-  async runSync(delayMs: number = 2400): Promise<void> {
+  async runSync(): Promise<void> {
     const count = this.repos().length;
     await this.cancellation.run(
       'sync',
@@ -1041,7 +1066,6 @@ export class WorkspaceStore {
         {
           label: this.n('actions.syncing', count),
           execute: async (opts) => {
-            await this.waitWithSignal(delayMs, opts.signal);
             await this.loadWorkspace(opts);
           },
         },
@@ -1051,7 +1075,7 @@ export class WorkspaceStore {
     );
   }
 
-  async runBatchApprove(stepDelayMs: number = 700): Promise<void> {
+  async runBatchApprove(): Promise<void> {
     const list = this.safeBatchSummary().safePending;
     if (list.length === 0) return;
     const total = list.length;
@@ -1063,7 +1087,6 @@ export class WorkspaceStore {
         label: this.t('actions.batch.approving', { current: idx + 1, total }),
         pct: ((idx + 1) / total) * 100,
         execute: async (opts: Required<ActionRequestOptions>) => {
-          await this.waitWithSignal(stepDelayMs, opts.signal);
           await this.prGateway?.approvePullRequest(pr.id, opts);
           this.markApproved(pr);
         },
@@ -1073,10 +1096,11 @@ export class WorkspaceStore {
         idx === 0
           ? this.t('actions.batch.approveCanceledNone')
           : this.n('actions.batch.approveCanceled', idx, { rest: total - idx }),
+      (err) => this.failureNote(err),
     );
   }
 
-  async runBatchMerge(stepDelayMs: number = 1100): Promise<void> {
+  async runBatchMerge(): Promise<void> {
     const list = this.safeBatchSummary().safeApproved;
     if (list.length === 0) return;
     const total = list.length;
@@ -1088,7 +1112,6 @@ export class WorkspaceStore {
         label: this.t('actions.batch.merging', { current: idx + 1, total }),
         pct: ((idx + 1) / total) * 100,
         execute: async (opts: Required<ActionRequestOptions>) => {
-          await this.waitWithSignal(stepDelayMs, opts.signal);
           await this.prGateway?.mergePullRequest(pr.id, opts);
           this.markMerged(pr);
         },
@@ -1098,6 +1121,7 @@ export class WorkspaceStore {
         idx === 0
           ? this.t('actions.batch.mergeCanceledNone')
           : this.n('actions.batch.mergeCanceled', idx, { rest: total - idx }),
+      (err) => this.failureNote(err),
     );
   }
 
@@ -1290,23 +1314,5 @@ export class WorkspaceStore {
 
   private n(base: string, count: number, params?: Readonly<Record<string, string | number>>): string {
     return this.locale.plural(base, count, params);
-  }
-
-  private waitWithSignal(ms: number, signal: AbortSignal): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (signal.aborted) {
-        reject(new DOMException('Aborted', 'AbortError'));
-        return;
-      }
-      const t = setTimeout(resolve, ms);
-      signal.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(t);
-          reject(new DOMException('Aborted', 'AbortError'));
-        },
-        { once: true },
-      );
-    });
   }
 }

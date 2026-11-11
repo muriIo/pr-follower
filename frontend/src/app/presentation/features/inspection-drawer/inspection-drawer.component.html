@@ -101,6 +101,9 @@
       @if (drawer().blocked) {
         <p [class]="drawer().blockedCls">{{ drawer().blockedText }}</p>
       }
+      @if (drawer().ownNote) {
+        <p class="pf-note">{{ drawer().ownNote }}</p>
+      }
       <div class="pf-actions">
         @if (drawer().showApprove) {
           <button type="button" class="pf-btn pf-btn-primary" (click)="store.approvePr(drawer().id)">

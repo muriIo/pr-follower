@@ -6,8 +6,10 @@ import {
   PULL_REQUEST_GATEWAY,
   PullRequestGateway,
 } from '../../domain/gateways/workspace.gateways';
+import { ActionError } from '../../domain/models/action-error.models';
 import { PullRequestItem, RepoInfo, TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
+import { LocaleStore } from './locale.store';
 import { WorkspaceStore } from './workspace.store';
 import { createInitialPrDataset, loadWorkspaceFixture } from '../../testing/workspace-fixtures';
 
@@ -15,7 +17,7 @@ function createFakeGateways(): { prGateway: PullRequestGateway; sseGateway: Live
   const prGateway: PullRequestGateway = {
     fetchWorkspace: async () => null,
     approvePullRequest: async () => undefined,
-    mergePullRequest: async () => ({ sha: 'a1b2c3d' }),
+    mergePullRequest: async () => ({ sha: undefined }),
     batchMergePullRequests: async (ids) => ({ mergedIds: ids }),
     commentOnPullRequest: async () => undefined,
     snoozePullRequest: async () => undefined,
@@ -96,16 +98,16 @@ describe('WorkspaceStore (Clean Architecture Reactive Signal Store)', () => {
     store.openPr(142);
 
     // Approve PR #142
-    await store.approvePr(142, 5);
+    await store.approvePr(142);
     expect(store.approvedMap()[142]).toBe(true);
     expect(store.navCounts().inbox).toBe(1);
 
     // Merge PR #142
-    await store.mergePr(142, 5);
+    await store.mergePr(142);
     expect(store.mergedMap()[142]).toBe(true);
 
     // Start slow batch approve and cancel mid-flight via cancelAction('batch')
-    const batchPromise = store.runBatchApprove(200);
+    const batchPromise = store.runBatchApprove();
     expect(store.batchAction().running).toBe(true);
     store.cancelAction('batch');
     await batchPromise;
@@ -649,8 +651,105 @@ describe('WorkspaceStore timeline views', () => {
 
     const pr = { ...createInitialPrDataset()[0], id: 501, repo: 'acme/web' };
     store.prs.set([pr]);
-    await store.approvePr(501, 0);
+    await store.approvePr(501);
     const mine = store.events().find((e) => e.type === 'pr.approved')!;
     expect(mine.actor).toBe('octocat');
+  });
+});
+
+
+describe('WorkspaceStore acting on GitHub as the user', () => {
+  const base = createInitialPrDataset().find((p) => !p.dep)!;
+  const prOf = (id: number, author: string): PullRequestItem => ({ ...base, id, repo: 'acme/web', author, approvedBy: undefined });
+
+  function setup(overrides: Partial<PullRequestGateway>) {
+    const { prGateway, sseGateway } = createFakeGateways();
+    const gateway = { ...prGateway, approvePullRequest: vi.fn(prGateway.approvePullRequest), mergePullRequest: vi.fn(prGateway.mergePullRequest), ...overrides };
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: gateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    store.startLiveSession('octocat');
+    store.repos.set([{ name: 'acme/web', branch: 'main', access: 'active' }]);
+    store.prs.set([prOf(1, '@bia'), prOf(2, '@OctoCat')]);
+    return { store, gateway, translate: (key: string, params?: Record<string, string | number>) => TestBed.inject(LocaleStore).translate(key, params) };
+  }
+
+  it('never approves the user\'s own PR: nothing is sent, and the drawer does not offer it', async () => {
+    const { store, gateway, translate } = setup({});
+
+    store.openPr(2);
+    expect(store.drawer()!.showApprove).toBe(false);
+    expect(store.drawer()!.ownNote).toBe(translate('drawer.ownPr'));
+
+    await store.approvePr(2);
+    expect(gateway.approvePullRequest).not.toHaveBeenCalled();
+    expect(store.approvedMap()[2]).toBeUndefined();
+    expect(store.drawer()!.act.note).toBe(translate('actions.error.own_pull_request'));
+
+    store.openPr(1);
+    expect(store.drawer()!.showApprove).toBe(true);
+    expect(store.drawer()!.ownNote).toBe('');
+  });
+
+  it('lets the user merge their own PR', async () => {
+    const { store, gateway } = setup({});
+    await store.mergePr(2);
+    expect(gateway.mergePullRequest).toHaveBeenCalledTimes(1);
+    expect(store.mergedMap()[2]).toBe(true);
+  });
+
+  it('tells the user when GitHub could not confirm an action, and records nothing', async () => {
+    const { store, translate } = setup({
+      approvePullRequest: vi.fn(async () => {
+        throw new ActionError('outcome_unknown', 'could not confirm');
+      }),
+    });
+
+    await store.approvePr(1);
+    expect(store.approvedMap()[1]).toBeUndefined();
+    expect(store.events().some((e) => e.type === 'pr.approved')).toBe(false);
+    store.openPr(1);
+    const note = store.drawer()!.act;
+    expect(note.note).toBe(translate('actions.error.outcome_unknown'));
+    expect(note.noteCls).toBe('pf-note pf-note-err');
+  });
+
+  it('shows GitHub\'s own explanation when it refuses a merge, and does not mark it merged', async () => {
+    const { store, translate } = setup({
+      mergePullRequest: vi.fn(async () => {
+        throw new ActionError('conflict', 'Pull Request is not mergeable');
+      }),
+    });
+
+    await store.mergePr(1);
+    expect(store.mergedMap()[1]).toBeUndefined();
+    store.openPr(1);
+    expect(store.drawer()!.act.note).toBe(translate('actions.error.conflict', { detail: 'Pull Request is not mergeable' }));
+  });
+
+  it('says "merged" without a made-up commit when GitHub returned none', async () => {
+    const { store, translate } = setup({});
+    store.openPr(1);
+    await store.mergePr(1);
+    expect(store.drawer()!.act.note).toBe(translate('actions.merged'));
+  });
+
+  it('does not wait on artificial delays: an action finishes as soon as the server answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store } = setup({});
+      const done = store.approvePr(1);
+      await vi.advanceTimersByTimeAsync(0);
+      await done;
+      expect(store.approvedMap()[1]).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

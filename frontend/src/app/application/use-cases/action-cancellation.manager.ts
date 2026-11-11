@@ -8,7 +8,7 @@ export interface CancellableStep {
 }
 
 export interface ActionStateEntry {
-  readonly status: 'running' | 'ok' | 'cancel';
+  readonly status: 'running' | 'ok' | 'cancel' | 'error';
   readonly label?: string;
   readonly pct?: number;
   readonly note?: string;
@@ -58,7 +58,7 @@ export class ActionCancellationManager {
       label: entry?.label ?? '',
       pct: entry?.pct ?? 0,
       note: entry?.note ?? '',
-      noteCls: entry?.status === 'ok' ? 'pf-note pf-note-ok' : 'pf-note',
+      noteCls: entry?.status === 'ok' ? 'pf-note pf-note-ok' : entry?.status === 'error' ? 'pf-note pf-note-err' : 'pf-note',
       cancel: () => this.cancel(key),
     };
   }
@@ -68,6 +68,7 @@ export class ActionCancellationManager {
     steps: readonly CancellableStep[],
     onDone: () => string | null,
     onCancelled: (stepIndex: number) => string,
+    onFailed?: (err: unknown, stepIndex: number) => string | null,
   ): Promise<void> {
     this.clearTimer(key);
     const controller = new AbortController();
@@ -77,6 +78,10 @@ export class ActionCancellationManager {
     let stepIndex = 0;
     try {
       for (; stepIndex < steps.length; stepIndex++) {
+        // A step that ignores the signal must not let the next one start after a cancel.
+        if (controller.signal.aborted) {
+          throw new DOMException('Aborted', 'AbortError');
+        }
         const step = steps[stepIndex];
         this.setAction(key, {
           status: 'running',
@@ -93,7 +98,11 @@ export class ActionCancellationManager {
         this.finish(key, 'cancel', onCancelled(stepIndex));
         return;
       }
-      throw err;
+      if (!onFailed) {
+        this.finish(key, 'error', null);
+        throw err;
+      }
+      this.finish(key, 'error', onFailed(err, stepIndex));
     }
   }
 
@@ -120,7 +129,7 @@ export class ActionCancellationManager {
     });
   }
 
-  private finish(key: string, status: 'ok' | 'cancel', note: string | null): void {
+  private finish(key: string, status: 'ok' | 'cancel' | 'error', note: string | null): void {
     this.controllers.delete(key);
     if (!note) {
       this.setAction(key, null);
