@@ -419,6 +419,15 @@ describe('WorkspaceStore truthful PR state', () => {
     expect(drawer.blocked).toBe(false);
   });
 
+  it('lists every open PR of a repository in its seat, in rank order, never just the first few', () => {
+    const prs = [1, 2, 3, 4, 5, 6].map((n) => pr(60 + n, 'acme/web', { number: n, rank: 7 - n }));
+    const store = setup([{ name: 'acme/web', branch: 'main' }], prs);
+
+    const stream = store.allSeats()[0].stream;
+    expect(stream.map((row) => row.number)).toEqual([6, 5, 4, 3, 2, 1]); // lowest rank value first
+    expect(stream).toHaveLength(6);
+  });
+
   it('hides the risk badge on PRs that have no risk verdict', () => {
     const store = setup([{ name: 'acme/web', branch: 'main' }], [pr(51, 'acme/web', { verdict: null })]);
     store.openPr(51);

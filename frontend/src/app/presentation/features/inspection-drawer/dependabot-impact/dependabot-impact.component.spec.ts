@@ -63,3 +63,37 @@ describe('DependabotImpactComponent', () => {
     expect(treeSpy).toHaveBeenCalledWith(0);
   });
 });
+
+describe('DependabotImpactComponent for a bump nobody analysed', () => {
+  function render(overrides: Record<string, unknown>) {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      imports: [DependabotImpactComponent],
+      providers: [
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: { cancelServerOperation: async () => undefined } },
+        { provide: LIVE_EVENT_GATEWAY, useValue: { connect: () => () => undefined } },
+        { provide: TRANSLATION_GATEWAY, useValue: { loadDictionary: async () => ({}) } },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    loadWorkspaceFixture(store);
+    const base = store.prs().find((p) => p.id === 233)!;
+    store.prs.set([{ ...base, id: 900, number: 24, verdict: null, via: [], blasts: [], note: '', score: undefined, ...overrides } as typeof base]);
+    store.openPr(900);
+
+    const fixture = TestBed.createComponent(DependabotImpactComponent);
+    fixture.componentRef.setInput('drawer', store.drawer()!);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('says only that it has no analysis: no tree, no impact and no notes that were never produced', () => {
+    for (const el of [render({ pkg: 'vitest' }), render({ pkg: undefined })]) {
+      expect(el.querySelector('.pf-rv')).not.toBeNull();
+      // "0 files affected" or "no import of this package" would be claims about code nobody read.
+      expect(el.querySelector('.pf-tree')).toBeNull();
+      expect(el.querySelectorAll('.pf-drawer-sec')).toHaveLength(0);
+    }
+  });
+});

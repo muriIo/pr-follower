@@ -430,7 +430,6 @@ export class WorkspaceStore {
       const stream: SeatStreamRowViewModel[] = repoPrs
         .slice()
         .sort((a, b) => a.rank - b.rank)
-        .slice(0, 3)
         .map((p) => {
           const isTurn = isActionableTurn(p, silenced, approved);
           const showTurn = isTurn && !p.dep;

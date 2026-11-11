@@ -103,6 +103,9 @@ No P1 item is open. In order of value:
 - [x] No hardcoded display text: store, mapper and templates render keys (with params and plurals); the ADR-0008 gate fails on literal text.
 - [x] Timeline follows the locale: activity carries its type and params (title, method, package...), never a sentence; the client phrases it.
 - [x] No demo data in production; sample data only in test fixtures (#10).
+- [x] Layout rhythm: a spacing scale (`--space-1` to `--space-6`) used by the views, component hosts that take no box of their own (so the canvas and drawer gaps apply between a view's header, filters and lists), ruled section headings, group headers with a trailing rule, and the dependency tree's caption as a callout attached to the tree. Checked by rendering the built app against mock data before and after.
+- [x] A seat lists every open PR of its repository (it used to cut the list at three), scrolling inside the card once it is long, and the seats of a row keep one height.
+- [x] An unanalysed Dependabot PR shows only its "Sem análise" verdict and the reason: no dependency tree, impact or notes that would claim "no imports" about code nobody read.
 - [x] A PR is identified in the SPA by its unique id; GitHub's number is only for display and GitHub URLs. The SPA used to key PRs by number and send it to routes that take the database id, so actions could reach another PR (and numbers repeat across repositories); the activity timeline now points at PRs by id too.
 - [ ] **P2** Browser end-to-end tests of the main flows (sign-in, import, drawer, merge).
 
