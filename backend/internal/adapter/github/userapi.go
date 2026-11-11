@@ -227,6 +227,32 @@ func (c *UserClient) ListOpenPullRequests(ctx context.Context, accessToken, owne
 	return out, nil
 }
 
+// GetPullRequest reads a PR's live state with the user's token.
+func (c *UserClient) GetPullRequest(ctx context.Context, accessToken, owner, name string, number int) (entity.RemotePullRequestState, error) {
+	if err := ctx.Err(); err != nil {
+		return entity.RemotePullRequestState{}, context.Cause(ctx)
+	}
+	var raw struct {
+		State  string `json:"state"`
+		Merged bool   `json:"merged"`
+		User   *struct {
+			Login string `json:"login"`
+		} `json:"user"`
+		Head struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	target := fmt.Sprintf("/repos/%s/%s/pulls/%d", owner, name, number)
+	if err := getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, target, &raw); err != nil {
+		return entity.RemotePullRequestState{}, err
+	}
+	state := entity.RemotePullRequestState{Open: raw.State == "open", Merged: raw.Merged, HeadSHA: raw.Head.SHA}
+	if raw.User != nil {
+		state.AuthorLogin = raw.User.Login
+	}
+	return state, nil
+}
+
 // prReviewsMaxPages bounds the reviews read for one PR (1,000 reviews).
 const prReviewsMaxPages = 10
 

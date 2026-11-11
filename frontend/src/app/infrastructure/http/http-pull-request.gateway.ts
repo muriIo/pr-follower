@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { ActionRequestOptions, PullRequestGateway } from '../../domain/gateways/workspace.gateways';
+import { ActionError, toActionErrorCode } from '../../domain/models/action-error.models';
 import { ChangedFileItem, WorkspaceDataset } from '../../domain/models/workspace.models';
 import { PermanentError, retryWithJitter } from '../resilience/jitter-backoff';
 import {
@@ -20,42 +21,36 @@ export class HttpPullRequestGateway implements PullRequestGateway {
   }
 
   async approvePullRequest(prId: number, options?: ActionRequestOptions): Promise<void> {
-    await this.requestJson(`/api/v1/prs/${prId}/approve`, 'POST', { body: 'Approved via PR Follower' }, options);
+    await this.postAction(`/api/v1/prs/${prId}/approve`, { body: 'Approved via PR Follower' }, options);
   }
 
-  async mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha: string }> {
-    const res = await this.requestJson<{ sha?: string }>(
-      `/api/v1/prs/${prId}/merge`,
-      'POST',
-      { method: 'squash' },
-      options,
-    );
-    return { sha: res?.sha ?? 'a1b2c3d' };
+  async mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha?: string }> {
+    const res = await this.postAction<{ sha?: string }>(`/api/v1/prs/${prId}/merge`, { method: 'squash' }, options);
+    return { sha: res?.sha };
   }
 
   async batchMergePullRequests(
     prIds: readonly number[],
     options?: ActionRequestOptions,
   ): Promise<{ mergedIds: readonly number[] }> {
-    const res = await this.requestJson<{ merged_ids?: number[] }>(
+    const res = await this.postAction<{ merged_ids?: number[] }>(
       '/api/v1/prs/batch-merge',
-      'POST',
       { pr_ids: prIds, method: 'squash' },
       options,
     );
-    return { mergedIds: res?.merged_ids ?? prIds };
+    return { mergedIds: res?.merged_ids ?? [] };
   }
 
   async commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void> {
-    await this.requestJson(`/api/v1/prs/${prId}/dependabot-command`, 'POST', { command }, options);
+    await this.postAction(`/api/v1/prs/${prId}/dependabot-command`, { command }, options);
   }
 
   async snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void> {
-    await this.requestJson(`/api/v1/prs/${prId}/snooze`, 'POST', { condition }, options);
+    await this.postAction(`/api/v1/prs/${prId}/snooze`, { condition }, options);
   }
 
   async claimPullRequest(prId: number, options?: ActionRequestOptions): Promise<void> {
-    await this.requestJson(`/api/v1/prs/${prId}/claim`, 'POST', {}, options);
+    await this.postAction(`/api/v1/prs/${prId}/claim`, {}, options);
   }
 
   async cancelServerOperation(operationId: string): Promise<void> {
@@ -83,6 +78,32 @@ export class HttpPullRequestGateway implements PullRequestGateway {
       throw new Error('changed files unavailable');
     }
     return (res.files ?? []).map(mapPullRequestFile);
+  }
+
+  /**
+   * A change the user asked for: sent once (a retried POST could repeat it), never reported as
+   * done when it was not. A refusal rejects with the server's code and explanation; no answer at
+   * all is an unknown outcome, because the request may have been applied.
+   */
+  private async postAction<T>(url: string, body: unknown, options?: ActionRequestOptions): Promise<T | null> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (options?.operationId) {
+      headers['X-Operation-ID'] = options.operationId;
+    }
+    let response: Response;
+    try {
+      response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: options?.signal });
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw err;
+      }
+      throw new ActionError('outcome_unknown');
+    }
+    const payload = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+    if (!response.ok) {
+      throw new ActionError(toActionErrorCode(payload?.code), payload?.error ?? '');
+    }
+    return payload as T | null;
   }
 
   private async requestJson<T>(

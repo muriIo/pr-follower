@@ -161,6 +161,8 @@ TLS proxy requirements:
 
 At start the API logs `GitHub App credentials not set` when background reads still depend on a follower's token, and `invalid GitHub App credentials` (then exits) when the key cannot be parsed. A PR's files stay "not evaluated" until read: if they never are, check that the app has *Contents* and *Pull requests* read access on that installation.
 
+Approve, merge and `@dependabot` comments are sent to GitHub with the signed-in user's own token, so they are limited by what the app is allowed to do *and* by what that user can do. "GitHub denied the action" with *Resource not accessible by integration* means the installation owner has not accepted the app's *Pull requests* / *Contents* write permission (GitHub emails them when permissions change; they accept on the installation page). GitHub never lets a user approve their own PR, and the app does not offer it.
+
 The sign-in screen shows why a login failed (`?auth_error=`):
 
 | Code | Meaning | Fix |

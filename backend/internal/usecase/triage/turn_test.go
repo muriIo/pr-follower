@@ -276,22 +276,22 @@ func TestTurn_RepositoriesWithoutCodeownersAssignNothing(t *testing.T) {
 	}
 }
 
-func TestTurn_KeepsWhatIDidInTheApp(t *testing.T) {
+func TestTurn_MyApprovalComesFromTheReviewGitHubRecordedNotFromAFlag(t *testing.T) {
 	t.Parallel()
-	f := newTurnFixture(openPR(1), openPR(2))
-	f.changes(1, "sha1", "docs/x.md") // not mine, but I approved it from the Seats
-	f.prs.states[1] = entity.UserPRState{PullRequestID: 1, UserID: 1, TurnState: entity.TurnStateApprovedByMe}
-	f.changes(2, "sha1", "src/app/x.ts")
-	f.prs.states[2] = entity.UserPRState{PullRequestID: 2, UserID: 1, TurnState: entity.TurnStateApprovedByMe}
+	f := newTurnFixture(openPR(1), openPR(2), openPR(3))
+	f.changes(1, "sha1", "docs/x.md")    // not mine
+	f.changes(2, "sha1", "src/app/x.ts") // mine, and I approved it on GitHub
+	f.changes(3, "sha1", "src/app/y.ts") // mine; an old in-app flag says approved, GitHub has no approval
+	f.reviewed(1, "murilo", entity.ReviewApproved, "sha1")
+	f.reviewed(2, "murilo", entity.ReviewApproved, "sha1")
+	f.prs.states[3] = entity.UserPRState{PullRequestID: 3, UserID: 1, TurnState: entity.TurnStateApprovedByMe}
 
 	snap := f.snapshot(t)
-	if len(snap.InboxWaitingOnMe) != 0 || !slices.Equal(ids(snap.InboxDimmed), []uint64{1, 2}) {
-		t.Fatalf("a PR I approved is dimmed, not my turn: waiting=%v dimmed=%v", ids(snap.InboxWaitingOnMe), ids(snap.InboxDimmed))
+	if got := ids(snap.InboxWaitingOnMe); !slices.Equal(got, []uint64{3}) {
+		t.Fatalf("a stored flag no longer decides: my turn = %v, want PR 3", got)
 	}
-	for _, item := range snap.InboxDimmed {
-		if item.UserState.TurnState != entity.TurnStateApprovedByMe {
-			t.Fatalf("expected APPROVED_BY_ME, got %+v", item.UserState)
-		}
+	if got := ids(snap.InboxDimmed); !slices.Equal(got, []uint64{2}) || snap.InboxDimmed[0].UserState.TurnState != entity.TurnStateApprovedByMe {
+		t.Fatalf("my approved PR is dimmed as APPROVED_BY_ME, and a PR I do not own is not in my inbox: %v", got)
 	}
 }
 

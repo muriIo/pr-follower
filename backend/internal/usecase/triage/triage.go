@@ -158,11 +158,8 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 		st := userStates[pr.ID]
 		st.PullRequestID, st.UserID = pr.ID, userID
 
-		// What the user did in the app holds whoever owns the files.
-		if st.TurnState == entity.TurnStateApprovedByMe {
-			snapshot.InboxDimmed = append(snapshot.InboxDimmed, InboxItem{PullRequest: pr, UserState: st})
-			continue
-		}
+		// Snoozing is the user's own choice and holds whoever owns the files. An approval is not
+		// stored: it is derived below from the review GitHub recorded, per head commit.
 		if st.IsSnoozedFor(pr.HeadSHA, pr.CIStatus) {
 			st.TurnState = entity.TurnStateSnoozed
 			snapshot.InboxDimmed = append(snapshot.InboxDimmed, InboxItem{PullRequest: pr, UserState: st})

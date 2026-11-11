@@ -28,7 +28,8 @@ export interface AuthGateway {
 export interface PullRequestGateway {
   fetchWorkspace?(options?: ActionRequestOptions): Promise<WorkspaceDataset | null>;
   approvePullRequest(prId: number, options?: ActionRequestOptions): Promise<void>;
-  mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha: string }>;
+  /** `sha` is set only when GitHub reported the merge commit. Writes reject with an ActionError. */
+  mergePullRequest(prId: number, options?: ActionRequestOptions): Promise<{ sha?: string }>;
   batchMergePullRequests?(prIds: readonly number[], options?: ActionRequestOptions): Promise<{ mergedIds: readonly number[] }>;
   commentOnPullRequest(prId: number, command: string, options?: ActionRequestOptions): Promise<void>;
   snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void>;

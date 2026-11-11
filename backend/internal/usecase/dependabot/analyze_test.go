@@ -76,13 +76,13 @@ func (f *fakeGHGateway) ListPRChangedFiles(_ context.Context, _ entity.Repositor
 func (f *fakeGHGateway) StreamRepoTarball(_ context.Context, _ entity.Repository, _ string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader([]byte("tarball"))), nil
 }
-func (f *fakeGHGateway) ApprovePullRequest(_ context.Context, _ entity.Repository, _ int, _ string) error {
+func (f *fakeGHGateway) ApprovePullRequest(_ context.Context, _ string, _ entity.Repository, _ int, _ string) (entity.PullRequestReview, error) {
+	return entity.PullRequestReview{}, nil
+}
+func (f *fakeGHGateway) MergePullRequest(_ context.Context, _ string, _ entity.Repository, _ int, _ string) error {
 	return nil
 }
-func (f *fakeGHGateway) MergePullRequest(_ context.Context, _ entity.Repository, _ int, _ string) error {
-	return nil
-}
-func (f *fakeGHGateway) CreatePRComment(_ context.Context, _ entity.Repository, _ int, _ string) error {
+func (f *fakeGHGateway) CreatePRComment(_ context.Context, _ string, _ entity.Repository, _ int, _ string) error {
 	return nil
 }
 

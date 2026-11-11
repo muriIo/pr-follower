@@ -74,7 +74,6 @@ func main() {
 		Installations: installations,
 	})
 
-	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGateway, sseHub)
 	analyzeUC := dependabot.NewAnalyzeUseCase(
 		prRepo,
 		repoRepo,
@@ -88,6 +87,8 @@ func main() {
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
 	// login endpoint redirects with auth_error=not_configured and every API route is 401.
 	var authUC *auth.UseCase
+	// Acts on GitHub as the signed-in user; nil without sign-in (every API route is 401 then).
+	var actionUC *action.UseCase
 	var importUC *repoimport.UseCase
 	var filesUC *prfiles.UseCase
 	// Reads PR changed files with user tokens; nil without sign-in, which leaves PRs "not evaluated".
@@ -109,6 +110,10 @@ func main() {
 		filesSyncer = changedFilesUC
 		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
+		actionUC = action.NewUseCase(action.Deps{
+			PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
+			GitHub: ghGateway, State: userAPI, Reviews: prRepo, Pub: sseHub,
+		})
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}

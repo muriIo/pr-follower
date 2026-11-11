@@ -78,6 +78,7 @@ h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
 @keyframes pf-rot { to { transform: rotate(360deg); } }
 .pf-note { color: var(--text-2); }
 .pf-note-ok { color: #34D399; }
+.pf-note-err { color: #FB7185; }
 .pf-link { color: var(--text-2); font-size: 12px; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
 .pf-link:hover { color: var(--text); text-decoration-color: currentColor; }
 

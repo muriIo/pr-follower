@@ -93,3 +93,52 @@ describe('ActionCancellationManager without a running action', () => {
     expect(manager.getView(manager.actionsState(), 'batch').idle).toBe(true);
   });
 });
+
+describe('ActionCancellationManager failures and cancellation between steps', () => {
+  it('shows a failure as an error note instead of throwing into the void', async () => {
+    TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+    const manager = TestBed.inject(ActionCancellationManager);
+
+    await manager.run(
+      'merge:7',
+      [{ label: 'Aprovando...', execute: async () => { throw new Error('boom'); } }],
+      () => 'ok',
+      () => 'cancelado',
+      (err, stepIndex) => `falhou ${stepIndex}: ${(err as Error).message}`,
+    );
+
+    const view = manager.getView(undefined, 'merge:7');
+    expect(view.running).toBe(false);
+    expect(view.note).toBe('falhou 0: boom');
+    expect(view.noteCls).toBe('pf-note pf-note-err');
+  });
+
+  it('still throws when nobody handles the failure', async () => {
+    TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+    const manager = TestBed.inject(ActionCancellationManager);
+    await expect(
+      manager.run('k', [{ label: 'x', execute: async () => { throw new Error('boom'); } }], () => null, () => 'c'),
+    ).rejects.toThrow('boom');
+  });
+
+  it('stops before the next step once cancelled, even when the running step ignores the signal', async () => {
+    TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+    const manager = TestBed.inject(ActionCancellationManager);
+    const second = vi.fn();
+
+    const promise = manager.run(
+      'batch',
+      [
+        { label: '1', execute: async () => undefined },
+        { label: '2', execute: async () => second() },
+      ],
+      () => 'done',
+      (idx) => `cancelled at ${idx}`,
+    );
+    manager.cancel('batch');
+    await promise;
+
+    expect(second).not.toHaveBeenCalled();
+    expect(manager.getView(undefined, 'batch').note).toBe('cancelled at 1');
+  });
+});

@@ -372,3 +372,50 @@ func TestUserClient_ListPullRequestReviews(t *testing.T) {
 		t.Fatalf("canceled: expected context.Canceled, got %v", err)
 	}
 }
+
+func TestUserClient_GetPullRequest(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/repos/acme/web/pulls/7":
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "merged": false, "user": map[string]any{"login": "bia"}, "head": map[string]any{"sha": "sha7"}})
+		case "/repos/acme/web/pulls/8":
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 8, "state": "closed", "merged": true, "user": map[string]any{"login": "bia"}, "head": map[string]any{"sha": "sha8"}})
+		case "/repos/acme/web/pulls/9":
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 9, "state": "closed", "merged": false, "user": nil, "head": map[string]any{"sha": "sha9"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+	ctx := context.Background()
+
+	open, err := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 7)
+	if err != nil || open != (entity.RemotePullRequestState{Open: true, HeadSHA: "sha7", AuthorLogin: "bia"}) {
+		t.Fatalf("open PR = %+v, %v", open, err)
+	}
+	merged, _ := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 8)
+	if merged.Open || !merged.Merged || merged.HeadSHA != "sha8" {
+		t.Fatalf("merged PR = %+v", merged)
+	}
+	closed, _ := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 9)
+	if closed.Open || closed.Merged || closed.AuthorLogin != "" {
+		t.Fatalf("closed PR = %+v", closed)
+	}
+	if _, err := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 10); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown PR: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.GetPullRequest(ctx, "revoked", "acme", "web", 7); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := c.GetPullRequest(canceled, "ghu_a", "acme", "web", 7); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}
