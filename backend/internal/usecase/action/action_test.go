@@ -107,6 +107,9 @@ type fakeGitHub struct {
 	approveErr, mergeErr, commentErr error
 	applyThenFail                    bool // the write is applied, then the answer is lost
 	stateErr, reviewsErr             error
+	runs                             map[string][]entity.CheckRun     // head commit -> check runs
+	commitStatuses                   map[string][]entity.CommitStatus // head commit -> legacy statuses
+	checksErr                        error
 	onMerge                          func(prNumber int)
 
 	// what the use case did
@@ -199,6 +202,20 @@ func (f *fakeGitHub) ListPullRequestReviews(_ context.Context, _ string, _, _ st
 		return nil, f.reviewsErr
 	}
 	return f.reviews[n], nil
+}
+
+func (f *fakeGitHub) ListCommitCheckRuns(_ context.Context, _ string, _, _, sha string) ([]entity.CheckRun, error) {
+	if f.checksErr != nil {
+		return nil, f.checksErr
+	}
+	return f.runs[sha], nil
+}
+
+func (f *fakeGitHub) ListCommitStatuses(_ context.Context, _ string, _, _, sha string) ([]entity.CommitStatus, error) {
+	if f.checksErr != nil {
+		return nil, f.checksErr
+	}
+	return f.commitStatuses[sha], nil
 }
 
 func loginOf(token string) string {

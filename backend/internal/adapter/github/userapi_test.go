@@ -298,7 +298,7 @@ func TestUserClient_ListCommitCheckRuns(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"total_count": 2,
 			"check_runs": []map[string]any{
-				{"id": 11, "name": "build", "status": "completed", "conclusion": "success", "head_sha": "abc123"},
+				{"id": 11, "name": "build", "status": "completed", "conclusion": "success", "head_sha": "abc123", "details_url": "https://ci.example.com/11", "output": map[string]any{"title": "Sem mudanças em apps/web"}},
 				{"id": 12, "name": "test", "status": "in_progress", "conclusion": nil, "head_sha": "abc123"},
 			},
 		})
@@ -310,7 +310,7 @@ func TestUserClient_ListCommitCheckRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCommitCheckRuns() error: %v", err)
 	}
-	if len(runs) != 2 || runs[0] != (entity.CheckRun{ID: 11, HeadSHA: "abc123", Name: "build", Status: "completed", Conclusion: "success"}) ||
+	if len(runs) != 2 || runs[0] != (entity.CheckRun{ID: 11, HeadSHA: "abc123", Name: "build", Status: "completed", Conclusion: "success", Title: "Sem mudanças em apps/web", DetailsURL: "https://ci.example.com/11"}) ||
 		runs[1].Status != "in_progress" || runs[1].Conclusion != "" {
 		t.Fatalf("unexpected check runs: %+v", runs)
 	}
@@ -416,6 +416,50 @@ func TestUserClient_GetPullRequest(t *testing.T) {
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
 	if _, err := c.GetPullRequest(canceled, "ghu_a", "acme", "web", 7); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: expected context.Canceled, got %v", err)
+	}
+}
+
+func TestUserClient_ListCommitStatuses(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer ghu_a" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path != "/repos/acme/web/commits/abc123/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"state": "pending", "total_count": 2,
+			"statuses": []map[string]any{
+				{"id": 31, "context": "Vercel", "state": "pending", "description": "Vercel is deploying your app", "target_url": "https://vercel.com/d/1"},
+				{"id": 32, "context": "jenkins/pr-validate", "state": "success", "description": nil, "target_url": nil},
+			},
+		})
+	}))
+	defer server.Close()
+	c := newUserClient(server)
+
+	got, err := c.ListCommitStatuses(context.Background(), "ghu_a", "acme", "web", "abc123")
+	if err != nil {
+		t.Fatalf("ListCommitStatuses() error: %v", err)
+	}
+	if len(got) != 2 || got[0] != (entity.CommitStatus{ID: 31, Context: "Vercel", State: "pending", Description: "Vercel is deploying your app", TargetURL: "https://vercel.com/d/1"}) ||
+		got[1] != (entity.CommitStatus{ID: 32, Context: "jenkins/pr-validate", State: "success"}) {
+		t.Fatalf("unexpected statuses: %+v", got)
+	}
+
+	if _, err := c.ListCommitStatuses(context.Background(), "ghu_a", "acme", "web", "nope"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown commit: expected ErrNotFound, got %v", err)
+	}
+	if _, err := c.ListCommitStatuses(context.Background(), "revoked", "acme", "web", "abc123"); !errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("revoked token: expected ErrUnauthorized, got %v", err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.ListCommitStatuses(canceled, "ghu_a", "acme", "web", "abc123"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled: expected context.Canceled, got %v", err)
 	}
 }

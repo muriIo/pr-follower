@@ -25,6 +25,9 @@ var (
 	// ErrNotAnalysable means a Dependabot PR is one the analysis cannot read yet (several packages
 	// in one PR, or a lockfile format no analyzer understands). It is not the caller's mistake.
 	ErrNotAnalysable = errors.New("this pull request cannot be analysed")
+	// ErrChecksRunning means a check or commit status of the PR's head commit has not finished, so it
+	// cannot be approved or merged yet. It is a conflict: the same request works once they finish.
+	ErrChecksRunning = fmt.Errorf("%w: checks are still running", ErrConflict)
 	// ErrOwnPullRequest means the user tried to approve a pull request they authored: GitHub
 	// does not allow it.
 	ErrOwnPullRequest = errors.New("you cannot approve your own pull request")

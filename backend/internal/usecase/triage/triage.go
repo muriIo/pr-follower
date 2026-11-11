@@ -48,6 +48,9 @@ type WorkspaceSnapshot struct {
 	// Reviews says where each reviewer stands, by PR id, for the PRs somebody reviewed. It shows in
 	// the drawer whoever owns the files; the turn itself is derived separately.
 	Reviews map[uint64][]entity.ReviewDecision `json:"reviews"`
+	// Checks lists each open PR's current checks (the latest run of each check on its head commit),
+	// by PR id, for the PRs whose commit reported any: what GitHub's checks panel shows.
+	Checks map[uint64][]entity.CheckRun `json:"checks"`
 }
 
 type UseCase struct {
@@ -58,6 +61,15 @@ type UseCase struct {
 	files    port.ChangedFilesStore
 	syncer   port.ChangedFilesSyncer
 	reviews  port.ReviewStore
+	checks   port.CheckRunBatchReader
+}
+
+// Option adds an optional collaborator to the use case.
+type Option func(*UseCase)
+
+// WithCheckRuns lets the snapshot carry each PR's checks.
+func WithCheckRuns(reader port.CheckRunBatchReader) Option {
+	return func(uc *UseCase) { uc.checks = reader }
 }
 
 // NewUseCase wires the triage use case. files holds each PR's changed files and syncer reads the
@@ -71,8 +83,13 @@ func NewUseCase(
 	files port.ChangedFilesStore,
 	syncer port.ChangedFilesSyncer,
 	reviews port.ReviewStore,
+	opts ...Option,
 ) *UseCase {
-	return &UseCase{userRepo: userRepo, repoRepo: repoRepo, prRepo: prRepo, pub: pub, files: files, syncer: syncer, reviews: reviews}
+	uc := &UseCase{userRepo: userRepo, repoRepo: repoRepo, prRepo: prRepo, pub: pub, files: files, syncer: syncer, reviews: reviews}
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*WorkspaceSnapshot, error) {
@@ -137,6 +154,10 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 		Seats:                 make([]RepoSeat, 0, len(repos)),
 		OwnershipPendingPRIDs: []uint64{},
 		Reviews:               map[uint64][]entity.ReviewDecision{},
+		Checks:                map[uint64][]entity.CheckRun{},
+	}
+	if err := uc.collectChecks(ctx, snapshot, repoIDs, prs); err != nil {
+		return nil, err
 	}
 
 	for _, pr := range prs {
@@ -236,6 +257,39 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 	return snapshot, nil
 }
 
+// collectChecks reads the checks of every open PR in one query and keeps each PR's own: the
+// latest run of each check on its head commit.
+func (uc *UseCase) collectChecks(ctx context.Context, snapshot *WorkspaceSnapshot, repoIDs []uint64, prs []entity.PullRequest) error {
+	if uc.checks == nil || len(prs) == 0 {
+		return nil
+	}
+	shas := make([]string, 0, len(prs))
+	for _, pr := range prs {
+		if pr.HeadSHA != "" {
+			shas = append(shas, pr.HeadSHA)
+		}
+	}
+	runs, err := uc.checks.ListCheckRunsForCommits(ctx, repoIDs, shas)
+	if err != nil {
+		return err
+	}
+	type commit struct {
+		repoID uint64
+		sha    string
+	}
+	byCommit := map[commit][]entity.CheckRun{}
+	for _, run := range runs {
+		key := commit{run.RepositoryID, run.HeadSHA}
+		byCommit[key] = append(byCommit[key], run)
+	}
+	for _, pr := range prs {
+		if latest := entity.LatestCheckRuns(byCommit[commit{pr.RepositoryID, pr.HeadSHA}]); len(latest) > 0 {
+			snapshot.Checks[pr.ID] = latest
+		}
+	}
+	return nil
+}
+
 func (uc *UseCase) SnoozePR(ctx context.Context, userID, prID uint64, condition entity.SnoozeCondition) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
@@ -243,6 +297,12 @@ func (uc *UseCase) SnoozePR(ctx context.Context, userID, prID uint64, condition 
 	pr, err := uc.prRepo.GetByID(ctx, prID)
 	if err != nil {
 		return err
+	}
+
+	// Waiting for CI to pass makes sense only while it can still pass: a PR whose CI already passed
+	// has nothing to wait for, and one with no CI would stay silenced forever.
+	if condition == entity.SnoozeConditionCIGreen && pr.CIStatus != entity.CIStatusPending && pr.CIStatus != entity.CIStatusFailure {
+		return fmt.Errorf("%w: CI is %q, so there is nothing to wait for", entity.ErrConflict, pr.CIStatus)
 	}
 
 	st, err := uc.prRepo.GetUserPRState(ctx, prID, userID)

@@ -17,6 +17,9 @@ type CheckRunEventPayload struct {
 	Name         string
 	Status       string // queued | in_progress | completed
 	Conclusion   string
+	// Title is the check's short result, DetailsURL where it reports in full.
+	Title      string
+	DetailsURL string
 }
 
 var ciEventTypes = map[entity.CIStatus]string{
@@ -40,7 +43,7 @@ func (uc *IngestUseCase) IngestCheckRunEvent(ctx context.Context, p CheckRunEven
 		return err
 	}
 
-	incoming := entity.CheckRun{ID: p.CheckRunID, RepositoryID: repo.ID, HeadSHA: p.HeadSHA, Name: p.Name, Status: p.Status, Conclusion: p.Conclusion}
+	incoming := entity.CheckRun{ID: p.CheckRunID, RepositoryID: repo.ID, HeadSHA: p.HeadSHA, Name: p.Name, Status: p.Status, Conclusion: p.Conclusion, Title: p.Title, DetailsURL: p.DetailsURL}
 	stored, err := uc.checks.GetCheckRun(ctx, p.CheckRunID)
 	switch {
 	case err == nil:
@@ -54,12 +57,18 @@ func (uc *IngestUseCase) IngestCheckRunEvent(ctx context.Context, p CheckRunEven
 		return err
 	}
 
-	runs, err := uc.checks.ListCheckRuns(ctx, repo.ID, p.HeadSHA)
+	return uc.syncCI(ctx, repo, p.HeadSHA)
+}
+
+// syncCI re-derives the CI of every open PR whose head is the commit, from all its checks (check
+// runs and commit statuses), and announces the PRs whose CI changed. It converges (ADR-0011).
+func (uc *IngestUseCase) syncCI(ctx context.Context, repo *entity.Repository, sha string) error {
+	runs, err := uc.checks.ListCheckRuns(ctx, repo.ID, sha)
 	if err != nil {
 		return err
 	}
 	ci := entity.DeriveCIStatus(runs)
-	prs, err := uc.checks.ListOpenByHeadSHA(ctx, repo.ID, p.HeadSHA)
+	prs, err := uc.checks.ListOpenByHeadSHA(ctx, repo.ID, sha)
 	if err != nil {
 		return err
 	}
@@ -90,4 +99,49 @@ func (uc *IngestUseCase) IngestCheckRunEvent(ctx context.Context, p CheckRunEven
 		}
 	}
 	return nil
+}
+
+// StatusEventPayload is the part of GitHub's `status` webhook (a legacy commit status) PR Follower uses.
+type StatusEventPayload struct {
+	StatusID     int64
+	GitHubRepoID int64
+	SHA          string
+	Context      string
+	State        string // pending | success | failure | error
+	Description  string
+	TargetURL    string
+}
+
+// IngestStatusEvent records a commit status and re-derives the CI of the open PRs at that commit.
+// Statuses are how Jenkins, Vercel and other CI report; GitHub lists them beside check runs, so a
+// pending one keeps a PR from looking green. A redelivered status changes nothing (ADR-0011).
+func (uc *IngestUseCase) IngestStatusEvent(ctx context.Context, p StatusEventPayload) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	repo, err := uc.repoRepo.GetByGitHubRepoID(ctx, p.GitHubRepoID)
+	if errors.Is(err, entity.ErrNotFound) {
+		return nil // not a repository anyone follows
+	}
+	if err != nil {
+		return err
+	}
+
+	incoming := entity.CommitStatus{
+		ID: p.StatusID, RepositoryID: repo.ID, HeadSHA: p.SHA, Context: p.Context,
+		State: p.State, Description: p.Description, TargetURL: p.TargetURL,
+	}
+	stored, err := uc.checks.GetCommitStatus(ctx, p.StatusID)
+	switch {
+	case err == nil:
+		if *stored == incoming {
+			return nil
+		}
+	case !errors.Is(err, entity.ErrNotFound):
+		return err
+	}
+	if err := uc.checks.UpsertCommitStatus(ctx, incoming); err != nil {
+		return err
+	}
+	return uc.syncCI(ctx, repo, p.SHA)
 }

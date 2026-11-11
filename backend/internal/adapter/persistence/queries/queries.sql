@@ -186,25 +186,49 @@ SELECT COUNT(*) FROM user_repo_follows
 WHERE user_id = $1 AND repository_id = $2;
 
 -- name: UpsertCheckRun :exec
-INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 ON CONFLICT (check_run_id) DO UPDATE SET
     head_sha = EXCLUDED.head_sha,
     name = EXCLUDED.name,
     status = EXCLUDED.status,
     conclusion = EXCLUDED.conclusion,
+    title = EXCLUDED.title,
+    details_url = EXCLUDED.details_url,
     updated_at = CURRENT_TIMESTAMP;
 
 -- name: GetCheckRun :one
-SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
 WHERE check_run_id = $1;
 
 -- name: ListCheckRunsByHead :many
-SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
 WHERE repository_id = $1 AND head_sha = $2
 ORDER BY check_run_id ASC;
+
+-- name: UpsertCommitStatus :exec
+INSERT INTO pr_commit_statuses (status_id, repository_id, head_sha, context, state, description, target_url, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+ON CONFLICT (status_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    context = EXCLUDED.context,
+    state = EXCLUDED.state,
+    description = EXCLUDED.description,
+    target_url = EXCLUDED.target_url,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- name: GetCommitStatus :one
+SELECT status_id, repository_id, head_sha, context, state, description, target_url
+FROM pr_commit_statuses
+WHERE status_id = $1;
+
+-- name: ListCommitStatusesByHead :many
+SELECT status_id, repository_id, head_sha, context, state, description, target_url
+FROM pr_commit_statuses
+WHERE repository_id = $1 AND head_sha = $2
+ORDER BY status_id ASC;
 
 -- name: ListOpenPullRequestsByHead :many
 SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,

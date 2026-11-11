@@ -132,7 +132,7 @@ func main() {
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo)
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triage.WithCheckRuns(prRepo))
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer, ingestOpts...)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 

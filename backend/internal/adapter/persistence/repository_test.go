@@ -649,3 +649,113 @@ func TestPullRequestRepository_ReviewsAreUpsertedByGitHubID(t *testing.T) {
 		t.Error("ListReviews: expected cancellation error")
 	}
 }
+
+func TestPullRequestRepository_CheckRunsKeepWhatGitHubShowsAndListManyCommitsAtOnce(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	one := &entity.Repository{GitHubRepoID: 910, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	two := &entity.Repository{GitHubRepoID: 911, Owner: "acme", Name: "api", FullName: "acme/api", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, one)
+	_ = repos.Upsert(ctx, two)
+
+	run := func(id int64, repo *entity.Repository, sha, name string) entity.CheckRun {
+		return entity.CheckRun{ID: id, RepositoryID: repo.ID, HeadSHA: sha, Name: name, Status: "completed", Conclusion: "success",
+			Title: "Sem mudanças em apps/" + name, DetailsURL: "https://ci.example.com/" + name}
+	}
+	for _, r := range []entity.CheckRun{run(1, one, "s1", "build"), run(2, one, "s1", "test"), run(3, one, "s2", "build"), run(4, two, "s1", "deploy"), run(5, one, "s9", "other")} {
+		if err := prs.UpsertCheckRun(ctx, r); err != nil {
+			t.Fatalf("UpsertCheckRun() error: %v", err)
+		}
+	}
+
+	got, err := prs.GetCheckRun(ctx, 1)
+	if err != nil || got.Title != "Sem mudanças em apps/build" || got.DetailsURL != "https://ci.example.com/build" {
+		t.Fatalf("the short result and the link must round-trip: %+v, %v", got, err)
+	}
+
+	// One query for many commits: only the pairs asked for, even when a commit id repeats in another repository.
+	many, err := prs.ListCheckRunsForCommits(ctx, []uint64{one.ID, two.ID}, []string{"s1", "s2"})
+	if err != nil {
+		t.Fatalf("ListCheckRunsForCommits() error: %v", err)
+	}
+	ids := map[int64]bool{}
+	for _, r := range many {
+		ids[r.ID] = true
+	}
+	if len(many) != 4 || ids[5] || !ids[1] || !ids[2] || !ids[3] || !ids[4] {
+		t.Fatalf("expected runs 1-4 and not 5 (another commit): %+v", many)
+	}
+	if empty, err := prs.ListCheckRunsForCommits(ctx, nil, []string{"s1"}); err != nil || len(empty) != 0 {
+		t.Fatalf("no repositories: %+v, %v", empty, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := prs.ListCheckRunsForCommits(canceled, []uint64{one.ID}, []string{"s1"}); err == nil {
+		t.Error("expected cancellation error")
+	}
+}
+
+func TestPullRequestRepository_CommitStatusesAreListedAmongTheChecks(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 920, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+
+	if _, err := prs.GetCommitStatus(ctx, 9001); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("unknown status: expected ErrNotFound, got %v", err)
+	}
+	status := entity.CommitStatus{ID: 9001, RepositoryID: repo.ID, HeadSHA: "abc", Context: "Vercel", State: "pending",
+		Description: "Vercel is deploying your app", TargetURL: "https://vercel.com/deploy/1"}
+	if err := prs.UpsertCommitStatus(ctx, status); err != nil {
+		t.Fatalf("UpsertCommitStatus() error: %v", err)
+	}
+	_ = prs.UpsertCommitStatus(ctx, status) // the same id again: nothing duplicated
+	_ = prs.UpsertCommitStatus(ctx, entity.CommitStatus{ID: 9002, RepositoryID: repo.ID, HeadSHA: "other", Context: "Vercel", State: "success"})
+	// Check runs have their own id space: a run and a status may share a number.
+	_ = prs.UpsertCheckRun(ctx, entity.CheckRun{ID: 9001, RepositoryID: repo.ID, HeadSHA: "abc", Name: "Vercel Preview Comments", Status: "completed", Conclusion: "success"})
+
+	got, err := prs.GetCommitStatus(ctx, 9001)
+	if err != nil || *got != status {
+		t.Fatalf("GetCommitStatus() = %+v, %v", got, err)
+	}
+
+	// Both kinds come back in one list, so CI is derived from everything GitHub shows.
+	runs, err := prs.ListCheckRuns(ctx, repo.ID, "abc")
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("ListCheckRuns() = %+v, %v", runs, err)
+	}
+	bySource := map[string]entity.CheckRun{}
+	for _, r := range runs {
+		bySource[r.Source] = r
+	}
+	if s := bySource[entity.CheckSourceStatus]; s.Name != "Vercel" || s.Status != "in_progress" || s.Title != "Vercel is deploying your app" || s.DetailsURL != "https://vercel.com/deploy/1" {
+		t.Fatalf("the status must come back shaped like a check: %+v", s)
+	}
+	if c := bySource[entity.CheckSourceCheckRun]; c.Name != "Vercel Preview Comments" {
+		t.Fatalf("the check run must still be there: %+v", c)
+	}
+	if ci := entity.DeriveCIStatus(runs); ci != entity.CIStatusPending {
+		t.Fatalf("a passing check run and a pending status: CI is pending, got %q", ci)
+	}
+
+	many, err := prs.ListCheckRunsForCommits(ctx, []uint64{repo.ID}, []string{"abc", "other"})
+	if err != nil || len(many) != 3 {
+		t.Fatalf("ListCheckRunsForCommits() must include statuses: %+v, %v", many, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := prs.UpsertCommitStatus(canceled, status); err == nil {
+		t.Error("UpsertCommitStatus: expected cancellation error")
+	}
+	if _, err := prs.GetCommitStatus(canceled, 9001); err == nil {
+		t.Error("GetCommitStatus: expected cancellation error")
+	}
+}

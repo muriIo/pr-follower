@@ -72,7 +72,7 @@ func (q *Queries) FollowRepository(ctx context.Context, arg FollowRepositoryPara
 }
 
 const getCheckRun = `-- name: GetCheckRun :one
-SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
 WHERE check_run_id = $1
 `
@@ -84,6 +84,8 @@ type GetCheckRunRow struct {
 	Name         string `json:"name"`
 	Status       string `json:"status"`
 	Conclusion   string `json:"conclusion"`
+	Title        string `json:"title"`
+	DetailsUrl   string `json:"details_url"`
 }
 
 func (q *Queries) GetCheckRun(ctx context.Context, checkRunID int64) (GetCheckRunRow, error) {
@@ -96,6 +98,39 @@ func (q *Queries) GetCheckRun(ctx context.Context, checkRunID int64) (GetCheckRu
 		&i.Name,
 		&i.Status,
 		&i.Conclusion,
+		&i.Title,
+		&i.DetailsUrl,
+	)
+	return i, err
+}
+
+const getCommitStatus = `-- name: GetCommitStatus :one
+SELECT status_id, repository_id, head_sha, context, state, description, target_url
+FROM pr_commit_statuses
+WHERE status_id = $1
+`
+
+type GetCommitStatusRow struct {
+	StatusID     int64  `json:"status_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Context      string `json:"context"`
+	State        string `json:"state"`
+	Description  string `json:"description"`
+	TargetUrl    string `json:"target_url"`
+}
+
+func (q *Queries) GetCommitStatus(ctx context.Context, statusID int64) (GetCommitStatusRow, error) {
+	row := q.db.QueryRowContext(ctx, getCommitStatus, statusID)
+	var i GetCommitStatusRow
+	err := row.Scan(
+		&i.StatusID,
+		&i.RepositoryID,
+		&i.HeadSha,
+		&i.Context,
+		&i.State,
+		&i.Description,
+		&i.TargetUrl,
 	)
 	return i, err
 }
@@ -393,7 +428,7 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 }
 
 const listCheckRunsByHead = `-- name: ListCheckRunsByHead :many
-SELECT check_run_id, repository_id, head_sha, name, status, conclusion
+SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
 WHERE repository_id = $1 AND head_sha = $2
 ORDER BY check_run_id ASC
@@ -411,6 +446,8 @@ type ListCheckRunsByHeadRow struct {
 	Name         string `json:"name"`
 	Status       string `json:"status"`
 	Conclusion   string `json:"conclusion"`
+	Title        string `json:"title"`
+	DetailsUrl   string `json:"details_url"`
 }
 
 func (q *Queries) ListCheckRunsByHead(ctx context.Context, arg ListCheckRunsByHeadParams) ([]ListCheckRunsByHeadRow, error) {
@@ -429,6 +466,61 @@ func (q *Queries) ListCheckRunsByHead(ctx context.Context, arg ListCheckRunsByHe
 			&i.Name,
 			&i.Status,
 			&i.Conclusion,
+			&i.Title,
+			&i.DetailsUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCommitStatusesByHead = `-- name: ListCommitStatusesByHead :many
+SELECT status_id, repository_id, head_sha, context, state, description, target_url
+FROM pr_commit_statuses
+WHERE repository_id = $1 AND head_sha = $2
+ORDER BY status_id ASC
+`
+
+type ListCommitStatusesByHeadParams struct {
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+}
+
+type ListCommitStatusesByHeadRow struct {
+	StatusID     int64  `json:"status_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Context      string `json:"context"`
+	State        string `json:"state"`
+	Description  string `json:"description"`
+	TargetUrl    string `json:"target_url"`
+}
+
+func (q *Queries) ListCommitStatusesByHead(ctx context.Context, arg ListCommitStatusesByHeadParams) ([]ListCommitStatusesByHeadRow, error) {
+	rows, err := q.db.QueryContext(ctx, listCommitStatusesByHead, arg.RepositoryID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommitStatusesByHeadRow{}
+	for rows.Next() {
+		var i ListCommitStatusesByHeadRow
+		if err := rows.Scan(
+			&i.StatusID,
+			&i.RepositoryID,
+			&i.HeadSha,
+			&i.Context,
+			&i.State,
+			&i.Description,
+			&i.TargetUrl,
 		); err != nil {
 			return nil, err
 		}
@@ -648,13 +740,15 @@ func (q *Queries) UpdateRepositoryAccess(ctx context.Context, arg UpdateReposito
 }
 
 const upsertCheckRun = `-- name: UpsertCheckRun :exec
-INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+INSERT INTO pr_check_runs (check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
 ON CONFLICT (check_run_id) DO UPDATE SET
     head_sha = EXCLUDED.head_sha,
     name = EXCLUDED.name,
     status = EXCLUDED.status,
     conclusion = EXCLUDED.conclusion,
+    title = EXCLUDED.title,
+    details_url = EXCLUDED.details_url,
     updated_at = CURRENT_TIMESTAMP
 `
 
@@ -665,6 +759,8 @@ type UpsertCheckRunParams struct {
 	Name         string `json:"name"`
 	Status       string `json:"status"`
 	Conclusion   string `json:"conclusion"`
+	Title        string `json:"title"`
+	DetailsUrl   string `json:"details_url"`
 }
 
 func (q *Queries) UpsertCheckRun(ctx context.Context, arg UpsertCheckRunParams) error {
@@ -675,6 +771,43 @@ func (q *Queries) UpsertCheckRun(ctx context.Context, arg UpsertCheckRunParams) 
 		arg.Name,
 		arg.Status,
 		arg.Conclusion,
+		arg.Title,
+		arg.DetailsUrl,
+	)
+	return err
+}
+
+const upsertCommitStatus = `-- name: UpsertCommitStatus :exec
+INSERT INTO pr_commit_statuses (status_id, repository_id, head_sha, context, state, description, target_url, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+ON CONFLICT (status_id) DO UPDATE SET
+    head_sha = EXCLUDED.head_sha,
+    context = EXCLUDED.context,
+    state = EXCLUDED.state,
+    description = EXCLUDED.description,
+    target_url = EXCLUDED.target_url,
+    updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertCommitStatusParams struct {
+	StatusID     int64  `json:"status_id"`
+	RepositoryID int64  `json:"repository_id"`
+	HeadSha      string `json:"head_sha"`
+	Context      string `json:"context"`
+	State        string `json:"state"`
+	Description  string `json:"description"`
+	TargetUrl    string `json:"target_url"`
+}
+
+func (q *Queries) UpsertCommitStatus(ctx context.Context, arg UpsertCommitStatusParams) error {
+	_, err := q.db.ExecContext(ctx, upsertCommitStatus,
+		arg.StatusID,
+		arg.RepositoryID,
+		arg.HeadSha,
+		arg.Context,
+		arg.State,
+		arg.Description,
+		arg.TargetUrl,
 	)
 	return err
 }
