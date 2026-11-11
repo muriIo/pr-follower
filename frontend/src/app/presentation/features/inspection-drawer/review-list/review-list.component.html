@@ -1,0 +1,16 @@
+@if (reviews().length > 0) {
+  <section class="pf-drawer-sec">
+    <h3 class="pf-section">{{ 'drawer.reviews' | t }}</h3>
+    <ul class="pf-reviews">
+      @for (r of reviews(); track r.reviewer) {
+        <li class="pf-review" [class.is-stale]="r.stale !== ''">
+          <span class="pf-mono">{{ r.reviewer }}</span>
+          <app-risk-badge [badgeClass]="r.badgeCls" [label]="r.label" />
+          @if (r.stale) {
+            <span class="pf-review-stale">{{ r.stale }}</span>
+          }
+        </li>
+      }
+    </ul>
+  </section>
+}

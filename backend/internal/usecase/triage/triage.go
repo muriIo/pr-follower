@@ -45,6 +45,9 @@ type WorkspaceSnapshot struct {
 	// OwnershipPendingPRIDs are PRs whose changed files are not known for their head commit yet,
 	// so nobody can say whether they touch the user's files. They are never shown as a turn.
 	OwnershipPendingPRIDs []uint64 `json:"ownership_pending_pr_ids"`
+	// Reviews says where each reviewer stands, by PR id, for the PRs somebody reviewed. It shows in
+	// the drawer whoever owns the files; the turn itself is derived separately.
+	Reviews map[uint64][]entity.ReviewDecision `json:"reviews"`
 }
 
 type UseCase struct {
@@ -133,9 +136,13 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 		DependabotPRs:         []DependabotItem{},
 		Seats:                 make([]RepoSeat, 0, len(repos)),
 		OwnershipPendingPRIDs: []uint64{},
+		Reviews:               map[uint64][]entity.ReviewDecision{},
 	}
 
 	for _, pr := range prs {
+		if decisions := service.LatestReviewDecisions(reviewsByPR[pr.ID], pr); len(decisions) > 0 {
+			snapshot.Reviews[pr.ID] = decisions
+		}
 		seat := seatMap[pr.RepositoryID]
 		if seat != nil {
 			seat.OpenPRCount++

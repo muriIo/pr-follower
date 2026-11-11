@@ -14,6 +14,7 @@ import {
   PerspectiveView,
   PullRequestItem,
   RepoInfo,
+  ReviewItem,
   RiskVerdictTier,
   SeatFilterType,
   SseConnectionState,
@@ -166,6 +167,16 @@ export interface DrawerBlastFileViewModel {
   readonly lines: readonly RenderedDiffLine[];
 }
 
+/** One reviewer in the drawer. */
+export interface DrawerReviewViewModel {
+  readonly reviewer: string;
+  /** What they decided, in the user's language. */
+  readonly label: string;
+  readonly badgeCls: string;
+  /** Set when the review is of an older commit, else ''. */
+  readonly stale: string;
+}
+
 export interface DrawerViewModel {
   readonly id: number;
   readonly number: number;
@@ -218,6 +229,8 @@ export interface DrawerViewModel {
   readonly showApprove: boolean;
   /** A Dependabot PR with no analysis yet: the user can ask for it. */
   readonly showAnalyze: boolean;
+  readonly hasReviews: boolean;
+  readonly reviews: readonly DrawerReviewViewModel[];
   /** Why the user cannot approve this PR (they wrote it), or ''. */
   readonly ownNote: string;
   readonly approvedMine: boolean;
@@ -783,6 +796,8 @@ export class WorkspaceStore {
       blockedCls: 'pf-blocked',
       blockedText,
       showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg),
+      hasReviews: (pr.reviews?.length ?? 0) > 0,
+      reviews: (pr.reviews ?? []).map((r) => this.reviewRow(r)),
       showApprove: !mine && !own,
       ownNote: own ? this.t('drawer.ownPr') : '',
       approvedMine: mine,
@@ -959,6 +974,16 @@ export class WorkspaceStore {
 
   cancelAction(key: string): void {
     this.cancellation.cancel(key);
+  }
+
+  private reviewRow(r: ReviewItem): DrawerReviewViewModel {
+    const badgeCls = { approved: 'pf-badge-baixo', changes_requested: 'pf-badge-alto', commented: 'pf-tag', dismissed: 'pf-tag' }[r.state];
+    return {
+      reviewer: r.reviewer.startsWith('@') ? r.reviewer : `@${r.reviewer}`,
+      label: this.t(`drawer.review.${r.state}`),
+      badgeCls,
+      stale: r.current ? '' : this.t('drawer.review.stale'),
+    };
   }
 
   /** Nobody approves a PR they wrote: GitHub refuses it, so it is not even offered. */

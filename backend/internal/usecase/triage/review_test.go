@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
 )
 
 type fakeReviewStore struct {
@@ -156,4 +157,53 @@ func TestTurn_DependabotPRsCarryMyApprovalAndTheTeammateWhoApproved(t *testing.T
 type triageItem struct {
 	approvedByMe    bool
 	approvedByLogin string
+}
+
+func TestSnapshot_CarriesWhoReviewedEachPR(t *testing.T) {
+	t.Parallel()
+	bump := openPR(3, func(p *entity.PullRequest) { p.IsDependabot, p.AuthorLogin = true, "dependabot[bot]" })
+	f := newTurnFixture(openPR(1), openPR(2), bump, openPR(4))
+	f.changes(1, "sha1", "docs/x.md")    // not mine: still visible in its drawer
+	f.changes(2, "sha1", "src/app/x.ts") // mine
+	f.changes(4, "sha1", "src/app/y.ts")
+	f.reviewed(1, "bia", entity.ReviewApproved, "sha1")
+	f.reviewed(2, "bia", entity.ReviewChangesRequested, "old")
+	f.reviewed(2, "carol", entity.ReviewApproved, "sha1")
+	f.reviewed(3, "bia", entity.ReviewApproved, "sha1")
+	f.reviewed(2, "alice", entity.ReviewCommented, "sha1") // the author: not a review
+
+	snap := f.snapshot(t)
+
+	login := func(id uint64) []string {
+		out := []string{}
+		for _, d := range snap.Reviews[id] {
+			out = append(out, d.Reviewer+":"+string(d.State))
+		}
+		return out
+	}
+	if got := login(1); len(got) != 1 || got[0] != "bia:APPROVED" {
+		t.Errorf("PR 1 (not mine): %v", got)
+	}
+	if got := login(2); len(got) != 2 || got[0] != "carol:APPROVED" || got[1] != "bia:CHANGES_REQUESTED" {
+		t.Errorf("PR 2 (current first, stale after): %v", got)
+	}
+	if snap.Reviews[2][1].Current {
+		t.Errorf("a review of an older commit is not current: %+v", snap.Reviews[2][1])
+	}
+	if got := login(3); len(got) != 1 {
+		t.Errorf("a Dependabot PR's reviewers are shown too: %v", got)
+	}
+	if _, ok := snap.Reviews[4]; ok {
+		t.Errorf("a PR nobody reviewed has no entry: %+v", snap.Reviews)
+	}
+}
+
+func TestSnapshot_WithoutAReviewStoreThereAreNoReviews(t *testing.T) {
+	t.Parallel()
+	f := newTurnFixture(openPR(1))
+	uc := triage.NewUseCase(&fakeUserRepo{user: &entity.User{ID: 1, Login: "murilo"}}, f.repos, f.prs, &fakePublisher{}, nil, nil, nil)
+	snap, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
+	if err != nil || snap.Reviews == nil || len(snap.Reviews) != 0 {
+		t.Fatalf("an empty map, never null: %+v, %v", snap, err)
+	}
 }

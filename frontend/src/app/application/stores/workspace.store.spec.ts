@@ -839,4 +839,35 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
     expect(local.pr).toBe(71);
     expect(local.text).toMatchObject({ params: { pr: 7 } });
   });
+
+  it('shows who reviewed the open PR, saying which reviews are of an older commit', () => {
+    const { store, translate } = setup({});
+    store.prs.set([
+      {
+        ...prOf(1, '@bia'),
+        reviews: [
+          { reviewer: 'bob', state: 'approved', current: true },
+          { reviewer: 'carol', state: 'changes_requested', current: false },
+          { reviewer: 'dave', state: 'commented', current: true },
+          { reviewer: 'erin', state: 'dismissed', current: true },
+        ],
+      },
+      prOf(2, '@bia'),
+    ]);
+
+    store.openPr(1);
+    const d = store.drawer()!;
+    expect(d.hasReviews).toBe(true);
+    expect(d.reviews.map((r) => [r.reviewer, r.label, r.stale])).toEqual([
+      ['@bob', translate('drawer.review.approved'), ''],
+      ['@carol', translate('drawer.review.changes_requested'), translate('drawer.review.stale')],
+      ['@dave', translate('drawer.review.commented'), ''],
+      ['@erin', translate('drawer.review.dismissed'), ''],
+    ]);
+    expect(d.reviews[0].badgeCls).toBe('pf-badge-baixo');
+    expect(d.reviews[1].badgeCls).toBe('pf-badge-alto');
+
+    store.openPr(2);
+    expect(store.drawer()!.hasReviews).toBe(false);
+  });
 });

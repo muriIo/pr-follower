@@ -58,11 +58,21 @@ export interface ChangedFileItem {
   readonly owned?: boolean;
 }
 
+/** Where one reviewer stands on a PR (the latest decision they recorded on GitHub). */
+export interface ReviewItem {
+  readonly reviewer: string;
+  readonly state: 'approved' | 'changes_requested' | 'commented' | 'dismissed';
+  /** False when the PR has new commits since: the reviewer looked at older code. */
+  readonly current: boolean;
+}
+
 export interface PullRequestItem {
   /** The PR's unique id: the key of every map and the handle the API routes take. */
   readonly id: number;
   /** GitHub's PR number, repeated across repositories: for display and GitHub URLs only. */
   readonly number: number;
+  /** Who reviewed it, current reviews first; absent when nobody did. */
+  readonly reviews?: readonly ReviewItem[];
   readonly rank: number;
   readonly repo: string;
   readonly title: string;

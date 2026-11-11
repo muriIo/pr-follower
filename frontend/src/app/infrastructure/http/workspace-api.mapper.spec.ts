@@ -554,6 +554,33 @@ describe('workspace-api.mapper', () => {
       expect(none.approvedBy).toBeUndefined();
     });
 
+    it('attaches who reviewed each PR, current reviews first as the server sends them', () => {
+      const a = dto(70, 7, 'acme/web');
+      const b = dto(71, 8, 'acme/web');
+      const prs = mapApiWorkspaceResponseToDataset({
+        snapshot: {
+          seats: [seat('acme/web', [a, b])],
+          reviews: {
+            '70': [
+              { reviewer: 'bob', state: 'APPROVED', commit_sha: 'h', submitted_at: '2026-11-10T09:00:00Z', current: true },
+              { reviewer: 'carol', state: 'CHANGES_REQUESTED', commit_sha: 'old', submitted_at: '2026-11-09T09:00:00Z', current: false },
+              { reviewer: 'dave', state: 'COMMENTED', commit_sha: 'h', submitted_at: '2026-11-10T10:00:00Z', current: true },
+              { reviewer: 'erin', state: 'DISMISSED', commit_sha: 'h', submitted_at: '2026-11-10T11:00:00Z', current: true },
+            ],
+          },
+        } as never,
+        timeline: [],
+      })!.prs;
+
+      expect(prs.find((p) => p.id === 70)!.reviews).toEqual([
+        { reviewer: 'bob', state: 'approved', current: true },
+        { reviewer: 'carol', state: 'changes_requested', current: false },
+        { reviewer: 'dave', state: 'commented', current: true },
+        { reviewer: 'erin', state: 'dismissed', current: true },
+      ]);
+      expect(prs.find((p) => p.id === 71)!.reviews).toBeUndefined();
+    });
+
     it('says why a bump that names several packages has no analysis', () => {
       const prs = mapApiWorkspaceResponseToDataset({
         snapshot: {
