@@ -300,13 +300,10 @@ func (uc *UseCase) recordCheckRuns(ctx context.Context, token string, repo *enti
 	return entity.DeriveCIStatus(known), nil
 }
 
-// codeownersPaths is where GitHub looks for CODEOWNERS, in its order of precedence.
-var codeownersPaths = []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"}
-
 // loadCodeowners reads the repository's CODEOWNERS with the user's token. ok is false when
 // GitHub could not answer, so the caller keeps what it knew instead of guessing "absent".
 func (uc *UseCase) loadCodeowners(ctx context.Context, token string, repo entity.InstallationRepository) ([]entity.CodeownerRule, entity.CodeownersStatus, bool) {
-	for _, path := range codeownersPaths {
+	for _, path := range service.CodeownersPaths {
 		content, err := uc.github.GetRepositoryFile(ctx, token, repo.Owner, repo.Name, path)
 		if err == nil {
 			return service.ParseCodeowners(string(content)), entity.CodeownersPresent, true

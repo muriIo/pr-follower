@@ -313,6 +313,8 @@ const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
   "timeline.event.ci.running": "CI rodando em #{pr}",
   "timeline.event.dependabot.command": "Enviou {command} em #{pr}",
   "timeline.event.repository.followed": "Passou a seguir {repo}",
+  "timeline.event.repository.codeowners_updated": "CODEOWNERS de {repo} atualizado ({rules} regras)",
+  "timeline.event.repository.codeowners_updated.absent": "CODEOWNERS de {repo} removido: ninguém recebe revisão por ele",
   "timeline.event.repository.access_lost": "Acesso perdido: o GitHub App foi desinstalado ou o repositório foi removido dele",
   "timeline.event.repository.access_suspended": "Acesso suspenso: a instalação do GitHub App foi suspensa",
   "timeline.event.repository.access_restored": "Acesso restaurado",

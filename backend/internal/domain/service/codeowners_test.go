@@ -133,3 +133,30 @@ func TestEvaluateCodeowners_FollowsGitHubPatternRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeownersPaths_AreGitHubsThreeLocationsInOrder(t *testing.T) {
+	t.Parallel()
+	want := []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"}
+	if got := service.CodeownersPaths; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("CodeownersPaths = %v, want %v (GitHub uses the first that exists)", got, want)
+	}
+}
+
+func TestIsCodeownersPath(t *testing.T) {
+	t.Parallel()
+	for path, want := range map[string]bool{
+		".github/CODEOWNERS": true,
+		"CODEOWNERS":         true,
+		"docs/CODEOWNERS":    true,
+		"/CODEOWNERS":        true, // a leading slash is the same file
+		"src/CODEOWNERS":     false,
+		".github/codeowners": false, // the name is case-sensitive on GitHub
+		"CODEOWNERS.md":      false,
+		"docs/CODEOWNERS/x":  false,
+		"":                   false,
+	} {
+		if got := service.IsCodeownersPath(path); got != want {
+			t.Errorf("IsCodeownersPath(%q) = %v, want %v", path, got, want)
+		}
+	}
+}

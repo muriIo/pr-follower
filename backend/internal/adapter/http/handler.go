@@ -37,6 +37,7 @@ type HandlerDeps struct {
 	AnalyzeUC     *dependabot.AnalyzeUseCase
 	WebhookUC     *webhook.IngestUseCase
 	ReviewUC      *webhook.ReviewIngestUseCase
+	PushUC        *webhook.PushIngestUseCase
 	SSEHub        *sse.Hub
 	OpRegistry    *operation.Registry
 	WebhookSecret string
@@ -287,6 +288,9 @@ func (h *Handler) CancelOperation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"canceled": true, "operation_id": opID})
 }
 
+// githubPushCommitLimit is how many commits GitHub includes in a push webhook.
+const githubPushCommitLimit = 20
+
 func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := io.ReadAll(io.LimitReader(r.Body, 5*1024*1024))
 	if err != nil {
@@ -331,6 +335,53 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			Name:         raw.CheckRun.Name,
 			Status:       raw.CheckRun.Status,
 			Conclusion:   raw.CheckRun.Conclusion,
+		}); err != nil {
+			writeDomainError(w, err)
+			return
+		}
+	}
+	if eventType == "push" && h.deps.PushUC != nil {
+		var raw struct {
+			Ref     string `json:"ref"`
+			Deleted bool   `json:"deleted"`
+			Commits []struct {
+				Added    []string `json:"added"`
+				Removed  []string `json:"removed"`
+				Modified []string `json:"modified"`
+			} `json:"commits"`
+			HeadCommit *struct {
+				Added    []string `json:"added"`
+				Removed  []string `json:"removed"`
+				Modified []string `json:"modified"`
+			} `json:"head_commit"`
+			Repository struct {
+				ID            int64  `json:"id"`
+				DefaultBranch string `json:"default_branch"`
+			} `json:"repository"`
+		}
+		if err := json.Unmarshal(payload, &raw); err != nil {
+			writeDomainError(w, entity.ErrInvalidInput)
+			return
+		}
+		var paths []string
+		for _, c := range raw.Commits {
+			paths = append(paths, c.Added...)
+			paths = append(paths, c.Removed...)
+			paths = append(paths, c.Modified...)
+		}
+		if raw.HeadCommit != nil {
+			paths = append(paths, raw.HeadCommit.Added...)
+			paths = append(paths, raw.HeadCommit.Removed...)
+			paths = append(paths, raw.HeadCommit.Modified...)
+		}
+		if err := h.deps.PushUC.IngestPushEvent(r.Context(), webhook.PushEventPayload{
+			GitHubRepoID:  raw.Repository.ID,
+			Ref:           raw.Ref,
+			DefaultBranch: raw.Repository.DefaultBranch,
+			Deleted:       raw.Deleted,
+			ChangedPaths:  paths,
+			// GitHub lists at most 20 commits in a push: with that many, the list may be incomplete.
+			Truncated: len(raw.Commits) >= githubPushCommitLimit,
 		}); err != nil {
 			writeDomainError(w, err)
 			return

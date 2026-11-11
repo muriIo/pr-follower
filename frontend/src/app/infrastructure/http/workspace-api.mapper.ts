@@ -288,7 +288,10 @@ function activityText(ev: ApiActivityEventDto): I18nText {
   }
   // The risk verdict is a word too: one sentence per verdict keeps it translated.
   const verdict = ev.type === 'dependabot.analyzed' ? ev.params?.['verdict']?.toLowerCase() : undefined;
-  const key = verdict && ['low', 'medium', 'high'].includes(verdict) ? `timeline.event.${ev.type}.${verdict}` : `timeline.event.${ev.type}`;
+  const verdictKey = verdict && ['low', 'medium', 'high'].includes(verdict) ? `timeline.event.${ev.type}.${verdict}` : null;
+  // A removed CODEOWNERS reads differently from an updated one.
+  const removed = ev.type === 'repository.codeowners_updated' && ev.params?.['status'] === 'absent';
+  const key = verdictKey ?? (removed ? `timeline.event.${ev.type}.absent` : `timeline.event.${ev.type}`);
   return { key, params: { ...base, ...ev.params } };
 }
 

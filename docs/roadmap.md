@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-11 (after expired-session handling).
+Last reviewed: 2026-11-11 (after CODEOWNERS freshness).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -11,8 +11,10 @@ Last reviewed: 2026-11-11 (after expired-session handling).
 
 ## Next up
 
-In order:
-1. **P1** CODEOWNERS freshness ([Repositories](#2-repositories--github-app-installation)): refresh the cached rules on `push` to the default branch.
+No P1 item is open. In order of value:
+1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh): the open "not verified" items below.
+2. **P2** Resync a followed repository on demand ([PR state](#3-pr-state-from-github)), which would also refill reviews of PRs stored before reviews existed.
+3. **P2** Persist activity and fan out across replicas ([Live updates](#7-live-updates--timeline)).
 
 ## 1. Identity & sessions
 
@@ -28,7 +30,8 @@ In order:
 - [x] Vercel-style import: accounts and repositories read with the user's token, import verified against GitHub, unfollow, "install / adjust permissions" links, return from the Setup URL (#7).
 - [x] Installation webhooks keep access in sync: removed / suspended / restored, flagged in Seats with "Corrigir acesso" (#8).
 - [x] CODEOWNERS read at import: present / absent / unknown, never guessed (#12).
-- [ ] **P1** CODEOWNERS freshness: refresh on `push` to the default branch when a CODEOWNERS path changes (today only at import).
+- [x] CODEOWNERS freshness: a `push` to the default branch that touches a CODEOWNERS path (or that GitHub truncated at 20 commits) re-reads the file as the GitHub App, with a follower's token as fallback; the cached rules and status are stored only when they changed and the change is announced, so every user's turn follows. A file that disappears is recorded as "no CODEOWNERS"; a read that cannot tell never is, and fails the delivery so it can be redelivered. Needs the app subscribed to Push events.
+- [ ] **P2** Not verified against real GitHub yet: a real push that edits CODEOWNERS (the app must be subscribed to Push events), and that a very large push (more than 20 commits) refreshes.
 
 ## 3. PR state from GitHub
 

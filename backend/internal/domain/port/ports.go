@@ -213,3 +213,14 @@ type PullRequestAnalyzer interface {
 type AnalysisScheduler interface {
 	ScheduleAnalysis(ctx context.Context, prID uint64)
 }
+
+// RepositoryFileReader reads a file from a repository's default branch with the given token (a
+// user's, or an installation's): entity.ErrNotFound when it does not exist.
+type RepositoryFileReader interface {
+	GetRepositoryFile(ctx context.Context, accessToken, owner, name, path string) ([]byte, error)
+}
+
+// CodeownersRefresher re-reads a repository's CODEOWNERS and updates the cached rules.
+type CodeownersRefresher interface {
+	RefreshCodeowners(ctx context.Context, repo entity.Repository) error
+}

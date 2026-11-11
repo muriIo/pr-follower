@@ -48,6 +48,7 @@ const BY_TYPE: Readonly<Record<string, ActivityIcon>> = {
   'dependabot.command': { icon: 'comment', tone: 'info' },
   'dependabot.analyzed': { icon: 'shield', tone: 'info' },
   'repository.followed': { icon: 'repo-add', tone: 'info' },
+  'repository.codeowners_updated': { icon: 'edit', tone: 'info' },
   'repository.access_lost': { icon: 'lock', tone: 'fail' },
   'repository.access_suspended': { icon: 'lock', tone: 'fail' },
   'repository.access_restored': { icon: 'unlock', tone: 'ok' },

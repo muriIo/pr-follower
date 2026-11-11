@@ -33,6 +33,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
+	"github.com/murilo/pr-follower/backend/internal/usecase/codeowners"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
@@ -126,7 +127,38 @@ func (fakeGitHubOAuth) FetchProfile(_ context.Context, token string) (entity.Git
 }
 
 // fakeGitHubUserAPI: octocat reaches installation 20 (acme) with two repositories.
-type fakeGitHubUserAPI struct{}
+type fakeGitHubUserAPI struct {
+	// files, when set, is what the repositories' CODEOWNERS files hold right now (path by repo).
+	files *fakeRepoFiles
+}
+
+// fakeRepoFiles is a mutable set of repository files, keyed "owner/name:path".
+type fakeRepoFiles struct {
+	mu    sync.Mutex
+	files map[string]string
+}
+
+func (f *fakeRepoFiles) set(key, content string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[key] = content
+}
+
+func (f *fakeRepoFiles) remove(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.files, key)
+}
+
+func (f *fakeRepoFiles) get(key string) (string, bool) {
+	if f == nil {
+		return "", false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.files[key]
+	return v, ok
+}
 
 func (fakeGitHubUserAPI) ListInstallations(_ context.Context, token string) ([]entity.Installation, error) {
 	if token != "ghu_test" {
@@ -176,9 +208,9 @@ func (fakeGitHubUserAPI) ListCommitCheckRuns(_ context.Context, _ string, _, _, 
 }
 
 // GetRepositoryFile: acme/web has CODEOWNERS, acme/api has none.
-func (fakeGitHubUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
-	if owner+"/"+name == "acme/web" && path == ".github/CODEOWNERS" {
-		return []byte("* @octocat\n"), nil
+func (f fakeGitHubUserAPI) GetRepositoryFile(_ context.Context, _ string, owner, name, path string) ([]byte, error) {
+	if content, ok := f.files.get(owner + "/" + name + ":" + path); ok {
+		return []byte(content), nil
 	}
 	return nil, entity.ErrNotFound
 }
@@ -200,6 +232,7 @@ type testServer struct {
 	repos  *persistence.RepositoryRepository
 	prs    *persistence.PullRequestRepository
 	gh     *noopGHGateway
+	files  *fakeRepoFiles
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -289,11 +322,13 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	sseHub := sse.NewHub(50)
 	opReg := operation.NewRegistry()
 	ghGw := &noopGHGateway{}
+	repoFiles := &fakeRepoFiles{files: map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}}
+	userAPI := fakeGitHubUserAPI{files: repoFiles}
 
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
-		GitHub: ghGw, State: fakeGitHubUserAPI{}, Reviews: prRepo, Pub: sseHub})
-	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo, nil)
+		GitHub: ghGw, State: userAPI, Reviews: prRepo, Pub: sseHub})
+	changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, nil)
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
 	analyzeUC := dependabot.NewAnalyzeUseCase(prRepo, repoRepo, ghGw, []port.DependencyAnalyzer{lowRiskAnalyzer{}}, blastradius.NewScanner(), sseHub)
 	runner := dependabot.NewRunner(analyzeUC, dependabot.RunnerConfig{Workers: 1})
@@ -303,9 +338,11 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	t.Cleanup(func() { stopRunner(); <-done })
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC, webhook.WithAnalysisScheduler(runner))
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
-	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
+	codeownersUC := codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, nil, sseHub)
+	pushUC := webhook.NewPushIngestUseCase(repoRepo, codeownersUC)
+	importUC := repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
-	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
+	filesUC := prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
@@ -316,6 +353,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
 		ReviewUC:       reviewUC,
+		PushUC:         pushUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,
 		WebhookSecret:  "test-secret",
@@ -327,7 +365,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		FilesUC:        filesUC,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -1637,5 +1675,89 @@ func TestWorkspace_ShowsWhoReviewedAPR(t *testing.T) {
 	if got[0].Reviewer != "bob" || got[0].State != entity.ReviewApproved || !got[0].Current ||
 		got[1].Reviewer != "carol" || got[1].State != entity.ReviewChangesRequested || got[1].Current {
 		t.Fatalf("expected bob's current approval, then carol's stale request: %+v", got)
+	}
+}
+
+func TestPush_ACodeownersChangeOnTheDefaultBranchMovesTheTurn(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	waiting := func() int {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		return len(body.Snapshot.InboxWaitingOnMe)
+	}
+	push := func(ref string, paths ...string) *httptest.ResponseRecorder {
+		list, _ := json.Marshal(paths)
+		return ts.postWebhook(t, "push", fmt.Sprintf(`{"ref":%q,"deleted":false,"repository":{"id":900,"default_branch":"main"},`+
+			`"commits":[{"added":[],"removed":[],"modified":%s}],"head_commit":{"added":[],"removed":[],"modified":%s}}`, ref, list, list))
+	}
+	if waiting() != 1 {
+		t.Fatal("PR 42 starts as octocat's turn: CODEOWNERS says '* @octocat'")
+	}
+
+	// CODEOWNERS changes on GitHub, but a push that does not touch it changes nothing here.
+	ts.files.set("acme/web:.github/CODEOWNERS", "* @someone-else\n")
+	if rec := push("refs/heads/main", "src/cart.ts"); rec.Code != http.StatusAccepted {
+		t.Fatalf("push: %d", rec.Code)
+	}
+	if rec := push("refs/heads/feat/x", ".github/CODEOWNERS"); rec.Code != http.StatusAccepted {
+		t.Fatalf("push: %d", rec.Code)
+	}
+	if waiting() != 1 {
+		t.Fatal("neither push can have changed the rules in force")
+	}
+
+	// A push of the new CODEOWNERS to the default branch: the cached rules follow, and so does the turn.
+	if rec := push("refs/heads/main", ".github/CODEOWNERS"); rec.Code != http.StatusAccepted {
+		t.Fatalf("push: %d %s", rec.Code, rec.Body.String())
+	}
+	if waiting() != 0 {
+		t.Fatal("octocat no longer owns anything in PR 42, so it is no longer octocat's turn")
+	}
+	// Redelivery changes nothing.
+	if rec := push("refs/heads/main", ".github/CODEOWNERS"); rec.Code != http.StatusAccepted || waiting() != 0 {
+		t.Fatalf("redelivery: %d", rec.Code)
+	}
+
+	// The file is deleted: the repository has no CODEOWNERS, and nobody is assigned a review.
+	ts.files.set("acme/web:.github/CODEOWNERS", "* @octocat\n")
+	ts.files.remove("acme/web:.github/CODEOWNERS")
+	if rec := push("refs/heads/main", ".github/CODEOWNERS"); rec.Code != http.StatusAccepted {
+		t.Fatalf("push: %d", rec.Code)
+	}
+	if waiting() != 0 {
+		t.Fatal("a repository without CODEOWNERS gives nobody a turn")
+	}
+	repo, err := ts.repos.GetByGitHubRepoID(context.Background(), 900)
+	if err != nil || repo.CodeownersStatus != entity.CodeownersAbsent {
+		t.Fatalf("the repository must be recorded as having no CODEOWNERS: %+v, %v", repo, err)
+	}
+}
+
+func TestPush_ARefreshNobodyCanDoFailsTheDeliveryInsteadOfKeepingStaleRulesQuietly(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d", rec.Code)
+	}
+	// Unfollow: nobody can read now, and the app has no credentials in this test.
+	repo, _ := ts.repos.GetByGitHubRepoID(context.Background(), 900)
+	if rec := ts.do(t, http.MethodDelete, "/api/v1/repositories/"+strconv.FormatUint(repo.ID, 10)+"/follow", "", session); rec.Code >= 300 {
+		t.Fatalf("unfollow: %d", rec.Code)
+	}
+	rec := ts.postWebhook(t, "push", `{"ref":"refs/heads/main","repository":{"id":900,"default_branch":"main"},"commits":[{"modified":[".github/CODEOWNERS"]}]}`)
+	if rec.Code < 500 {
+		t.Fatalf("expected the delivery to fail visibly, got %d", rec.Code)
 	}
 }

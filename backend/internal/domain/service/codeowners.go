@@ -26,6 +26,21 @@ func (e CodeownerEvaluation) IsTeammateOwner(owner string) bool {
 	return e.HasCoOwner(owner)
 }
 
+// CodeownersPaths is where GitHub looks for a CODEOWNERS file, in its order of precedence: the
+// first one that exists is the one in force.
+var CodeownersPaths = []string{".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"}
+
+// IsCodeownersPath reports whether a repository path is one of the CODEOWNERS locations.
+func IsCodeownersPath(path string) bool {
+	path = strings.TrimPrefix(path, "/")
+	for _, candidate := range CodeownersPaths {
+		if path == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 func ParseCodeowners(raw string) []entity.CodeownerRule {
 	var rules []entity.CodeownerRule
 	lines := strings.Split(raw, "\n")
