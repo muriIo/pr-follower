@@ -4,9 +4,9 @@ The automated tests use fakes for GitHub. This is the manual checklist for the r
 
 ## 0. Setup
 
-1. Create the dev app as in [`production-setup.md`](production-setup.md) §2–3, with the callback `http://localhost:4200/api/v1/auth/github/callback`. Subscribe to Pull request, Pull request review, Push, Status, Check suite, Check run and Issue comment.
+1. Create the dev app as in [`production-setup.md`](production-setup.md) §4–5, with the callback `http://localhost:4200/api/v1/auth/github/callback` and the Setup URL `http://localhost:4200/`. Subscribe to Pull request, Pull request review, Push, Status and Check run (production-setup §4.6).
 2. Expose the webhook endpoint (`smee.io` or `ngrok http 8080`) and set the app's Webhook URL to `<tunnel>/api/v1/webhooks/github` with a secret equal to `GITHUB_WEBHOOK_SECRET`.
-3. Fill `.env` with `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY_FILE` (the `.pem` stays git-ignored).
+3. Fill `.env` with `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY`: the `.pem` as one line, made with the `awk` command in production-setup §6.2 (`.env` is git-ignored). `make dev` does not pass `GITHUB_APP_PRIVATE_KEY_FILE` to the API container.
 4. `make dev`, then `docker compose -f docker-compose.local.yml logs -f api`. The API must **not** print `GitHub App credentials not set`.
 5. Test repository: a `.github/CODEOWNERS` assigning a path to you, a second GitHub account (or a teammate) for reviews, and a `package.json` + `package-lock.json` (npm v2/v3) with an outdated dependency so Dependabot opens a PR.
 6. Install the app on the test repository, sign in, import it. Keep **Recent Deliveries** (app → Advanced) open: every delivery must be `2xx`.
