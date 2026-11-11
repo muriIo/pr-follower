@@ -61,7 +61,7 @@ On the app's **General** page:
 1. Copy **Client ID** → `GITHUB_CLIENT_ID`.
 2. **Generate a new client secret** → `GITHUB_CLIENT_SECRET` (shown once).
 3. Copy **App ID** → `GITHUB_APP_ID`, and the app's URL name (the `<slug>` in `https://github.com/apps/<slug>`) → `GITHUB_APP_SLUG`.
-4. **Generate a private key** → download the `.pem`. Store it in your secret manager; never commit it. (Needed once installation tokens are wired.)
+4. **Generate a private key** → download the `.pem`. Store it in your secret manager; never commit it. It becomes `GITHUB_APP_PRIVATE_KEY` or a mounted file for `GITHUB_APP_PRIVATE_KEY_FILE` (step 4).
 5. Optionally upload a logo, so the authorization and install pages look trustworthy.
 
 ## 4. Prepare the secrets
@@ -80,7 +80,9 @@ API environment:
 | `DATABASE_URL` | `postgres://USER:PASS@HOST:5432/pr_follower?sslmode=require` | Use `sslmode=require` (or `verify-full`) for managed Postgres. |
 | `GITHUB_CLIENT_ID` | from step 3 | Without it sign-in is disabled (`auth_error=not_configured`). |
 | `GITHUB_CLIENT_SECRET` | from step 3 | Secret. |
-| `GITHUB_APP_ID` | from step 3 | |
+| `GITHUB_APP_ID` | from step 3 | With the private key below, the API authenticates as the app and reads PR files with its installation token, so webhooks no longer depend on a signed-in follower. |
+| `GITHUB_APP_PRIVATE_KEY_FILE` | path of the mounted `.pem` | Secret. Preferred: mount the key as a file. Wins over `GITHUB_APP_PRIVATE_KEY`. An unreadable file stops the API at start. |
+| `GITHUB_APP_PRIVATE_KEY` | the `.pem` contents | Secret. Alternative to the file: one line, newlines written as `\n`. Without a key (or without `GITHUB_APP_ID`) the API logs a warning and falls back to followers' tokens; an invalid key stops it at start. |
 | `GITHUB_APP_SLUG` | from step 3 | Builds the "install on GitHub / add account" links on the import screen. |
 | `GITHUB_WEBHOOK_SECRET` | from step 2 | Secret. **Must be set**: the default is the public dev value. |
 | `TOKEN_ENCRYPTION_KEY` | from above | Secret. **Must be set**: without it a random key is used and every sign-in is lost on restart. |
@@ -148,6 +150,7 @@ TLS proxy requirements:
 ## 8. Operate
 
 - **Rotate the client secret:** generate a new one on the app page, deploy it, then delete the old one. Signed-in users are unaffected.
+- **Rotate the app private key:** generate a second key on the app page, deploy it, then delete the old one. Cached installation tokens last at most an hour and are renewed with the new key.
 - **Rotate the webhook secret:** update the app and `GITHUB_WEBHOOK_SECRET` together; deliveries in between fail and can be redelivered from **Recent Deliveries**.
 - **Rotate `TOKEN_ENCRYPTION_KEY`:** stored GitHub tokens become unreadable and are dropped, so users sign in again. Sessions themselves stay valid until they need a GitHub call. Rotate on suspected leak, not routinely.
 - **Revoke everyone:** truncate the `sessions` table; every user must sign in again.
@@ -155,6 +158,8 @@ TLS proxy requirements:
 - **Upgrades:** deploy a new API tag; forward-only migrations (ADR-0004) run on start. Roll back by deploying the previous tag only if no new migration shipped; otherwise fix forward.
 
 ## Troubleshooting
+
+At start the API logs `GitHub App credentials not set` when background reads still depend on a follower's token, and `invalid GitHub App credentials` (then exits) when the key cannot be parsed. A PR's files stay "not evaluated" until read: if they never are, check that the app has *Contents* and *Pull requests* read access on that installation.
 
 The sign-in screen shows why a login failed (`?auth_error=`):
 

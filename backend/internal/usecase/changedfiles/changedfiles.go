@@ -21,10 +21,14 @@ type UseCase struct {
 	github    port.PullRequestFilesReader
 	store     port.ChangedFilesStore
 	followers port.RepositoryFollowers
+	app       port.InstallationTokenSource
 }
 
-func NewUseCase(tokens port.UserTokenSource, github port.PullRequestFilesReader, store port.ChangedFilesStore, followers port.RepositoryFollowers) *UseCase {
-	return &UseCase{tokens: tokens, github: github, store: store, followers: followers}
+// NewUseCase wires the use case. app (optional) lets background reads use the GitHub App's
+// installation token, so they do not depend on a follower being signed in; without it followers'
+// tokens are used.
+func NewUseCase(tokens port.UserTokenSource, github port.PullRequestFilesReader, store port.ChangedFilesStore, followers port.RepositoryFollowers, app port.InstallationTokenSource) *UseCase {
+	return &UseCase{tokens: tokens, github: github, store: store, followers: followers, app: app}
 }
 
 // SyncWithToken stores the files the PR changes at its head commit, read with the given user
@@ -63,9 +67,11 @@ func (uc *UseCase) SyncAsUser(ctx context.Context, userID uint64, repo entity.Re
 	return uc.SyncWithToken(ctx, token, repo, pr)
 }
 
-// SyncAsFollower reads the files with the token of a user who follows the repository, for work
-// that has no user behind it (webhooks). A follower whose token is missing or rejected is
-// skipped; any other failure stops the attempt. ErrNoReader when nobody could read.
+// SyncAsFollower reads the files for work that has no user behind it (webhooks). The GitHub App's
+// installation token goes first; when it cannot read (not configured, uninstalled, rejected, GitHub
+// failing) the token of a user who follows the repository is used. A follower whose token is
+// missing or rejected is skipped; any other failure stops the attempt. ErrNoReader when nobody
+// could read.
 func (uc *UseCase) SyncAsFollower(ctx context.Context, repo entity.Repository, pr entity.PullRequest) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
@@ -73,6 +79,19 @@ func (uc *UseCase) SyncAsFollower(ctx context.Context, repo entity.Repository, p
 	current, err := uc.isCurrent(ctx, pr)
 	if err != nil || current {
 		return err
+	}
+	if uc.app != nil && repo.InstallationID != 0 {
+		if token, tokenErr := uc.app.InstallationToken(ctx, repo.InstallationID); tokenErr == nil {
+			err := uc.SyncWithToken(ctx, token, repo, pr)
+			if err == nil {
+				return nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return context.Cause(ctx)
+			}
+		} else if ctxErr := ctx.Err(); ctxErr != nil {
+			return context.Cause(ctx)
+		}
 	}
 	followers, err := uc.followers.ListFollowerIDs(ctx, repo.ID)
 	if err != nil {

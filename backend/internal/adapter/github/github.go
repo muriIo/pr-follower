@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/domain/port"
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/resilience"
 )
 
@@ -48,6 +49,9 @@ type GatewayConfig struct {
 	Token      string
 	HTTPClient *http.Client
 	Backoff    resilience.BackoffConfig
+	// Installations (optional) authenticates reads as the GitHub App on a repository's
+	// installation. Without it, or for a repository with no installation id, Token is used.
+	Installations port.InstallationTokenSource
 }
 
 type Gateway struct {
@@ -56,6 +60,7 @@ type Gateway struct {
 	httpClient *http.Client
 	backoff    resilience.BackoffConfig
 	fileGroup  resilience.SingleFlightGroup[[]byte]
+	apps       port.InstallationTokenSource
 }
 
 func NewGateway(cfg GatewayConfig) *Gateway {
@@ -76,6 +81,23 @@ func NewGateway(cfg GatewayConfig) *Gateway {
 		token:      cfg.Token,
 		httpClient: client,
 		backoff:    backoff,
+		apps:       cfg.Installations,
+	}
+}
+
+// readToken picks the credential for a read of the repository: the app's installation token when
+// available, else the configured static token. A failure to get the app's token is returned, never
+// papered over with another identity. Writes do not use it: they act as the user.
+func (g *Gateway) readToken(ctx context.Context, repo entity.Repository) (string, error) {
+	if g.apps != nil && repo.InstallationID != 0 {
+		return g.apps.InstallationToken(ctx, repo.InstallationID)
+	}
+	return g.token, nil
+}
+
+func setBearer(req *http.Request, token string) {
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 }
 
@@ -85,6 +107,10 @@ func (g *Gateway) GetFileContent(ctx context.Context, repo entity.Repository, re
 	}
 	key := fmt.Sprintf("file:%d:%s:%s", repo.ID, ref, filePath)
 	return g.fileGroup.Do(ctx, key, func(callCtx context.Context) ([]byte, error) {
+		token, err := g.readToken(callCtx, repo)
+		if err != nil {
+			return nil, err
+		}
 		url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", g.baseURL, repo.Owner, repo.Name, strings.TrimPrefix(filePath, "/"), ref)
 		return resilience.Retry(callCtx, g.backoff, func(reqCtx context.Context) ([]byte, error) {
 			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
@@ -92,7 +118,7 @@ func (g *Gateway) GetFileContent(ctx context.Context, repo entity.Repository, re
 				return nil, resilience.Permanent(err)
 			}
 			req.Header.Set("Accept", "application/vnd.github.v3.raw")
-			g.applyAuth(req)
+			setBearer(req, token)
 
 			resp, err := g.httpClient.Do(req)
 			if err != nil {
@@ -109,6 +135,10 @@ func (g *Gateway) GetFileContent(ctx context.Context, repo entity.Repository, re
 }
 
 func (g *Gateway) ListPRChangedFiles(ctx context.Context, repo entity.Repository, prNumber int) ([]entity.ChangedFile, error) {
+	token, err := g.readToken(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files", g.baseURL, repo.Owner, repo.Name, prNumber)
 	return resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) ([]entity.ChangedFile, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
@@ -116,7 +146,7 @@ func (g *Gateway) ListPRChangedFiles(ctx context.Context, repo entity.Repository
 			return nil, resilience.Permanent(err)
 		}
 		req.Header.Set("Accept", "application/vnd.github+json")
-		g.applyAuth(req)
+		setBearer(req, token)
 
 		resp, err := g.httpClient.Do(req)
 		if err != nil {
@@ -152,13 +182,17 @@ func (g *Gateway) ListPRChangedFiles(ctx context.Context, repo entity.Repository
 }
 
 func (g *Gateway) StreamRepoTarball(ctx context.Context, repo entity.Repository, ref string) (io.ReadCloser, error) {
+	token, err := g.readToken(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
 	url := fmt.Sprintf("%s/repos/%s/%s/tarball/%s", g.baseURL, repo.Owner, repo.Name, ref)
 	return resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) (io.ReadCloser, error) {
 		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, resilience.Permanent(err)
 		}
-		g.applyAuth(req)
+		setBearer(req, token)
 
 		resp, err := g.httpClient.Do(req)
 		if err != nil {

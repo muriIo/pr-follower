@@ -42,6 +42,10 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      # Optional: lets background reads (webhooks) use the app's installation token instead of a
+      # follower's. Read from the git-ignored .env; never put the key in this file.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # Local-only key; production must set its own secret value.
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-yfYm0n3yY3owYS1usyLqydvMge5O6ts0bF9AGsGXar8=}
     volumes:

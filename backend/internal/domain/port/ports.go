@@ -38,6 +38,13 @@ type UserTokenSource interface {
 	AccessToken(ctx context.Context, userID uint64) (string, error)
 }
 
+// InstallationTokenSource authenticates as the GitHub App on one installation, for reads that have
+// no signed-in user behind them (webhooks, background analysis). entity.ErrNotFound means the app is
+// no longer installed there; entity.ErrUnauthorized means GitHub rejected the app's credentials.
+type InstallationTokenSource interface {
+	InstallationToken(ctx context.Context, installationID int64) (string, error)
+}
+
 // GitHubUserAPI reads what a user can reach through the GitHub App, using their user token.
 type GitHubUserAPI interface {
 	ListInstallations(ctx context.Context, accessToken string) ([]entity.Installation, error)

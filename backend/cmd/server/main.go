@@ -68,8 +68,10 @@ func main() {
 	// Recent activity is in memory (see roadmap): keep enough for every user's followed repositories.
 	sseHub := sse.NewHub(1000)
 	opReg := operation.NewRegistry()
+	installations := newInstallationTokens(cfg)
 	ghGateway := github.NewGateway(github.GatewayConfig{
-		Backoff: resilience.DefaultBackoffConfig(),
+		Backoff:       resilience.DefaultBackoffConfig(),
+		Installations: installations,
 	})
 
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGateway, sseHub)
@@ -103,7 +105,7 @@ func main() {
 		})
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
 		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
-		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo)
+		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
 		filesSyncer = changedFilesUC
 		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
@@ -154,6 +156,29 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+}
+
+// newInstallationTokens authenticates as the GitHub App for reads that have no signed-in user
+// behind them. It returns nil (an untyped nil interface) when the app credentials are not set, and
+// stops the server when they are set but invalid: a broken key must not fail silently later.
+func newInstallationTokens(cfg *config.Config) port.InstallationTokenSource {
+	if !cfg.GitHubAppConfigured() {
+		if cfg.GitHubAppID != "" || cfg.GitHubAppPrivateKey != "" {
+			slog.Warn("GitHub App credentials incomplete: set both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (or _FILE)")
+		}
+		slog.Warn("GitHub App credentials not set: background reads use the token of a signed-in follower")
+		return nil
+	}
+	auth, err := github.NewAppAuth(github.AppAuthConfig{
+		AppID:         cfg.GitHubAppID,
+		PrivateKeyPEM: cfg.GitHubAppPrivateKey,
+		Backoff:       resilience.DefaultBackoffConfig(),
+	})
+	if err != nil {
+		slog.Error("invalid GitHub App credentials", "err", err)
+		os.Exit(1)
+	}
+	return auth
 }
 
 // newTokenCipher uses TOKEN_ENCRYPTION_KEY, or an ephemeral key for local development:
