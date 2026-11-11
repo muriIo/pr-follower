@@ -58,6 +58,16 @@ export interface ChangedFileItem {
   readonly owned?: boolean;
 }
 
+/** One check of a PR's head commit, as GitHub's checks panel lists it. */
+export interface CheckItem {
+  readonly name: string;
+  readonly state: 'failure' | 'pending' | 'success' | 'skipped';
+  /** The check's short result ("Sem mudanças em apps/web"), or ''. */
+  readonly detail: string;
+  /** Where the check reports in full; only ever an http(s) link. */
+  readonly url?: string;
+}
+
 /** Where one reviewer stands on a PR (the latest decision they recorded on GitHub). */
 export interface ReviewItem {
   readonly reviewer: string;
@@ -73,6 +83,8 @@ export interface PullRequestItem {
   readonly number: number;
   /** Who reviewed it, current reviews first; absent when nobody did. */
   readonly reviews?: readonly ReviewItem[];
+  /** The head commit's checks (the latest run of each), failing first; absent when none reported. */
+  readonly checks?: readonly CheckItem[];
   readonly rank: number;
   readonly repo: string;
   readonly title: string;

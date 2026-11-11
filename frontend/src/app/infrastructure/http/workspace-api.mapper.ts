@@ -8,6 +8,7 @@ import {
   I18nText,
   MergeState,
   OwnersState,
+  CheckItem,
   PullRequestItem,
   ReviewItem,
   RepoInfo,
@@ -71,6 +72,48 @@ export interface ApiUserPrStateDto {
   readonly approved_by_login?: string;
   readonly snoozed_until_condition?: string;
   readonly owned_files_changed?: readonly ApiChangedFileDto[];
+}
+
+export interface ApiCheckRunDto {
+  readonly id: number;
+  readonly name: string;
+  readonly status: string;
+  readonly conclusion: string;
+  readonly title: string;
+  readonly details_url: string;
+}
+
+const CHECK_STATE_RANK: Readonly<Record<CheckItem['state'], number>> = { failure: 0, pending: 1, success: 2, skipped: 3 };
+
+/** GitHub's grouping: anything not finished is pending; success passes; neutral and skipped are set apart. */
+function checkState(c: ApiCheckRunDto): CheckItem['state'] {
+  if (c.status !== 'completed') {
+    return 'pending';
+  }
+  switch (c.conclusion) {
+    case 'success':
+      return 'success';
+    case 'neutral':
+    case 'skipped':
+      return 'skipped';
+    default: // failure, cancelled, timed_out, action_required, startup_failure
+      return 'failure';
+  }
+}
+
+/** Only an http(s) link is ever kept: a check's URL comes from outside and must not run script. */
+function safeHttpUrl(raw: string): string | undefined {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mapCheckRun(c: ApiCheckRunDto): CheckItem {
+  const url = safeHttpUrl(c.details_url);
+  return { name: c.name, state: checkState(c), detail: c.title?.trim() ?? '', ...(url ? { url } : {}) };
 }
 
 export interface ApiReviewDecisionDto {
@@ -154,6 +197,8 @@ export interface ApiWorkspaceResponseDto {
     readonly ownership_pending_pr_ids?: readonly number[];
     /** Where each reviewer stands, by PR id, for the PRs somebody reviewed. */
     readonly reviews?: Readonly<Record<string, readonly ApiReviewDecisionDto[]>>;
+    /** Each open PR's current checks, by PR id, for the PRs whose commit reported any. */
+    readonly checks?: Readonly<Record<string, readonly ApiCheckRunDto[]>>;
   };
   readonly timeline?: readonly ApiActivityEventDto[];
 }
@@ -240,9 +285,16 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
   }));
 
   const reviews = snapshot.reviews ?? {};
+  const checks = snapshot.checks ?? {};
   const withReviews = prs.map((pr) => {
     const decisions = reviews[String(pr.id)];
-    return decisions?.length ? { ...pr, reviews: decisions.map(mapReviewDecision) } : pr;
+    const runs = checks[String(pr.id)];
+    return {
+      ...pr,
+      ...(decisions?.length ? { reviews: decisions.map(mapReviewDecision) } : {}),
+      // Failing first, then running, then the rest; each group keeps the server's order (by name).
+      ...(runs?.length ? { checks: runs.map(mapCheckRun).sort((a, b) => CHECK_STATE_RANK[a.state] - CHECK_STATE_RANK[b.state]) } : {}),
+    };
   });
 
   return { repos, prs: withReviews, events, approvedMap, silencedMap };

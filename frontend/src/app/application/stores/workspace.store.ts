@@ -12,6 +12,7 @@ import {
   I18nText,
   MergeState,
   PerspectiveView,
+  CheckItem,
   PullRequestItem,
   RepoInfo,
   ReviewItem,
@@ -167,6 +168,33 @@ export interface DrawerBlastFileViewModel {
   readonly lines: readonly RenderedDiffLine[];
 }
 
+/** One check in the drawer's checks panel. */
+export interface DrawerCheckViewModel {
+  readonly name: string;
+  readonly detail: string;
+  readonly url: string | null;
+  readonly state: CheckItem['state'];
+}
+
+export interface DrawerCheckGroupViewModel {
+  readonly key: CheckItem['state'];
+  readonly label: string;
+  /** Whether the group starts expanded (failing and running ones do, like on GitHub). */
+  readonly open: boolean;
+  readonly items: readonly DrawerCheckViewModel[];
+}
+
+/** GitHub's checks panel for the open PR: a verdict, the counts, and the checks grouped by outcome. */
+export interface DrawerChecksViewModel {
+  readonly has: boolean;
+  readonly tone: 'ok' | 'fail' | 'run';
+  readonly title: string;
+  readonly subtitle: string;
+  /** A conic-gradient ring sized by outcome. */
+  readonly ring: string;
+  readonly groups: readonly DrawerCheckGroupViewModel[];
+}
+
 /** One reviewer in the drawer. */
 export interface DrawerReviewViewModel {
   readonly reviewer: string;
@@ -227,10 +255,19 @@ export interface DrawerViewModel {
   readonly blockedCls: string;
   readonly blockedText: string;
   readonly showApprove: boolean;
+  /** 'true' while checks are still running: approving waits for them. */
+  readonly approveDis: string;
+  /** Why approving is unavailable, or ''. */
+  readonly approveTip: string;
   /** A Dependabot PR with no analysis yet: the user can ask for it. */
   readonly showAnalyze: boolean;
+  /** 'true' once CI has passed (or never reports): waiting for it is pointless. */
+  readonly silenceCiDis: string;
+  /** Why "silence until CI passes" is unavailable, or ''. */
+  readonly silenceCiTip: string;
   readonly hasReviews: boolean;
   readonly reviews: readonly DrawerReviewViewModel[];
+  readonly checks: DrawerChecksViewModel;
   /** Why the user cannot approve this PR (they wrote it), or ''. */
   readonly ownNote: string;
   readonly approvedMine: boolean;
@@ -312,6 +349,9 @@ export class WorkspaceStore {
           if (!this.pausedTimeline()) {
             this.appendTimelineEvent(evt);
           }
+          if (evt.pr !== undefined && evt.pr === this.selectedPrId() && (evt.type === 'pr.merged' || evt.type === 'pr.closed')) {
+            this.endDrawer(evt.pr, evt.type === 'pr.merged' ? 'notice.pr.merged' : 'notice.pr.closed');
+          }
           if (evt.refreshWorkspace) {
             this.scheduleWorkspaceRefresh();
           }
@@ -371,8 +411,15 @@ export class WorkspaceStore {
     if (!dataset) {
       return;
     }
+    const selected = this.selectedPrId();
+    const shown = selected === null ? undefined : this.prs().find((p) => p.id === selected);
     this.repos.set(dataset.repos);
     this.prs.set(dataset.prs);
+    // The PR in the drawer is no longer open (merged or closed meanwhile): never leave a drawer, or
+    // room reserved for one, behind a PR that nobody can approve or merge any more.
+    if (selected !== null && !dataset.prs.some((p) => p.id === selected)) {
+      this.endDrawer(selected, 'notice.pr.gone', shown?.number);
+    }
     this.events.set(dataset.events);
     if (dataset.approvedMap) {
       this.approvedMap.set(dataset.approvedMap);
@@ -380,6 +427,27 @@ export class WorkspaceStore {
     if (dataset.silencedMap) {
       this.silencedMap.set(dataset.silencedMap);
     }
+  }
+
+  private readonly noticeState = signal<{ readonly key: string; readonly params: Readonly<Record<string, string | number>> } | null>(null);
+  /** A one-line explanation of something that changed under the user (e.g. the PR in the drawer was merged). */
+  readonly notice = computed(() => {
+    const n = this.noticeState();
+    return n ? this.t(n.key, n.params) : null;
+  });
+
+  dismissNotice(): void {
+    this.noticeState.set(null);
+  }
+
+  /** Closes the drawer of a PR that can no longer be acted on, and tells the user why. */
+  private endDrawer(prId: number, key: string, number?: number): void {
+    if (this.selectedPrId() !== prId) {
+      return;
+    }
+    const pr = this.prs().find((p) => p.id === prId);
+    this.closeDrawer();
+    this.noticeState.set({ key, params: { pr: number ?? pr?.number ?? prId } });
   }
 
   readonly openPrs = computed(() => {
@@ -725,7 +793,8 @@ export class WorkspaceStore {
 
     // Only GitHub decides what blocks a merge (mergeable_state: conflicts, out of date, branch
     // protection with its required reviews and checks, draft). CI and CODEOWNERS are signals.
-    const blockedText = pr.merge && MERGE_BLOCKER_KEYS[pr.merge] ? this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!) : '';
+    const runningText = this.checksRunning(pr) ? this.t('drawer.checksRunning') : '';
+    const blockedText = (pr.merge && MERGE_BLOCKER_KEYS[pr.merge] ? this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!) : '') || runningText;
 
     const vLabel = pr.verdict ? this.t(RISK_LABEL_KEYS[pr.verdict]) : '';
     const openFiles = this.changedFileOpenMap();
@@ -742,8 +811,11 @@ export class WorkspaceStore {
       hasDiff: f.hunk.length > 0,
       lines: this.renderDiffLines(f.hunk),
     }));
+    const checks = this.checksPanel(pr.checks ?? []);
+    // With the checks listed, the CI signal is their verdict: it can never say something else.
+    const checksDot = { ok: 'pf-dot pf-dot-ok', run: 'pf-dot pf-dot-warn pf-dot-pulse', fail: 'pf-dot pf-dot-fail' }[checks.tone];
     const signals = [
-      { k: 'CI', v: ciText, dot: dotCi },
+      { k: 'CI', v: checks.has ? checks.title : ciText, dot: checks.has ? checksDot : dotCi },
       { k: 'CODEOWNERS', v: ownersText, dot: dotOwners },
       ...(pr.size ? [{ k: 'Tamanho', v: pr.size, dot: 'pf-dot' }] : []),
     ];
@@ -795,9 +867,14 @@ export class WorkspaceStore {
       blockedCls: 'pf-blocked',
       blockedText,
       showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg),
+      silenceCiDis: this.canSilenceUntilCi(pr) ? 'false' : 'true',
+      silenceCiTip: this.silenceCiReason(pr),
       hasReviews: (pr.reviews?.length ?? 0) > 0,
       reviews: (pr.reviews ?? []).map((r) => this.reviewRow(r)),
+      checks,
       showApprove: !mine && !own,
+      approveDis: runningText ? 'true' : 'false',
+      approveTip: runningText,
       ownNote: own ? this.t('drawer.ownPr') : '',
       approvedMine: mine,
       mergeCls: (mine || pr.approvedBy) && !blockedText ? 'pf-btn-primary' : '',
@@ -975,6 +1052,46 @@ export class WorkspaceStore {
     this.cancellation.cancel(key);
   }
 
+  private checksPanel(checks: readonly CheckItem[]): DrawerChecksViewModel {
+    const of = (state: CheckItem['state']) => checks.filter((c) => c.state === state);
+    const failing = of('failure');
+    const pending = of('pending');
+    const success = of('success');
+    const skipped = of('skipped');
+
+    const tone = failing.length > 0 ? 'fail' : pending.length > 0 ? 'run' : 'ok';
+    const counts = [
+      failing.length ? this.t('drawer.checks.count.failing', { count: failing.length }) : '',
+      pending.length ? this.t('drawer.checks.count.running', { count: pending.length }) : '',
+      success.length ? this.t('drawer.checks.count.successful', { count: success.length }) : '',
+      skipped.length ? this.t('drawer.checks.count.skipped', { count: skipped.length }) : '',
+    ].filter(Boolean);
+
+    const group = (key: CheckItem['state'], list: readonly CheckItem[], open: boolean): DrawerCheckGroupViewModel[] =>
+      list.length === 0
+        ? []
+        : [
+            {
+              key,
+              label: this.n(`drawer.checks.group.${key}`, list.length),
+              open,
+              items: list.map((c) => ({ name: c.name, detail: c.detail, url: c.url ?? null, state: c.state })),
+            },
+          ];
+
+    const total = checks.length || 1;
+    const fail = (failing.length / total) * 100;
+    const run = fail + (pending.length / total) * 100;
+    return {
+      has: checks.length > 0,
+      tone,
+      title: this.t(`drawer.checks.title.${tone}`),
+      subtitle: counts.join(', '),
+      ring: `conic-gradient(#F43F5E 0 ${fail}%, #F59E0B ${fail}% ${run}%, #10B981 ${run}% 100%)`,
+      groups: [...group('failure', failing, true), ...group('pending', pending, true), ...group('success', success, false), ...group('skipped', skipped, false)],
+    };
+  }
+
   private reviewRow(r: ReviewItem): DrawerReviewViewModel {
     const badgeCls = { approved: 'pf-badge-baixo', changes_requested: 'pf-badge-alto', commented: 'pf-tag', dismissed: 'pf-tag' }[r.state];
     return {
@@ -983,6 +1100,28 @@ export class WorkspaceStore {
       badgeCls,
       stale: r.current ? '' : this.t('drawer.review.stale'),
     };
+  }
+
+  /** Checks that have not finished are blockers: neither approving nor merging waits for nothing. */
+  private checksRunning(pr: PullRequestItem): boolean {
+    return this.effectiveCi(pr).ci === 'run';
+  }
+
+  /** Silencing until CI passes only makes sense while CI can still pass: it is running or failing. */
+  private canSilenceUntilCi(pr: PullRequestItem): boolean {
+    const ci = this.effectiveCi(pr).ci;
+    return ci === 'run' || ci === 'fail';
+  }
+
+  private silenceCiReason(pr: PullRequestItem): string {
+    switch (this.effectiveCi(pr).ci) {
+      case 'ok':
+        return this.t('drawer.silenceCi.passed');
+      case 'none':
+        return this.t('drawer.silenceCi.none');
+      default:
+        return '';
+    }
   }
 
   /** Nobody approves a PR they wrote: GitHub refuses it, so it is not even offered. */
@@ -994,7 +1133,7 @@ export class WorkspaceStore {
   /** The note shown when an action fails: what happened, in the user's language. */
   private failureNote(err: unknown): string {
     if (err instanceof ActionError) {
-      if (err.code === 'outcome_unknown' || err.code === 'conflict') {
+      if (err.code === 'outcome_unknown' || err.code === 'conflict' || err.code === 'checks_running') {
         this.scheduleWorkspaceRefresh(); // GitHub's state may differ from ours: look again
       }
       return this.t(`actions.error.${err.code}`, { detail: err.detail });
@@ -1013,6 +1152,9 @@ export class WorkspaceStore {
           execute: async (opts) => {
             if (this.isOwnPr(pr)) {
               throw new ActionError('own_pull_request');
+            }
+            if (this.checksRunning(pr)) {
+              throw new ActionError('checks_running');
             }
             await this.prGateway?.approvePullRequest(prId, opts);
           },
@@ -1037,6 +1179,9 @@ export class WorkspaceStore {
         {
           label: this.t('actions.merging'),
           execute: async (opts) => {
+            if (this.checksRunning(pr)) {
+              throw new ActionError('checks_running');
+            }
             const res = await this.prGateway?.mergePullRequest(prId, opts);
             if (res?.sha) {
               mergedSha = res.sha;
@@ -1074,6 +1219,10 @@ export class WorkspaceStore {
 
   /** Snooze a PR until its next commit, until CI passes, or (Dependabot) out of the Radar. */
   async silencePr(prId: number, until: 'commit' | 'ci' | 'radar'): Promise<void> {
+    const target = this.prs().find((p) => p.id === prId);
+    if (until === 'ci' && target && !this.canSilenceUntilCi(target)) {
+      return; // the button is disabled, but a keyboard can still reach it
+    }
     const condition = until === 'ci' ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
     const badge: I18nText = { key: `silenced.${until}` };
     await this.cancellation.run(
@@ -1186,6 +1335,7 @@ export class WorkspaceStore {
 
   private markMerged(pr: PullRequestItem): void {
     this.mergedMap.update((curr) => ({ ...curr, [pr.id]: true }));
+    this.endDrawer(pr.id, 'notice.pr.mergedByYou', pr.number);
     this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: { key: 'timeline.local.merged', params: { pr: pr.number } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 

@@ -596,6 +596,42 @@ describe('workspace-api.mapper', () => {
       expect(prs.find((p) => p.id === 71)!.reviews).toBeUndefined();
     });
 
+    it('maps each PR\'s checks the way GitHub groups them, keeping only safe links', () => {
+      const a = dto(70, 7, 'acme/web');
+      const b = dto(71, 8, 'acme/web');
+      const run = (name: string, status: string, conclusion: string, extra: Record<string, unknown> = {}) => ({
+        id: 1, repository_id: 1, head_sha: 'h', name, status, conclusion, title: '', details_url: '', ...extra,
+      });
+      const prs = mapApiWorkspaceResponseToDataset({
+        snapshot: {
+          seats: [seat('acme/web', [a, b])],
+          checks: {
+            '70': [
+              run('build', 'completed', 'failure', { title: 'Build failed', details_url: 'https://ci.example.com/1' }),
+              run('cancelled-one', 'completed', 'cancelled'),
+              run('timeout', 'completed', 'timed_out'),
+              run('needs-you', 'completed', 'action_required'),
+              run('test', 'in_progress', ''),
+              run('queued-one', 'queued', ''),
+              run('lint', 'completed', 'success', { title: 'Sem mudanças', details_url: 'javascript:alert(1)' }),
+              run('docs', 'completed', 'neutral'),
+              run('e2e', 'completed', 'skipped'),
+            ],
+          },
+        } as never,
+        timeline: [],
+      })!.prs;
+
+      const checks = prs.find((p) => p.id === 70)!.checks!;
+      expect(checks.map((c) => [c.name, c.state])).toEqual([
+        ['build', 'failure'], ['cancelled-one', 'failure'], ['timeout', 'failure'], ['needs-you', 'failure'],
+        ['test', 'pending'], ['queued-one', 'pending'], ['lint', 'success'], ['docs', 'skipped'], ['e2e', 'skipped'],
+      ]);
+      expect(checks[0]).toMatchObject({ detail: 'Build failed', url: 'https://ci.example.com/1' });
+      expect(checks.find((c) => c.name === 'lint')!.url).toBeUndefined(); // a javascript: link is never kept
+      expect(prs.find((p) => p.id === 71)!.checks).toBeUndefined();
+    });
+
     it('says why a bump that names several packages has no analysis', () => {
       const prs = mapApiWorkspaceResponseToDataset({
         snapshot: {

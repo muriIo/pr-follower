@@ -86,6 +86,31 @@ h1, h2, h3, p { margin: 0; font-weight: inherit; font-size: inherit; }
 .pf-note { color: var(--text-2); }
 .pf-note-ok { color: #34D399; }
 .pf-note-err { color: #FB7185; }
+/* Something changed under the user (e.g. the PR in the drawer was merged): one line, dismissible. */
+.pf-notice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid rgba(59, 130, 246, .35); border-radius: 8px; background: rgba(59, 130, 246, .10); color: var(--text); }
+.pf-notice-text { min-width: 0; overflow-wrap: anywhere; }
+/* Checks panel (mirrors GitHub's): verdict ring, counts, then groups by outcome. */
+.pf-checks { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.pf-checks-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); }
+.pf-checks-ring { flex: none; width: 28px; height: 28px; border-radius: 50%; -webkit-mask: radial-gradient(circle, transparent 9px, #000 10px); mask: radial-gradient(circle, transparent 9px, #000 10px); }
+.pf-checks-title { font-size: 14px; font-weight: 600; }
+.pf-checks-sub { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+.pf-checks-group { border-top: 1px solid var(--border); }
+.pf-checks-group-head { display: flex; align-items: center; gap: var(--space-2); width: 100%; padding: var(--space-3) var(--space-4); font-size: 12px; font-weight: 500; color: var(--text-2); }
+.pf-checks-group-head:hover { color: var(--text); background: var(--surface-hover); }
+.pf-checks-group-head:focus-visible { outline-offset: -2px; }
+.pf-checks-group-head .pf-chev { transform: rotate(-90deg); }
+.pf-checks-group-head .pf-chev.is-open { transform: rotate(0); }
+.pf-checks-list { list-style: none; margin: 0; padding: 0 0 var(--space-2); }
+.pf-check { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); padding: var(--space-2) var(--space-4); }
+.pf-check-icon { flex: none; align-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.pf-check-failure .pf-check-icon { background: var(--rose); }
+.pf-check-pending .pf-check-icon { background: var(--amber); animation: pf-pulse 2s ease-in-out infinite; }
+.pf-check-success .pf-check-icon { background: var(--emerald); }
+.pf-check-name { font-family: var(--mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+a.pf-check-name { text-decoration: none; }
+a.pf-check-name:hover { text-decoration: underline; }
+.pf-check-detail { color: var(--text-2); font-size: 12px; }
 .pf-reviews { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .pf-review { display: flex; align-items: center; gap: 10px; }
 .pf-review.is-stale { opacity: .7; }

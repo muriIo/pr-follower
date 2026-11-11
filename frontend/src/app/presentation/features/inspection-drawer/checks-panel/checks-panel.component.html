@@ -1,0 +1,46 @@
+@if (checks().has) {
+  <section class="pf-drawer-sec">
+    <h3 class="pf-section">{{ 'drawer.checks' | t }}</h3>
+    <div [class]="'pf-checks pf-checks-' + checks().tone">
+      <div class="pf-checks-head">
+        <span class="pf-checks-ring" [style.background]="checks().ring" aria-hidden="true"></span>
+        <div class="pf-checks-summary">
+          <p class="pf-checks-title">{{ checks().title }}</p>
+          <p class="pf-checks-sub">{{ checks().subtitle }}</p>
+        </div>
+      </div>
+      @for (g of checks().groups; track g.key) {
+        <div class="pf-checks-group">
+          <button
+            type="button"
+            class="pf-checks-group-head"
+            [attr.aria-expanded]="isOpen(g.key, g.open)"
+            (click)="toggle(g.key, g.open)"
+          >
+            <svg [class]="'pf-chev ' + (isOpen(g.key, g.open) ? 'is-open' : '')" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 4.5l3 3 3-3"></path>
+            </svg>
+            {{ g.label }}
+          </button>
+          @if (isOpen(g.key, g.open)) {
+            <ul class="pf-checks-list">
+              @for (c of g.items; track $index) {
+                <li [class]="'pf-check pf-check-' + c.state">
+                  <span class="pf-check-icon" aria-hidden="true"></span>
+                  @if (c.url) {
+                    <a class="pf-check-name" [href]="c.url" target="_blank" rel="noopener noreferrer">{{ c.name }}</a>
+                  } @else {
+                    <span class="pf-check-name">{{ c.name }}</span>
+                  }
+                  @if (c.detail) {
+                    <span class="pf-check-detail">— {{ c.detail }}</span>
+                  }
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      }
+    </div>
+  </section>
+}
