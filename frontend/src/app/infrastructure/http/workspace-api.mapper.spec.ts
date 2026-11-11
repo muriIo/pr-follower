@@ -161,6 +161,7 @@ describe('workspace-api.mapper', () => {
           id: 'ev-1',
           type: 'pr.approved',
           repository_name: 'arvore/hive-web',
+          pull_request_id: 10,
           pr_number: 142,
           actor_login: 'murilo',
           occurred_at: '2026-11-09T18:00:00Z',
@@ -173,18 +174,19 @@ describe('workspace-api.mapper', () => {
     expect(dataset!.repos).toEqual([{ name: 'arvore/hive-web', branch: 'main', access: 'active' }]);
     expect(dataset!.prs.length).toBe(3);
 
-    const codePr = dataset!.prs.find((p) => p.id === 142)!;
+    const codePr = dataset!.prs.find((p) => p.number === 142)!;
+    expect(codePr.id).toBe(10);
     expect(codePr.turn).toBe(true);
     expect(codePr.claim).toEqual({ key: 'inbox.claim', params: { login: '@murilo' } });
     expect(codePr.files[0].additions).toBe(24);
     expect(codePr.files[0].deletions).toBe(3);
     expect(codePr.files[0].hunk.length).toBe(4);
 
-    const mutedPr = dataset!.prs.find((p) => p.id === 136)!;
+    const mutedPr = dataset!.prs.find((p) => p.number === 136)!;
     expect(mutedPr.turn).toBe(false);
     expect(mutedPr.approvedBy).toBe('@carlos');
 
-    const depPr = dataset!.prs.find((p) => p.id === 89)!;
+    const depPr = dataset!.prs.find((p) => p.number === 89)!;
     expect(depPr.dep).toBe(true);
     expect(depPr.verdict).toBe('alto');
     expect(depPr.score).toBe(88);
@@ -194,7 +196,7 @@ describe('workspace-api.mapper', () => {
 
     expect(dataset!.events.length).toBe(1);
     expect(dataset!.events[0].kind).toBe('ok');
-    expect(dataset!.events[0].pr).toBe(142);
+    expect(dataset!.events[0].pr).toBe(10);
   });
 
   it('maps SSE ActivityEvent payloads to TimelineEventItem', () => {
@@ -202,13 +204,14 @@ describe('workspace-api.mapper', () => {
       id: 'sse-1',
       type: 'pr.claimed',
       repository_name: 'arvore/checkout-api',
+      pull_request_id: 55,
       pr_number: 412,
       actor_login: 'murilo',
       occurred_at: '2026-11-09T19:00:00Z',
     });
     expect(item.kind).toBe('turn');
     expect(item.repo).toBe('arvore/checkout-api');
-    expect(item.pr).toBe(412);
+    expect(item.pr).toBe(55);
     expect(item.text).toEqual({ key: 'timeline.event.pr.claimed', params: { repo: 'arvore/checkout-api', pr: 412, actor: '@murilo' } });
   });
 
@@ -441,7 +444,7 @@ describe('workspace-api.mapper', () => {
     it('keeps a PR I do not own in its seat, outside the inbox, even when it is a draft', () => {
       const [item, ...rest] = map({ seats: [seat([pr(5, { is_draft: true })])] });
       expect(rest).toEqual([]);
-      expect(item).toMatchObject({ id: 5, repo: 'acme/web', turn: false, owners: 'others' });
+      expect(item).toMatchObject({ id: 1005, number: 5, repo: 'acme/web', turn: false, owners: 'others' });
       expect(item.why).toEqual({ key: 'drawer.why.others' });
       // No badge: a badge is what lists a PR under "muted" in Minha Vez.
       expect(item.muteBadge).toBeUndefined();
@@ -450,7 +453,7 @@ describe('workspace-api.mapper', () => {
 
     it('shows a PR whose files are not known yet as not evaluated, never as my turn', () => {
       const [item] = map({ seats: [seat([pr(5)])], ownership_pending_pr_ids: [1005] });
-      expect(item).toMatchObject({ id: 5, turn: false, owners: 'unknown' });
+      expect(item).toMatchObject({ id: 1005, number: 5, turn: false, owners: 'unknown' });
       expect(item.why).toEqual({ key: 'drawer.why.pending' });
       expect(item.muteBadge).toBeUndefined();
     });
@@ -471,9 +474,10 @@ describe('workspace-api.mapper', () => {
         inbox_dimmed: [{ pull_request: gated, user_state: state('HIDDEN_GATE', 1) }],
         dependabot_prs: [{ pull_request: bump }],
       });
-      expect(prs.map((p) => p.id).sort()).toEqual([1, 2, 3, 4]);
-      expect(prs.find((p) => p.id === 1)).toMatchObject({ turn: true, owners: 'voce', ownFiles: 2 });
-      expect(prs.find((p) => p.id === 4)).toMatchObject({ turn: false, owners: 'others' });
+      expect(prs.map((p) => p.number).sort()).toEqual([1, 2, 3, 4]);
+      expect(new Set(prs.map((p) => p.id)).size).toBe(4);
+      expect(prs.find((p) => p.number === 1)).toMatchObject({ turn: true, owners: 'voce', ownFiles: 2 });
+      expect(prs.find((p) => p.number === 4)).toMatchObject({ turn: false, owners: 'others' });
     });
 
     it('dims a PR of mine behind the gate and says why', () => {
@@ -489,6 +493,94 @@ describe('workspace-api.mapper', () => {
       expect(gate({ mergeable_state: 'CONFLICTING' }).muteBadge).toEqual({ key: 'inbox.mute.conflict' });
       expect(gate({ ci_status: 'PENDING' }).muteBadge).toEqual({ key: 'inbox.mute.ci' });
       expect(gate({ is_draft: true }).muteBadge).toEqual({ key: 'inbox.mute.draft' });
+    });
+  });
+
+  describe('PR identity: the unique id is the key and the API handle, the GitHub number is only for display', () => {
+    const dto = (id: number, number: number, repo: string, extra: Record<string, unknown> = {}) => ({
+      id, repository_id: 1, repository_name: repo, number, title: `PR ${number}`, author_login: 'bia', html_url: '',
+      is_dependabot: false, is_draft: false, state: 'OPEN', mergeable_state: 'CLEAN', ci_status: 'SUCCESS', head_sha: 'h', base_ref: 'main', ...extra,
+    });
+    const seat = (full: string, prs: unknown[]) => ({
+      repository: { id: 1, owner: 'acme', name: full.split('/')[1], full_name: full, default_branch: 'main', codeowners_status: 'present' },
+      open_pr_count: prs.length, waiting_on_me_count: 0, dependabot_pr_count: 0, failing_ci_count: 0, pull_requests: prs,
+    });
+    const state = (id: number) => ({ pull_request_id: id, user_id: 1, turn_state: 'WAITING_ON_ME', team_already_approved: false, owned_files_changed: [{ path: 'a.ts', additions: 1, deletions: 0, patch: '' }] });
+
+    it('keeps two PRs with the same number in different repositories apart', () => {
+      const a = dto(70, 7, 'acme/web');
+      const b = dto(71, 7, 'acme/api');
+      const prs = mapApiWorkspaceResponseToDataset({
+        snapshot: { seats: [seat('acme/web', [a]), seat('acme/api', [b])], inbox_waiting_on_me: [{ pull_request: a, user_state: state(70) }] } as never,
+        timeline: [],
+      })!.prs;
+
+      expect(prs.map((p) => [p.id, p.number, p.repo])).toEqual([[70, 7, 'acme/web'], [71, 7, 'acme/api']]);
+    });
+
+    it('uses the database id for every kind of PR, not the number the API routes cannot find', () => {
+      const human = dto(23, 20, 'acme/web');
+      const bump = dto(29, 24, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title: 'bump x from 1.0.0 to 1.0.1' });
+      const prs = mapApiWorkspaceResponseToDataset({
+        snapshot: {
+          seats: [seat('acme/web', [human, bump])],
+          inbox_waiting_on_me: [{ pull_request: human, user_state: state(23) }],
+          dependabot_prs: [{ pull_request: bump }],
+        } as never,
+        timeline: [],
+      })!.prs;
+
+      expect(prs.map((p) => [p.id, p.number])).toEqual([[23, 20], [29, 24]]);
+    });
+
+    it('keeps my approval of a Dependabot PR across a reload, and names a teammate who approved', () => {
+      const bump = (id: number, number: number) => dto(id, number, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title: 'bump x from 1.0.0 to 1.0.1' });
+      const dataset = mapApiWorkspaceResponseToDataset({
+        snapshot: {
+          seats: [seat('acme/web', [])],
+          dependabot_prs: [
+            { pull_request: bump(30, 23), approved_by_me: true },
+            { pull_request: bump(31, 22), approved_by_login: 'bia' },
+            { pull_request: bump(32, 21) },
+          ],
+        } as never,
+        timeline: [],
+      })!;
+
+      expect(dataset.approvedMap).toEqual({ 30: true });
+      const [mine, team, none] = dataset.prs;
+      expect(mine.approvedBy).toBeUndefined();
+      expect(team.approvedBy).toBe('@bia');
+      expect(none.approvedBy).toBeUndefined();
+    });
+
+    it('says why a bump that names several packages has no analysis', () => {
+      const prs = mapApiWorkspaceResponseToDataset({
+        snapshot: {
+          seats: [seat('acme/web', [])],
+          dependabot_prs: [
+            { pull_request: dto(30, 23, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title: 'build(deps): bump tinypool and vitest' }) },
+            { pull_request: dto(31, 22, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title: 'build(deps): bump undici from 7.29.0 to 7.30.2' }) },
+          ],
+        } as never,
+        timeline: [],
+      })!.prs;
+      const [grouped, single] = prs;
+      expect(grouped.pkg).toBeUndefined();
+      expect(grouped.rvDetail).toEqual({ key: 'impact.rvDetail.grouped' });
+      expect(single.pkg).toBe('undici');
+      expect(single.rvDetail).toEqual({ key: 'impact.rvDetail.none' });
+    });
+
+    it('points an activity at its PR by id and writes the number in the sentence', () => {
+      const item = mapActivityEventToTimelineItem({
+        id: 'e', type: 'pr.approved', repository_name: 'acme/web', pull_request_id: 29, pr_number: 24, occurred_at: '2026-11-10T12:00:00Z',
+      });
+      expect(item.pr).toBe(29);
+      expect(item.text).toMatchObject({ params: { pr: 24 } });
+
+      const noPr = mapActivityEventToTimelineItem({ id: 'e2', type: 'repository.followed', repository_name: 'acme/web', occurred_at: '2026-11-10T12:00:00Z' });
+      expect(noPr.pr).toBeUndefined();
     });
   });
 });

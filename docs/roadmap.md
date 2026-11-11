@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-10 (after acting on GitHub as the user).
+Last reviewed: 2026-11-10 (after the Dependabot analysis).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,9 +12,8 @@ Last reviewed: 2026-11-10 (after acting on GitHub as the user).
 ## Next up
 
 In order:
-1. **P1** Run the Dependabot analysis ([Dependabot](#5-dependabot-radar--analysis)); its reads can now use the installation token.
-2. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
-3. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
+1. **P1** Review state in the drawer ([Inspection drawer](#8-inspection-drawer)).
+2. **P1** Expired session in the SPA ([Identity](#1-identity--sessions)): an action that answers 401 now says the session expired, but the app does not yet return to the sign-in screen.
 
 ## 1. Identity & sessions
 
@@ -60,7 +59,10 @@ In order:
 - [x] npm lockfile analyzer (dependency path, scope) and in-memory tarball blast-radius scanner (ADR-0005).
 - [x] Radar by risk tier, impact drawer, safe batch merge limited to analysed low-risk bumps with green CI.
 - [x] Unanalysed bumps show only what their title says, sit in "Sem análise" and are never batch-merged (#13).
-- [ ] **P1** Run the analysis: `AnalyzeUseCase` is wired but never called. Trigger it on Dependabot `pull_request` webhooks (and on demand, cancellable) and store the result.
+- [x] The analysis runs: a Dependabot `pull_request` webhook that changes an open PR, an import that finds one, or a click on "Analisar agora" (cancellable) schedules `AnalyzePR` on a bounded background runner (2 workers, 256 queued, 2 minute timeout per PR, stops with the server). A PR scheduled twice waits once, and one that gets a new commit mid-analysis is analysed again afterwards. The result is stored per commit and converges (concurrent requests share one run and one event). It reads as the GitHub App, so it only exists with the app credentials, and only followers of the repository can ask for it.
+- [x] The analysis refuses what it cannot read honestly: a grouped update ("bump the X group with 3 updates", "bump a and b") or a non-npm PR stays "Sem análise", with its own explanation (`not_analysable`) and no button, instead of being analysed as package "unknown" or answered "invalid request", and the stored verdict no longer bakes in the CI of the moment (CI gates the batch merge live).
+- [ ] **P2** Failed analyses are only logged, and PRs stored before this shipped are analysed on their next webhook, a re-import or a click: resync them on start, and show "analysis failed" instead of silence.
+- [ ] **P2** Grouped Dependabot updates (several packages in one PR) are not analysed.
 - [x] Installation token: the server signs an app JWT (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` or `_FILE`) and exchanges it for a per-installation token, cached and renewed five minutes before expiry, one exchange shared by concurrent callers. The gateway's reads (file contents, PR files, tarballs) use it; approve, merge and comment never do, so nothing acts as the app. Without credentials the server warns and falls back to followers' tokens; invalid credentials stop it at start.
 - [ ] **P2** Not verified against real GitHub yet: exchange a token with the dev app's key and read a PR's files through it (see the production runbook).
 - [ ] **P2** yarn / pnpm lockfiles: accepted by `CanAnalyze`, but path reconstruction only covers npm v2/v3.
@@ -71,10 +73,10 @@ In order:
 - [x] Non-idempotent calls never repeated blindly (`RetryNonIdempotent`, ADR-0011).
 - [x] Act as the user: approve, merge and `@dependabot` comments are written with the signed-in user's own token (never the app's), after checking what GitHub says now. Nobody approves their own PR (refused before anything is sent, also against GitHub's author; the UI does not offer it; merging your own PR is allowed); a closed PR is not approved or merged; an approval already on the head commit is not repeated and a merged PR converges to success; a batch containing the user's own PR is refused as a whole before any write.
 - [x] Ambiguous outcomes are never guessed: a timeout, dropped connection or 5xx on approve or merge is checked against GitHub (the review or the merge is there, so it succeeded; it is not, so the user is told "could not confirm, check GitHub" and nothing is recorded or announced). GitHub's refusals reach the user with its own explanation (403, 404, 405/409/422).
-- [x] "Approved by me" is the review GitHub recorded for the head commit (stored from the approve response and from webhooks), no longer a flag set in the app; a new commit makes it stale.
+- [x] "Approved by me" is the review GitHub recorded for the head commit (stored from the approve response and from webhooks), no longer a flag set in the app; a new commit makes it stale, and every Radar item reports it (`approved_by_me`, plus the teammate who approved) so a reload after an action keeps it.
 - [x] The SPA shows action failures in the user's language instead of swallowing them (a 502 used to look like success), sends each write once, and no longer invents a merge commit.
 - [x] Artificial delays removed from every action: they finish when the server answers.
-- [ ] **P2** Not verified against real GitHub yet: approve, merge and comment with a real user token, and the GitHub app's permission to write pull requests for the user (see the production runbook).
+- [ ] **P2** Not verified against real GitHub yet: the Dependabot analysis of a real PR (lockfile and tarball reads as the app), and approve, merge and comment with a real user token, and the GitHub app's permission to write pull requests for the user (see the production runbook).
 
 ## 7. Live updates & timeline
 
@@ -98,6 +100,7 @@ In order:
 - [x] No hardcoded display text: store, mapper and templates render keys (with params and plurals); the ADR-0008 gate fails on literal text.
 - [x] Timeline follows the locale: activity carries its type and params (title, method, package...), never a sentence; the client phrases it.
 - [x] No demo data in production; sample data only in test fixtures (#10).
+- [x] A PR is identified in the SPA by its unique id; GitHub's number is only for display and GitHub URLs. The SPA used to key PRs by number and send it to routes that take the database id, so actions could reach another PR (and numbers repeat across repositories); the activity timeline now points at PRs by id too.
 - [ ] **P2** Browser end-to-end tests of the main flows (sign-in, import, drawer, merge).
 
 ## 10. Backend platform & operations

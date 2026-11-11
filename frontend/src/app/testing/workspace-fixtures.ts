@@ -41,7 +41,7 @@ export function createInitialTimelineEvents(nowMs: number = Date.now()): readonl
 }
 
 /** Fixture literals keep a compact single-file shape; toFixtureItems maps them to the model. */
-type LegacyPr = Omit<PullRequestItem, 'files' | 'owners'> & {
+type LegacyPr = Omit<PullRequestItem, 'files' | 'owners' | 'number'> & {
   readonly owners: PullRequestItem['owners'] | 'pend';
   readonly file?: string;
   readonly deltaAdd?: string;
@@ -52,6 +52,7 @@ type LegacyPr = Omit<PullRequestItem, 'files' | 'owners'> & {
 function toFixtureItems(prs: readonly LegacyPr[]): readonly PullRequestItem[] {
   return prs.map(({ file, deltaAdd, deltaDel, hunk, owners, ...rest }) => ({
     ...rest,
+    number: rest.id,
     owners: owners === 'pend' ? 'others' : owners,
     files: file
       ? [

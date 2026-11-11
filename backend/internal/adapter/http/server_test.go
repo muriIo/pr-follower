@@ -20,17 +20,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/murilo/pr-follower/backend/internal/adapter/analyzer/blastradius"
 	"github.com/murilo/pr-follower/backend/internal/adapter/crypto"
 	httpadapter "github.com/murilo/pr-follower/backend/internal/adapter/http"
 	"github.com/murilo/pr-follower/backend/internal/adapter/http/operation"
 	"github.com/murilo/pr-follower/backend/internal/adapter/persistence"
 	"github.com/murilo/pr-follower/backend/internal/adapter/sse"
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/domain/port"
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/database"
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/server"
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
+	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
@@ -62,7 +65,7 @@ func (n *noopGHGateway) GetFileContent(_ context.Context, _ entity.Repository, _
 	return nil, nil
 }
 func (n *noopGHGateway) ListPRChangedFiles(_ context.Context, _ entity.Repository, _ int) ([]entity.ChangedFile, error) {
-	return nil, nil
+	return []entity.ChangedFile{{Path: "package-lock.json"}}, nil
 }
 func (n *noopGHGateway) StreamRepoTarball(_ context.Context, _ entity.Repository, _ string) (io.ReadCloser, error) {
 	return nil, nil
@@ -79,6 +82,17 @@ func (n *noopGHGateway) MergePullRequest(_ context.Context, token string, _ enti
 }
 func (n *noopGHGateway) CreatePRComment(_ context.Context, token string, _ entity.Repository, number int, _ string) error {
 	return n.record("comment", token, number)
+}
+
+// lowRiskAnalyzer reads every package-lock.json as a harmless dev-dependency patch bump.
+type lowRiskAnalyzer struct{}
+
+func (lowRiskAnalyzer) Ecosystem() string           { return "npm" }
+func (lowRiskAnalyzer) CanAnalyze(name string) bool { return name == "package-lock.json" }
+func (lowRiskAnalyzer) AnalyzeLockfile(_ context.Context, in port.DependencyAnalysisInput) (*entity.DependabotAnalysis, error) {
+	return &entity.DependabotAnalysis{PullRequestID: in.PullRequest.ID, HeadSHA: in.PullRequest.HeadSHA, Ecosystem: "npm",
+		PackageName: in.PackageName, FromVersion: in.FromVersion, ToVersion: in.ToVersion,
+		SemverBumpType: entity.SemverBumpPatch, IsDirectDep: true, DepScope: entity.DependencyScopeDev}, nil
 }
 
 // fakeGitHubOAuth stands in for github.com: any code except "bad" signs in as octocat.
@@ -281,7 +295,13 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		GitHub: ghGw, State: fakeGitHubUserAPI{}, Reviews: prRepo, Pub: sseHub})
 	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo, nil)
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC)
+	analyzeUC := dependabot.NewAnalyzeUseCase(prRepo, repoRepo, ghGw, []port.DependencyAnalyzer{lowRiskAnalyzer{}}, blastradius.NewScanner(), sseHub)
+	runner := dependabot.NewRunner(analyzeUC, dependabot.RunnerConfig{Workers: 1})
+	runCtx, stopRunner := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { runner.Run(runCtx); close(done) }()
+	t.Cleanup(func() { stopRunner(); <-done })
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC, webhook.WithAnalysisScheduler(runner))
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
@@ -293,6 +313,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		PRRepo:         prRepo,
 		TriageUC:       triageUC,
 		ActionUC:       actionUC,
+		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
 		ReviewUC:       reviewUC,
 		SSEHub:         sseHub,
@@ -1389,5 +1410,194 @@ func TestActions_SurfaceGitHubsAnswerHonestly(t *testing.T) {
 		if tc.message != "" && body["error"] != tc.message {
 			t.Errorf("%s: the client shows GitHub's explanation alone, got %q", name, body["error"])
 		}
+	}
+}
+
+// dependabotPR stores an open Dependabot PR in the repository of PR 1 and returns its id.
+func (ts testServer) dependabotPR(t *testing.T, number int, title string) uint64 {
+	t.Helper()
+	first, err := ts.prs.GetByID(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := &entity.PullRequest{RepositoryID: first.RepositoryID, RepositoryName: first.RepositoryName, GitHubPRID: int64(71000 + number), Number: number,
+		Title: title, AuthorLogin: "dependabot[bot]", IsDependabot: true, State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateClean, CIStatus: entity.CIStatusSuccess, HeadSHA: fmt.Sprintf("live-%d", number), BaseRef: "main"}
+	if err := ts.prs.Upsert(context.Background(), pr); err != nil {
+		t.Fatal(err)
+	}
+	return pr.ID
+}
+
+// radarItemOf returns a Dependabot PR's entry in the workspace the signed-in user loads.
+func radarItemOf(t *testing.T, ts testServer, session *http.Cookie, prID uint64) triage.DependabotItem {
+	t.Helper()
+	var body struct {
+		Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+	}
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+		t.Fatalf("workspace: %d", rec.Code)
+	}
+	for _, item := range body.Snapshot.DependabotPRs {
+		if item.PullRequest.ID == prID {
+			return item
+		}
+	}
+	t.Fatalf("PR %d is not in the radar", prID)
+	return triage.DependabotItem{}
+}
+
+func analysisOf(t *testing.T, ts testServer, session *http.Cookie, prID uint64) *entity.DependabotAnalysis {
+	t.Helper()
+	var body struct {
+		Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+	}
+	rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", session)
+	if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+		t.Fatalf("workspace: %d", rec.Code)
+	}
+	for _, item := range body.Snapshot.DependabotPRs {
+		if item.PullRequest.ID == prID {
+			return item.Analysis
+		}
+	}
+	t.Fatalf("PR %d is not in the radar", prID)
+	return nil
+}
+
+func TestAnalysis_AFollowerCanRunItOnDemandAndSeeTheResult(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, session)
+	prID := ts.dependabotPR(t, 601, "chore(deps-dev): bump vitest from 2.1.0 to 2.1.1")
+	path := "/api/v1/prs/" + strconv.FormatUint(prID, 10) + "/analyze"
+
+	if analysisOf(t, ts, session, prID) != nil {
+		t.Fatal("not analysed yet")
+	}
+	if rec := ts.do(t, http.MethodPost, path, "", session); rec.Code != http.StatusOK {
+		t.Fatalf("analyze: %d %s", rec.Code, rec.Body.String())
+	}
+	got := analysisOf(t, ts, session, prID)
+	if got == nil || got.PackageName != "vitest" || got.RiskVerdict != entity.RiskVerdictLow {
+		t.Fatalf("the radar must show the stored analysis: %+v", got)
+	}
+	if rec := ts.do(t, http.MethodPost, path, "", session); rec.Code != http.StatusOK {
+		t.Fatalf("asking again converges: %d", rec.Code)
+	}
+
+	// A grouped update names no single package: refused, and still "not analysed".
+	grouped := ts.dependabotPR(t, 602, "chore(deps): bump the npm_and_yarn group with 3 updates")
+	rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+strconv.FormatUint(grouped, 10)+"/analyze", "", session)
+	var refusal map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&refusal)
+	if rec.Code != http.StatusUnprocessableEntity || refusal["code"] != "not_analysable" {
+		t.Fatalf("grouped update: %d %v, want 422 not_analysable (not a generic bad request)", rec.Code, refusal)
+	}
+	if analysisOf(t, ts, session, grouped) != nil {
+		t.Fatal("a grouped update must stay unanalysed, not be analysed as 'unknown'")
+	}
+}
+
+func TestAnalysis_SomeoneWhoDoesNotFollowTheRepositoryCannotReachIt(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	owner := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, owner)
+	prID := ts.dependabotPR(t, 601, "chore(deps-dev): bump vitest from 2.1.0 to 2.1.1")
+	stranger := ts.signInAs(t, "other")
+
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+strconv.FormatUint(prID, 10)+"/analyze", "", stranger); rec.Code != http.StatusNotFound {
+		t.Fatalf("a stranger must get 404, got %d", rec.Code)
+	}
+	if analysisOf(t, ts, owner, prID) != nil {
+		t.Fatal("nothing may have been analysed on the stranger's request")
+	}
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+strconv.FormatUint(prID, 10)+"/analyze", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed out: %d", rec.Code)
+	}
+}
+
+func TestAnalysis_NotAvailableWithoutTheGitHubAppCredentials(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{AuthUC: ts.authUC}) // no AnalyzeUC
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/prs/1/analyze", nil)
+	req.AddCookie(session)
+	server.NewChiRouter(handler, "*").ServeHTTP(rec, req)
+	var body map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if rec.Code != http.StatusServiceUnavailable || body["code"] != "unavailable" {
+		t.Fatalf("expected 503 unavailable, got %d %v", rec.Code, body)
+	}
+}
+
+func TestAnalysis_ADependabotWebhookIsAnalysedInTheBackground(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, session)
+
+	payload := `{"action":"opened","number":603,"pull_request":{"id":72003,"number":603,"title":"chore(deps-dev): bump vitest from 2.1.0 to 2.1.1","state":"open",` +
+		`"user":{"login":"dependabot[bot]"},"head":{"sha":"dep-603"},"base":{"ref":"main"}},"repository":{"id":5001},"sender":{"login":"dependabot[bot]"}}`
+	if rec := ts.postWebhook(t, "pull_request", payload); rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: %d %s", rec.Code, rec.Body.String())
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		_ = json.NewDecoder(ts.do(t, http.MethodGet, "/api/v1/workspace", "", session).Body).Decode(&body)
+		for _, item := range body.Snapshot.DependabotPRs {
+			if item.PullRequest.Number == 603 && item.Analysis != nil {
+				if item.Analysis.RiskVerdict != entity.RiskVerdictLow {
+					t.Fatalf("unexpected verdict: %+v", item.Analysis)
+				}
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the webhook's Dependabot PR was never analysed in the background")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestActions_AnApprovedDependabotPRStaysApprovedWhenTheWorkspaceReloads(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, session)
+	prID := ts.dependabotPR(t, 611, "chore(deps-dev): bump vitest from 2.1.0 to 2.1.1")
+
+	if radarItemOf(t, ts, session, prID).ApprovedByMe {
+		t.Fatal("not approved yet")
+	}
+	if rec := ts.do(t, http.MethodPost, "/api/v1/prs/"+strconv.FormatUint(prID, 10)+"/approve", `{}`, session); rec.Code != http.StatusOK {
+		t.Fatalf("approve: %d %s", rec.Code, rec.Body.String())
+	}
+	// What the panel does after every action: it reloads the workspace. The approval GitHub
+	// recorded must still be there, or the panel shows the PR as unapproved again.
+	if !radarItemOf(t, ts, session, prID).ApprovedByMe {
+		t.Fatal("the radar item must report my approval after a reload")
+	}
+
+	// A new commit makes the approval stale.
+	pr, err := ts.prs.GetByID(context.Background(), prID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr.HeadSHA = "live-612"
+	if err := ts.prs.Upsert(context.Background(), pr); err != nil {
+		t.Fatal(err)
+	}
+	if radarItemOf(t, ts, session, prID).ApprovedByMe {
+		t.Fatal("an approval of an older commit must not count")
 	}
 }

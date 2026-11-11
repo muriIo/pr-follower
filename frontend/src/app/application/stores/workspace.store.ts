@@ -79,6 +79,8 @@ export interface RenderedDiffLine {
 
 export interface SeatStreamRowViewModel {
   readonly id: number;
+  /** GitHub's PR number, shown as #N. */
+  readonly number: number;
   readonly title: string;
   readonly sel: string;
   readonly dim: string;
@@ -123,6 +125,7 @@ export interface SeatCardViewModel {
 
 export interface InboxCardViewModel {
   readonly id: number;
+  readonly number: number;
   readonly repo: string;
   readonly title: string;
   readonly sel: string;
@@ -139,6 +142,7 @@ export interface InboxCardViewModel {
 
 export interface RadarCardViewModel {
   readonly id: number;
+  readonly number: number;
   readonly repo: string;
   readonly radarTitle: string;
   readonly radarMeta: string;
@@ -164,6 +168,7 @@ export interface DrawerBlastFileViewModel {
 
 export interface DrawerViewModel {
   readonly id: number;
+  readonly number: number;
   readonly repo: string;
   readonly title: string;
   readonly ghUrl: string;
@@ -211,6 +216,8 @@ export interface DrawerViewModel {
   readonly blockedCls: string;
   readonly blockedText: string;
   readonly showApprove: boolean;
+  /** A Dependabot PR with no analysis yet: the user can ask for it. */
+  readonly showAnalyze: boolean;
   /** Why the user cannot approve this PR (they wrote it), or ''. */
   readonly ownNote: string;
   readonly approvedMine: boolean;
@@ -423,6 +430,7 @@ export class WorkspaceStore {
 
           return {
             id: p.id,
+            number: p.number,
             title: p.seatTitle ?? p.title,
             sel: selected === p.id ? 'is-sel' : '',
             dim: p.approvedBy && !mine ? 'is-dim' : '',
@@ -553,6 +561,7 @@ export class WorkspaceStore {
             const ci = this.effectiveCi(p).ci;
             return {
               id: p.id,
+              number: p.number,
               repo: p.repo,
               radarTitle: p.radarTitle ?? p.title,
               radarMeta: this.locale.text(p.radarMeta),
@@ -730,6 +739,7 @@ export class WorkspaceStore {
 
     return {
       id: pr.id,
+      number: pr.number,
       repo: pr.repo,
       title: pr.title,
       ghUrl: `https://github.com/${pr.repo}/pull/${pr.id}`,
@@ -772,6 +782,7 @@ export class WorkspaceStore {
       blocked: Boolean(blockedText),
       blockedCls: 'pf-blocked',
       blockedText,
+      showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg),
       showApprove: !mine && !own,
       ownNote: own ? this.t('drawer.ownPr') : '',
       approvedMine: mine,
@@ -831,7 +842,7 @@ export class WorkspaceStore {
     this.filesLoad = controller;
     this.changedFiles.set({ prId, state: 'loading', files: [] });
     try {
-      const files = await this.prGateway.fetchChangedFiles(pr.repo, prId, { signal: controller.signal });
+      const files = await this.prGateway.fetchChangedFiles(pr.repo, pr.number, { signal: controller.signal });
       if (controller.signal.aborted) {
         return;
       }
@@ -1018,6 +1029,25 @@ export class WorkspaceStore {
     );
   }
 
+  /** Runs the Dependabot analysis now and reloads the workspace to show it. */
+  async analyzePr(prId: number): Promise<void> {
+    await this.cancellation.run(
+      `merge:${prId}`,
+      [
+        {
+          label: this.t('actions.analyzing'),
+          execute: async (opts) => {
+            await this.prGateway?.analyzePullRequest?.(prId, opts);
+            await this.loadWorkspace(opts);
+          },
+        },
+      ],
+      () => this.t('actions.analyzed'),
+      () => this.t('actions.canceled.analyze'),
+      (err) => this.failureNote(err),
+    );
+  }
+
   /** Snooze a PR until its next commit, until CI passes, or (Dependabot) out of the Radar. */
   async silencePr(prId: number, until: 'commit' | 'ci' | 'radar'): Promise<void> {
     const condition = until === 'ci' ? 'UNTIL_CI_GREEN' : 'UNTIL_NEXT_COMMIT';
@@ -1127,12 +1157,12 @@ export class WorkspaceStore {
 
   private markApproved(pr: PullRequestItem): void {
     this.approvedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: { key: 'timeline.local.approved', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: { key: 'timeline.local.approved', params: { pr: pr.number } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private markMerged(pr: PullRequestItem): void {
     this.mergedMap.update((curr) => ({ ...curr, [pr.id]: true }));
-    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: { key: 'timeline.local.merged', params: { pr: pr.id } }, repo: pr.repo, pr: pr.id, fresh: true });
+    this.appendTimelineEvent({ kind: 'ok', type: 'pr.merged', actor: this.viewerLogin(), text: { key: 'timeline.local.merged', params: { pr: pr.number } }, repo: pr.repo, pr: pr.id, fresh: true });
   }
 
   private appendTimelineEvent(item: Omit<TimelineEventItem, 'key' | 't'>): void {
@@ -1152,6 +1182,7 @@ export class WorkspaceStore {
     const selected = this.selectedPrId();
     return {
       id: pr.id,
+      number: pr.number,
       repo: pr.repo,
       title: pr.title,
       sel: selected === pr.id ? 'is-sel' : '',

@@ -752,4 +752,91 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
       vi.useRealTimers();
     }
   });
+
+  it('analyses a Dependabot PR on demand and reloads the workspace to show the result', async () => {
+    const analyzePullRequest = vi.fn(async () => undefined);
+    const fetchWorkspace = vi.fn(async () => null);
+    const { store, translate } = setup({ analyzePullRequest, fetchWorkspace });
+    store.prs.set([{ ...prOf(9, '@dependabot[bot]'), dep: true, verdict: null, pkg: 'vitest' }]);
+    store.openPr(9);
+    expect(store.drawer()!.showAnalyze).toBe(true);
+
+    await store.analyzePr(9);
+    expect(analyzePullRequest).toHaveBeenCalledWith(9, expect.anything());
+    expect(fetchWorkspace).toHaveBeenCalled();
+    expect(store.drawer()!.act.note).toBe(translate('actions.analyzed'));
+  });
+
+  it('offers the analysis only for Dependabot PRs that have none', () => {
+    const { store } = setup({});
+    store.prs.set([
+      { ...prOf(9, '@dependabot[bot]'), dep: true, verdict: 'baixo', pkg: 'vitest' },
+      { ...prOf(10, '@dependabot[bot]'), dep: true, verdict: null, pkg: 'vitest' },
+      prOf(11, '@bia'),
+      // "bump tinypool and vitest": no single package, so there is nothing the analysis could read.
+      { ...prOf(12, '@dependabot[bot]'), dep: true, verdict: null, pkg: undefined },
+    ]);
+    const flags = [9, 10, 11, 12].map((id) => {
+      store.openPr(id);
+      return store.drawer()!.showAnalyze;
+    });
+    expect(flags).toEqual([false, true, false, false]);
+  });
+
+  it('tells the user when the analysis is unavailable or fails', async () => {
+    const { store, translate } = setup({
+      analyzePullRequest: vi.fn(async () => {
+        throw new ActionError('unavailable');
+      }),
+    });
+    store.prs.set([{ ...prOf(9, '@dependabot[bot]'), dep: true, verdict: null, pkg: 'vitest' }]);
+    store.openPr(9);
+    await store.analyzePr(9);
+    expect(store.drawer()!.act.note).toBe(translate('actions.error.unavailable'));
+  });
+
+  it('explains why a PR cannot be analysed instead of calling the request invalid', async () => {
+    const { store, translate } = setup({
+      analyzePullRequest: vi.fn(async () => {
+        throw new ActionError('not_analysable');
+      }),
+    });
+    store.prs.set([{ ...prOf(9, '@dependabot[bot]'), dep: true, verdict: null, pkg: 'vitest' }]);
+    store.openPr(9);
+    await store.analyzePr(9);
+    expect(store.drawer()!.act.note).toBe(translate('actions.error.not_analysable'));
+    expect(translate('actions.error.not_analysable')).not.toBe(translate('actions.error.invalid_input'));
+  });
+
+  it('acts on the PR that was shown even when another repository has a PR with the same number', async () => {
+    const fetchChangedFiles = vi.fn(async () => []);
+    const { store, gateway } = setup({ fetchChangedFiles });
+    store.prs.set([
+      { ...prOf(70, '@bia'), number: 7, repo: 'acme/web' },
+      { ...prOf(71, '@bia'), number: 7, repo: 'acme/api' },
+    ]);
+
+    await store.approvePr(71);
+    expect(gateway.approvePullRequest).toHaveBeenCalledWith(71, expect.anything());
+    expect(store.approvedMap()[71]).toBe(true);
+    expect(store.approvedMap()[70]).toBeUndefined();
+
+    // GitHub's files are read by number, in the PR's own repository.
+    await store.loadChangedFiles(71);
+    expect(fetchChangedFiles).toHaveBeenCalledWith('acme/api', 7, expect.anything());
+  });
+
+  it('shows the GitHub number, not the id, to the user', async () => {
+    const { store } = setup({});
+    store.prs.set([{ ...prOf(71, '@bia'), number: 7, repo: 'acme/api' }]);
+
+    store.openPr(71);
+    expect(store.drawer()!.number).toBe(7);
+    expect(store.drawer()!.id).toBe(71);
+
+    await store.approvePr(71);
+    const local = store.events().find((e) => e.type === 'pr.approved')!;
+    expect(local.pr).toBe(71);
+    expect(local.text).toMatchObject({ params: { pr: 7 } });
+  });
 });

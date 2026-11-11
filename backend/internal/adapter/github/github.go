@@ -92,6 +92,9 @@ func (g *Gateway) readToken(ctx context.Context, repo entity.Repository) (string
 	if g.apps != nil && repo.InstallationID != 0 {
 		return g.apps.InstallationToken(ctx, repo.InstallationID)
 	}
+	if g.token == "" {
+		return "", fmt.Errorf("%w: no credential to read %s/%s", entity.ErrUnauthorized, repo.Owner, repo.Name)
+	}
 	return g.token, nil
 }
 
@@ -134,51 +137,60 @@ func (g *Gateway) GetFileContent(ctx context.Context, repo entity.Repository, re
 	})
 }
 
+// prFilesPerPage follows GitHub's limit of 100 per page (prFilesMaxPages, in userapi.go, caps the
+// pages at GitHub's 3,000 files).
+const prFilesPerPage = 100
+
 func (g *Gateway) ListPRChangedFiles(ctx context.Context, repo entity.Repository, prNumber int) ([]entity.ChangedFile, error) {
 	token, err := g.readToken(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files", g.baseURL, repo.Owner, repo.Name, prNumber)
-	return resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) ([]entity.ChangedFile, error) {
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
-		if err != nil {
-			return nil, resilience.Permanent(err)
-		}
-		req.Header.Set("Accept", "application/vnd.github+json")
-		setBearer(req, token)
+	var files []entity.ChangedFile
+	for page := 1; page <= prFilesMaxPages; page++ {
+		url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/files?per_page=%d&page=%d", g.baseURL, repo.Owner, repo.Name, prNumber, prFilesPerPage, page)
+		batch, err := resilience.Retry(ctx, g.backoff, func(reqCtx context.Context) ([]entity.ChangedFile, error) {
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+			if err != nil {
+				return nil, resilience.Permanent(err)
+			}
+			req.Header.Set("Accept", "application/vnd.github+json")
+			setBearer(req, token)
 
-		resp, err := g.httpClient.Do(req)
+			resp, err := g.httpClient.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+
+			if err := classifyHTTPStatus(resp); err != nil {
+				return nil, err
+			}
+
+			var raw []struct {
+				Filename  string `json:"filename"`
+				Additions int    `json:"additions"`
+				Deletions int    `json:"deletions"`
+				Patch     string `json:"patch"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+				return nil, resilience.Permanent(err)
+			}
+			out := make([]entity.ChangedFile, 0, len(raw))
+			for _, item := range raw {
+				out = append(out, entity.ChangedFile{Path: item.Filename, Additions: item.Additions, Deletions: item.Deletions, Patch: item.Patch})
+			}
+			return out, nil
+		})
 		if err != nil {
 			return nil, err
 		}
-		defer resp.Body.Close()
-
-		if err := classifyHTTPStatus(resp); err != nil {
-			return nil, err
+		files = append(files, batch...)
+		if len(batch) < prFilesPerPage {
+			break
 		}
-
-		var raw []struct {
-			Filename  string `json:"filename"`
-			Additions int    `json:"additions"`
-			Deletions int    `json:"deletions"`
-			Patch     string `json:"patch"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-			return nil, resilience.Permanent(err)
-		}
-
-		files := make([]entity.ChangedFile, 0, len(raw))
-		for _, item := range raw {
-			files = append(files, entity.ChangedFile{
-				Path:      item.Filename,
-				Additions: item.Additions,
-				Deletions: item.Deletions,
-				Patch:     item.Patch,
-			})
-		}
-		return files, nil
-	})
+	}
+	return files, nil
 }
 
 func (g *Gateway) StreamRepoTarball(ctx context.Context, repo entity.Repository, ref string) (io.ReadCloser, error) {

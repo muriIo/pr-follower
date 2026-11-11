@@ -194,4 +194,17 @@ describe('HttpPullRequestGateway actions are never silent and never repeated', (
     answer(200, { ok: true, pr_id: 1 });
     expect((await gateway().mergePullRequest(1)).sha).toBeUndefined();
   });
+
+  it('asks the server to analyse a Dependabot PR, and says when the analysis is not available', async () => {
+    const spy = answer(200, { ok: true, pr_id: 233 });
+    await gateway().analyzePullRequest(233, { operationId: 'op-analyze-233' });
+    expect(spy).toHaveBeenCalledWith(
+      '/api/v1/prs/233/analyze',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'X-Operation-ID': 'op-analyze-233' }) }),
+    );
+    spy.mockRestore();
+
+    answer(503, { error: 'dependabot analysis needs the GitHub App credentials', code: 'unavailable' });
+    await expect(gateway().analyzePullRequest(233)).rejects.toMatchObject({ code: 'unavailable' });
+  });
 });

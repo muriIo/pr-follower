@@ -22,16 +22,25 @@ type ImportableRepository struct {
 }
 
 type UseCase struct {
-	tokens  port.UserTokenSource
-	github  port.GitHubUserAPI
-	repos   port.RepositoryRepository
-	prs     port.PullRequestSnapshotStore
-	checks  port.CheckRunRecorder
-	users   port.UserRepository
-	events  port.EventPublisher
-	files   port.ChangedFilesSyncer
-	reviews port.ReviewStore
-	nowFunc func() time.Time
+	tokens   port.UserTokenSource
+	github   port.GitHubUserAPI
+	repos    port.RepositoryRepository
+	prs      port.PullRequestSnapshotStore
+	checks   port.CheckRunRecorder
+	users    port.UserRepository
+	events   port.EventPublisher
+	files    port.ChangedFilesSyncer
+	reviews  port.ReviewStore
+	analysis port.AnalysisScheduler
+	nowFunc  func() time.Time
+}
+
+// Option adds an optional collaborator to the import.
+type Option func(*UseCase)
+
+// WithAnalysisScheduler has the import schedule the analysis of the open Dependabot PRs it finds.
+func WithAnalysisScheduler(s port.AnalysisScheduler) Option {
+	return func(uc *UseCase) { uc.analysis = s }
 }
 
 // NewUseCase wires the import. files (optional) reads each open PR's changed files, so the
@@ -47,8 +56,13 @@ func NewUseCase(
 	events port.EventPublisher,
 	files port.ChangedFilesSyncer,
 	reviews port.ReviewStore,
+	opts ...Option,
 ) *UseCase {
-	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, files: files, reviews: reviews, nowFunc: time.Now}
+	uc := &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, files: files, reviews: reviews, nowFunc: time.Now}
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 // ListAccounts returns the installations (user and organization accounts) the user can reach.
@@ -217,6 +231,9 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 // syncTurnFacts reads what decides a PR's turn: its changed files and its reviews. Both are only
 // read for open, human PRs of a repository with CODEOWNERS: nobody else is ever given a turn.
 func (uc *UseCase) syncTurnFacts(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, pr *entity.PullRequest) error {
+	if uc.analysis != nil && pr.IsDependabot && pr.State == entity.PRStateOpen {
+		uc.analysis.ScheduleAnalysis(ctx, pr.ID) // in the background; import does not wait for it
+	}
 	if err := uc.syncChangedFiles(ctx, token, repo, pr); err != nil {
 		return err
 	}

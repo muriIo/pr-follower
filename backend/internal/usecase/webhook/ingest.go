@@ -36,6 +36,15 @@ type IngestUseCase struct {
 	checks   port.CheckRunStore
 	pub      port.EventPublisher
 	files    port.ChangedFilesSyncer
+	analysis port.AnalysisScheduler
+}
+
+// IngestOption adds an optional collaborator to IngestUseCase.
+type IngestOption func(*IngestUseCase)
+
+// WithAnalysisScheduler has every change to an open Dependabot PR schedule its analysis.
+func WithAnalysisScheduler(s port.AnalysisScheduler) IngestOption {
+	return func(uc *IngestUseCase) { uc.analysis = s }
 }
 
 // NewIngestUseCase wires webhook ingestion. files (optional) reads a PR's changed files with a
@@ -46,8 +55,13 @@ func NewIngestUseCase(
 	checks port.CheckRunStore,
 	pub port.EventPublisher,
 	files port.ChangedFilesSyncer,
+	opts ...IngestOption,
 ) *IngestUseCase {
-	return &IngestUseCase{repoRepo: repoRepo, prRepo: prRepo, checks: checks, pub: pub, files: files}
+	uc := &IngestUseCase{repoRepo: repoRepo, prRepo: prRepo, checks: checks, pub: pub, files: files}
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullRequestEventPayload) error {
@@ -106,6 +120,9 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 	}
 	if err := uc.syncChangedFiles(ctx, repo, pr); err != nil {
 		return err
+	}
+	if uc.analysis != nil && pr.IsDependabot && pr.State == entity.PRStateOpen {
+		uc.analysis.ScheduleAnalysis(ctx, pr.ID) // in the background: the webhook is answered at once
 	}
 
 	return uc.pub.Publish(ctx, entity.ActivityEvent{

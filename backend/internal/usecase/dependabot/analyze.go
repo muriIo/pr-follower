@@ -21,6 +21,9 @@ type AnalyzeUseCase struct {
 	analyzers []port.DependencyAnalyzer
 	scanner   port.BlastRadiusScanner
 	pub       port.EventPublisher
+	// inflight makes concurrent requests for the same commit (a webhook, an import and a click)
+	// share one analysis: one tarball scan, one stored result, one event.
+	inflight flightGroup[*entity.DependabotAnalysis]
 }
 
 func NewAnalyzeUseCase(
@@ -41,6 +44,32 @@ func NewAnalyzeUseCase(
 	}
 }
 
+// AnalyzePRForUser analyses a PR on behalf of a signed-in user. The analysis reads GitHub as the
+// app, so only a follower of the PR's repository may ask for it (and see its result).
+func (uc *AnalyzeUseCase) AnalyzePRForUser(ctx context.Context, userID, prID uint64) (*entity.DependabotAnalysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	pr, err := uc.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+	followed, err := uc.repoRepo.ListFollowedByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, repo := range followed {
+		if repo.ID == pr.RepositoryID {
+			return uc.AnalyzePR(ctx, prID)
+		}
+	}
+	return nil, entity.ErrNotFound
+}
+
+// AnalyzePR analyses an open Dependabot PR at its head commit and stores the result. It converges
+// (ADR-0011): a commit already analysed is returned as is, and concurrent calls for the same
+// commit share one run. A PR that names no single package (a grouped update) is refused rather
+// than analysed as "unknown".
 func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.DependabotAnalysis, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
@@ -50,7 +79,22 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 	if err != nil {
 		return nil, err
 	}
+	if !pr.IsDependabot {
+		return nil, fmt.Errorf("%w: PR #%d is not a Dependabot PR", entity.ErrInvalidInput, pr.Number)
+	}
+	if pr.State != entity.PRStateOpen {
+		return nil, fmt.Errorf("%w: PR #%d is not open", entity.ErrConflict, pr.Number)
+	}
+	if _, _, _, ok := parseDependabotTitle(pr.Title); !ok {
+		return nil, fmt.Errorf("%w: PR #%d does not name a single package (a grouped update?)", entity.ErrNotAnalysable, pr.Number)
+	}
 
+	return uc.inflight.do(ctx, fmt.Sprintf("analysis:%d:%s", pr.ID, pr.HeadSHA), func(callCtx context.Context) (*entity.DependabotAnalysis, error) {
+		return uc.analyze(callCtx, pr)
+	})
+}
+
+func (uc *AnalyzeUseCase) analyze(ctx context.Context, pr *entity.PullRequest) (*entity.DependabotAnalysis, error) {
 	if cached, err := uc.prRepo.GetAnalysisByPRAndSHA(ctx, pr.ID, pr.HeadSHA); err == nil && cached != nil {
 		return cached, nil
 	}
@@ -60,7 +104,7 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 		return nil, err
 	}
 
-	pkgName, fromVer, toVer := ParseDependabotTitle(pr.Title)
+	pkgName, fromVer, toVer, _ := parseDependabotTitle(pr.Title)
 	changedFiles, err := uc.ghGateway.ListPRChangedFiles(ctx, *repo, pr.Number)
 	if err != nil {
 		return nil, err
@@ -83,7 +127,7 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 	}
 
 	if matchedAnalyzer == nil {
-		return nil, fmt.Errorf("%w: no analyzer found for PR #%d", entity.ErrInvalidInput, pr.Number)
+		return nil, fmt.Errorf("%w: no analyzer reads the lockfile of PR #%d", entity.ErrNotAnalysable, pr.Number)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -140,10 +184,11 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 	}
 
 	scoring := service.ComputeDependabotRiskVerdict(service.RiskScoringInput{
-		DepScope:        analysis.DepScope,
-		IsDirectDep:     analysis.IsDirectDep,
-		SemverBump:      analysis.SemverBumpType,
-		CIStatus:        pr.CIStatus,
+		DepScope:    analysis.DepScope,
+		IsDirectDep: analysis.IsDirectDep,
+		SemverBump:  analysis.SemverBumpType,
+		// CI is judged live (it gates the batch merge), never frozen into a verdict kept for the commit.
+		CIStatus:        entity.CIStatusNone,
 		DirectImports:   len(analysis.BlastRadiusUsages),
 		HasBreakingNote: hasBreaking,
 	})
@@ -173,9 +218,17 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 }
 
 func ParseDependabotTitle(title string) (pkg, fromVer, toVer string) {
-	m := dependabotTitleRegex.FindStringSubmatch(title)
-	if len(m) == 4 {
-		return m[1], m[2], m[3]
+	if pkg, fromVer, toVer, ok := parseDependabotTitle(title); ok {
+		return pkg, fromVer, toVer
 	}
 	return "unknown", "0.0.0", "0.0.0"
+}
+
+// parseDependabotTitle reads "bump <package> from <a> to <b>"; ok is false for any other title.
+func parseDependabotTitle(title string) (pkg, fromVer, toVer string, ok bool) {
+	m := dependabotTitleRegex.FindStringSubmatch(title)
+	if len(m) != 4 {
+		return "", "", "", false
+	}
+	return m[1], m[2], m[3], true
 }

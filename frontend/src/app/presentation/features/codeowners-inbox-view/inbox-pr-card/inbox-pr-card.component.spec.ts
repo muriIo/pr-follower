@@ -6,7 +6,8 @@ import { InboxPrCardComponent } from './inbox-pr-card.component';
 describe('InboxPrCardComponent', () => {
   it('renders CODEOWNERS inbox card and emits selected PR id on click', () => {
     const cardVm: InboxCardViewModel = {
-      id: 142,
+      id: 9142,
+      number: 142,
       repo: 'arvore/hive-web',
       title: 'feat(seats): add real-time CI status pulse to repo tiles',
       sel: 'is-sel',
@@ -34,6 +35,6 @@ describe('InboxPrCardComponent', () => {
     expect(btn.textContent).toContain('🎯 Toca apenas 1 arquivo seu');
 
     btn.click();
-    expect(selectSpy).toHaveBeenCalledWith(142);
+    expect(selectSpy).toHaveBeenCalledWith(9142);
   });
 });

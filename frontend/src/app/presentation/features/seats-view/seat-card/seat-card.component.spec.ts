@@ -25,7 +25,8 @@ describe('SeatCardComponent', () => {
       noCodeowners: false,
       stream: [
         {
-          id: 142,
+          id: 9142,
+          number: 142,
           title: 'feat(seats): add real-time CI status pulse',
           sel: '',
           dim: '',

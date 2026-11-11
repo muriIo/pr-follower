@@ -45,6 +45,10 @@ export class HttpPullRequestGateway implements PullRequestGateway {
     await this.postAction(`/api/v1/prs/${prId}/dependabot-command`, { command }, options);
   }
 
+  async analyzePullRequest(prId: number, options?: ActionRequestOptions): Promise<void> {
+    await this.postAction(`/api/v1/prs/${prId}/analyze`, {}, options);
+  }
+
   async snoozePullRequest(prId: number, condition: string, options?: ActionRequestOptions): Promise<void> {
     await this.postAction(`/api/v1/prs/${prId}/snooze`, { condition }, options);
   }

@@ -22,6 +22,10 @@ type InboxItem struct {
 type DependabotItem struct {
 	PullRequest entity.PullRequest         `json:"pull_request"`
 	Analysis    *entity.DependabotAnalysis `json:"analysis,omitempty"`
+	// ApprovedByMe: the reader has a standing approval of the head commit (from the review GitHub
+	// recorded, so a new commit makes it stale). ApprovedByLogin: a teammate who approved the head.
+	ApprovedByMe    bool   `json:"approved_by_me"`
+	ApprovedByLogin string `json:"approved_by_login,omitempty"`
 }
 
 type RepoSeat struct {
@@ -146,9 +150,12 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 				seat.DependabotPRCount++
 			}
 			analysis, _ := uc.prRepo.GetAnalysisByPRAndSHA(ctx, pr.ID, pr.HeadSHA)
+			facts := service.DeriveReviewFacts(reviewsByPR[pr.ID], pr, reader.Login)
 			snapshot.DependabotPRs = append(snapshot.DependabotPRs, DependabotItem{
-				PullRequest: pr,
-				Analysis:    analysis,
+				PullRequest:     pr,
+				Analysis:        analysis,
+				ApprovedByMe:    facts.ApprovedByMeSHA != "" && facts.ApprovedByMeSHA == pr.HeadSHA,
+				ApprovedByLogin: facts.TeammateApprovedBy,
 			})
 			continue
 		}

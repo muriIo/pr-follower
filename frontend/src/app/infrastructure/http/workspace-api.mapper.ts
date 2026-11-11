@@ -114,7 +114,14 @@ export interface ApiWorkspaceResponseDto {
   readonly snapshot?: {
     readonly inbox_waiting_on_me?: readonly { pull_request: ApiPullRequestDto; user_state: ApiUserPrStateDto }[];
     readonly inbox_dimmed?: readonly { pull_request: ApiPullRequestDto; user_state: ApiUserPrStateDto }[];
-    readonly dependabot_prs?: readonly { pull_request: ApiPullRequestDto; analysis?: ApiDependabotAnalysisDto }[];
+    readonly dependabot_prs?: readonly {
+      pull_request: ApiPullRequestDto;
+      analysis?: ApiDependabotAnalysisDto;
+      /** I have a standing approval of the head commit (from GitHub's review). */
+      approved_by_me?: boolean;
+      /** A teammate approved the head commit. */
+      approved_by_login?: string;
+    }[];
     readonly seats?: readonly {
       repository: ApiRepositoryDto;
       open_pr_count: number;
@@ -184,7 +191,13 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
 
   for (const item of snapshot.dependabot_prs ?? []) {
     listed.add(item.pull_request.id);
-    prs.push(mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name)));
+    const bump = mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name));
+    // Approval comes from the review GitHub recorded: a reload must not forget it.
+    if (item.approved_by_me) {
+      approvedMap[bump.id] = true;
+    }
+    const teammate = item.approved_by_login ? `@${item.approved_by_login.replace(/^@/, '')}` : undefined;
+    prs.push(teammate && !item.approved_by_me ? { ...bump, approvedBy: teammate } : bump);
   }
 
   const pending = new Set(snapshot.ownership_pending_pr_ids ?? []);
@@ -226,7 +239,8 @@ export function mapActivityEventToTimelineItem(
     actor: ev.actor_login || undefined,
     text: activityText(ev),
     repo: ev.repository_name,
-    pr: ev.pr_number || ev.pull_request_id,
+    // The PR the activity is about, by id (numbers repeat across repositories).
+    pr: ev.pull_request_id || undefined,
     fresh: true,
     // Every server activity changes what the workspace shows (a new PR, a commit, lost access).
     refreshWorkspace: true,
@@ -339,7 +353,6 @@ function mapInboxPrToModel(
   repoRulesMap: Map<string, string>,
   codeowners: CodeownersState | undefined,
 ): PullRequestItem {
-  const prId = pr.number || pr.id;
   const { ci, ciText } = mapCiStatus(pr.ci_status);
   const ownedFiles = st.owned_files_changed ?? [];
   const approvedBy = st.approved_by_login
@@ -383,7 +396,8 @@ function mapInboxPrToModel(
   }
 
   return {
-    id: prId,
+    id: pr.id,
+    number: pr.number,
     rank: isActionable ? 1 : 3,
     repo: pr.repository_name,
     title: pr.title,
@@ -432,11 +446,11 @@ function mapDependabotPrToModel(
   analysis: ApiDependabotAnalysisDto | undefined,
   codeowners: CodeownersState | undefined,
 ): PullRequestItem {
-  const prId = pr.number || pr.id;
   const { ci, ciText } = mapCiStatus(pr.ci_status);
   const owners = ownersForNonOwner(codeowners);
   const base = {
-    id: prId,
+    id: pr.id,
+    number: pr.number,
     rank: 2,
     repo: pr.repository_name,
     title: pr.title,
@@ -464,7 +478,7 @@ function mapDependabotPrToModel(
       pkg,
       from,
       to,
-      rvDetail: { key: 'impact.rvDetail.none' },
+      rvDetail: { key: pkg ? 'impact.rvDetail.none' : 'impact.rvDetail.grouped' },
       via: [],
       blasts: [],
       note: '',
