@@ -123,3 +123,37 @@ func TestTurn_FailedReviewReadIsAnError(t *testing.T) {
 		t.Fatalf("expected the store error (never guess a turn without reviews), got %v", err)
 	}
 }
+
+func TestTurn_DependabotPRsCarryMyApprovalAndTheTeammateWhoApproved(t *testing.T) {
+	t.Parallel()
+	bump := func(id uint64) entity.PullRequest {
+		return openPR(id, func(p *entity.PullRequest) { p.IsDependabot, p.AuthorLogin = true, "dependabot[bot]" })
+	}
+	f := newTurnFixture(bump(1), bump(2), bump(3), bump(4))
+	f.reviewed(1, "murilo", entity.ReviewApproved, "sha1") // I approved the head
+	f.reviewed(2, "murilo", entity.ReviewApproved, "old")  // I approved an older commit
+	f.reviewed(3, "bia", entity.ReviewApproved, "sha1")    // a teammate approved the head
+	// PR 4 has no review
+
+	snap := f.snapshot(t)
+	byID := map[uint64]triageItem{}
+	for _, it := range snap.DependabotPRs {
+		byID[it.PullRequest.ID] = triageItem{it.ApprovedByMe, it.ApprovedByLogin}
+	}
+	want := map[uint64]triageItem{1: {true, ""}, 2: {false, ""}, 3: {false, "bia"}, 4: {false, ""}}
+	for id, w := range want {
+		if byID[id] != w {
+			t.Errorf("PR %d: approved by me / by = %+v, want %+v", id, byID[id], w)
+		}
+	}
+
+	// A Dependabot PR still never enters the inbox.
+	if len(snap.InboxWaitingOnMe)+len(snap.InboxDimmed) != 0 {
+		t.Fatalf("bumps stay out of Minha Vez: %+v", snap)
+	}
+}
+
+type triageItem struct {
+	approvedByMe    bool
+	approvedByLogin string
+}

@@ -256,6 +256,28 @@ func (h *Handler) DependabotCommand(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pr_id": prID})
 }
 
+// AnalyzePR runs the Dependabot analysis for a PR on demand (cancellable). It needs the GitHub
+// App credentials: without them the analysis is not available.
+func (h *Handler) AnalyzePR(w http.ResponseWriter, r *http.Request) {
+	if h.deps.AnalyzeUC == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "dependabot analysis needs the GitHub App credentials", "code": "unavailable"})
+		return
+	}
+	ctx, release := h.beginOperation(r)
+	defer release()
+
+	prID, err := parseUintParam(r, "id")
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	if _, err := h.deps.AnalyzeUC.AnalyzePRForUser(ctx, currentUserID(r), prID); err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "pr_id": prID})
+}
+
 func (h *Handler) CancelOperation(w http.ResponseWriter, r *http.Request) {
 	opID := chi.URLParam(r, "id")
 	if !h.deps.OpRegistry.Cancel(opID) {
@@ -447,6 +469,8 @@ func writeDomainError(w http.ResponseWriter, err error) {
 		status, code = http.StatusUnprocessableEntity, "own_pull_request"
 	case errors.Is(err, entity.ErrOutcomeUnknown):
 		status, code = http.StatusBadGateway, "outcome_unknown"
+	case errors.Is(err, entity.ErrNotAnalysable):
+		status, code = http.StatusUnprocessableEntity, "not_analysable"
 	case errors.Is(err, entity.ErrForbidden):
 		status, code = http.StatusForbidden, "forbidden"
 	case errors.Is(err, entity.ErrInvalidInput):

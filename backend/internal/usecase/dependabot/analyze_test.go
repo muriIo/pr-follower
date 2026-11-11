@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -13,6 +14,7 @@ import (
 )
 
 type fakePRRepo struct {
+	mu     sync.Mutex
 	pr     *entity.PullRequest
 	saved  *entity.DependabotAnalysis
 	cached *entity.DependabotAnalysis
@@ -29,12 +31,18 @@ func (f *fakePRRepo) ListOpenByRepoIDs(_ context.Context, _ []uint64) ([]entity.
 	return nil, nil
 }
 func (f *fakePRRepo) SaveAnalysis(_ context.Context, a *entity.DependabotAnalysis) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.saved = a
 	return nil
 }
 func (f *fakePRRepo) GetAnalysisByPRAndSHA(_ context.Context, _ uint64, sha string) (*entity.DependabotAnalysis, error) {
-	if f.cached != nil && f.cached.HeadSHA == sha {
-		return f.cached, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, a := range []*entity.DependabotAnalysis{f.cached, f.saved} {
+		if a != nil && a.HeadSHA == sha {
+			return a, nil
+		}
 	}
 	return nil, entity.ErrNotFound
 }

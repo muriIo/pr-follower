@@ -44,6 +44,7 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 			private.Post("/prs/{id}/snooze", h.SnoozePR)
 			private.Post("/prs/{id}/claim", h.ClaimPR)
 			private.Post("/prs/{id}/dependabot-command", h.DependabotCommand)
+			private.Post("/prs/{id}/analyze", h.AnalyzePR)
 
 			private.Delete("/operations/{id}", h.CancelOperation)
 		})

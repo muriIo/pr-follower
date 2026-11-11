@@ -202,3 +202,14 @@ type ChangedFilesSyncer interface {
 	// SyncAsFollower reads them with the token of any user who follows the repository.
 	SyncAsFollower(ctx context.Context, repo entity.Repository, pr entity.PullRequest) error
 }
+
+// PullRequestAnalyzer analyses a Dependabot PR at its head commit and stores the result.
+type PullRequestAnalyzer interface {
+	AnalyzePR(ctx context.Context, prID uint64) (*entity.DependabotAnalysis, error)
+}
+
+// AnalysisScheduler asks for a PR to be analysed in the background. It never blocks and never
+// fails the caller: the work is best effort and can always be asked for again.
+type AnalysisScheduler interface {
+	ScheduleAnalysis(ctx context.Context, prID uint64)
+}

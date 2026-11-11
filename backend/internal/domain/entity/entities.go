@@ -18,6 +18,9 @@ var (
 	// ErrOutcomeUnknown means a write may or may not have been applied on GitHub (a timeout, a
 	// dropped connection, a 5xx): the caller must check GitHub, never assume either way.
 	ErrOutcomeUnknown = errors.New("could not confirm the outcome on github")
+	// ErrNotAnalysable means a Dependabot PR is one the analysis cannot read yet (several packages
+	// in one PR, or a lockfile format no analyzer understands). It is not the caller's mistake.
+	ErrNotAnalysable = errors.New("this pull request cannot be analysed")
 	// ErrOwnPullRequest means the user tried to approve a pull request they authored: GitHub
 	// does not allow it.
 	ErrOwnPullRequest = errors.New("you cannot approve your own pull request")

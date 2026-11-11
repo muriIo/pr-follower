@@ -74,14 +74,25 @@ func main() {
 		Installations: installations,
 	})
 
-	analyzeUC := dependabot.NewAnalyzeUseCase(
-		prRepo,
-		repoRepo,
-		ghGateway,
-		[]port.DependencyAnalyzer{nodejs.NewAnalyzer()},
-		blastradius.NewScanner(),
-		sseHub,
-	)
+	// The Dependabot analysis reads lockfiles and tarballs as the GitHub App, so it only exists
+	// when the app credentials are set; without them PRs stay "not analysed".
+	var analyzeUC *dependabot.AnalyzeUseCase
+	var ingestOpts []webhook.IngestOption
+	var importOpts []repoimport.Option
+	if installations != nil {
+		analyzeUC = dependabot.NewAnalyzeUseCase(
+			prRepo,
+			repoRepo,
+			ghGateway,
+			[]port.DependencyAnalyzer{nodejs.NewAnalyzer()},
+			blastradius.NewScanner(),
+			sseHub,
+		)
+		runner := dependabot.NewRunner(analyzeUC, dependabot.RunnerConfig{})
+		go runner.Run(ctx) // stops with the server
+		ingestOpts = append(ingestOpts, webhook.WithAnalysisScheduler(runner))
+		importOpts = append(importOpts, repoimport.WithAnalysisScheduler(runner))
+	}
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 
 	// ADR-0010: GitHub is the only identity provider. Without client credentials the
@@ -108,7 +119,7 @@ func main() {
 		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
 		filesSyncer = changedFilesUC
-		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo, importOpts...)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 		actionUC = action.NewUseCase(action.Deps{
 			PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
@@ -118,7 +129,7 @@ func main() {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo)
-	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer)
+	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer, ingestOpts...)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{

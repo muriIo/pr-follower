@@ -2,7 +2,9 @@ package github_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -141,5 +143,53 @@ func TestGateway_ReadFailsWithoutSendingAnythingWhenTheAppTokenCannotBeObtained(
 	}
 	if len(rec.auth) != 0 {
 		t.Fatalf("nothing may reach GitHub without the app's token (never fall back to an unrelated identity): %v", rec.auth)
+	}
+}
+
+func TestGateway_ReadWithoutAnyCredentialFailsInsteadOfGoingOutAnonymous(t *testing.T) {
+	t.Parallel()
+	gw, rec := newAppGateway(t, nil, "") // no app, no static token
+	for name, err := range map[string]error{
+		"file":    func() error { _, err := gw.GetFileContent(context.Background(), appRepo, "main", "a.txt"); return err }(),
+		"files":   func() error { _, err := gw.ListPRChangedFiles(context.Background(), appRepo, 7); return err }(),
+		"tarball": func() error { _, err := gw.StreamRepoTarball(context.Background(), appRepo, "sha"); return err }(),
+	} {
+		if !errors.Is(err, entity.ErrUnauthorized) {
+			t.Errorf("%s: expected ErrUnauthorized, got %v", name, err)
+		}
+	}
+	if len(rec.auth) != 0 {
+		t.Fatalf("nothing may reach GitHub without a credential: %v", rec.auth)
+	}
+}
+
+func TestGateway_ListPRChangedFilesReadsEveryPage(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var queries []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		queries = append(queries, r.URL.RawQuery)
+		mu.Unlock()
+		page := r.URL.Query().Get("page")
+		n := 100
+		if page == "2" {
+			n = 5
+		}
+		files := make([]map[string]any, n)
+		for i := range files {
+			files[i] = map[string]any{"filename": fmt.Sprintf("f-%s-%d", page, i)}
+		}
+		_ = json.NewEncoder(w).Encode(files)
+	}))
+	defer srv.Close()
+	gw := github.NewGateway(github.GatewayConfig{BaseURL: srv.URL, Token: "t", Backoff: resilience.BackoffConfig{MaxAttempts: 1}})
+
+	files, err := gw.ListPRChangedFiles(context.Background(), appRepo, 7)
+	if err != nil || len(files) != 105 {
+		t.Fatalf("expected 105 files across two pages: %d, %v", len(files), err)
+	}
+	if len(queries) != 2 || queries[0] != "per_page=100&page=1" || queries[1] != "per_page=100&page=2" {
+		t.Fatalf("expected two full-size page requests: %v", queries)
 	}
 }
