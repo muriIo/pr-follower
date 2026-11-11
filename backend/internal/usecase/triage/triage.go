@@ -50,10 +50,12 @@ type UseCase struct {
 	pub      port.EventPublisher
 	files    port.ChangedFilesStore
 	syncer   port.ChangedFilesSyncer
+	reviews  port.ReviewStore
 }
 
 // NewUseCase wires the triage use case. files holds each PR's changed files and syncer reads the
 // missing ones from GitHub with the reader's token; without them every PR stays "not evaluated".
+// reviews (optional) holds what reviewers decided, so an approved PR stops being the user's move.
 func NewUseCase(
 	userRepo port.UserRepository,
 	repoRepo port.RepositoryRepository,
@@ -61,8 +63,9 @@ func NewUseCase(
 	pub port.EventPublisher,
 	files port.ChangedFilesStore,
 	syncer port.ChangedFilesSyncer,
+	reviews port.ReviewStore,
 ) *UseCase {
-	return &UseCase{userRepo: userRepo, repoRepo: repoRepo, prRepo: prRepo, pub: pub, files: files, syncer: syncer}
+	return &UseCase{userRepo: userRepo, repoRepo: repoRepo, prRepo: prRepo, pub: pub, files: files, syncer: syncer, reviews: reviews}
 }
 
 func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*WorkspaceSnapshot, error) {
@@ -103,6 +106,12 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 	changed := map[uint64]entity.PRChangedFiles{}
 	if uc.files != nil {
 		if changed, err = uc.files.ListChangedFiles(ctx, prIDs); err != nil {
+			return nil, err
+		}
+	}
+	reviewsByPR := map[uint64][]entity.PullRequestReview{}
+	if uc.reviews != nil {
+		if reviewsByPR, err = uc.reviews.ListReviews(ctx, prIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -187,7 +196,16 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 
 		owned := service.EvaluateCodeownersForUser(seat.Repository.CachedCodeownersRules, files.Files, reader).OwnedFiles
 		st.OwnedFilesChanged = owned
-		st.TurnState = service.ComputeTurnState(service.TurnStateInput{PR: pr, OwnedFiles: owned, ExistingState: st})
+		facts := service.DeriveReviewFacts(reviewsByPR[pr.ID], pr, reader.Login)
+		st.TurnState = service.ComputeTurnState(service.TurnStateInput{
+			PR: pr, OwnedFiles: owned, ExistingState: st,
+			ApprovedByMeSHA:       facts.ApprovedByMeSHA,
+			TeammateApprovedAtSHA: facts.TeammateApprovedAtSHA,
+			UserActedAtSHA:        facts.UserActedAtSHA,
+		})
+		if st.TurnState == entity.TurnStateTeammateApproved {
+			st.ApprovedByLogin = facts.TeammateApprovedBy
+		}
 		item := InboxItem{PullRequest: pr, UserState: st}
 		switch {
 		case st.TurnState == entity.TurnStateWaitingOnMe:

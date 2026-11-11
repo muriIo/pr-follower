@@ -203,6 +203,10 @@ func (f *fakeGitHub) ListOpenPullRequests(context.Context, string, string, strin
 	return nil, nil
 }
 
+func (f *fakeGitHub) ListPullRequestReviews(context.Context, string, string, string, int) ([]entity.PullRequestReview, error) {
+	return nil, nil
+}
+
 func (f *fakeGitHub) ListCommitCheckRuns(context.Context, string, string, string, string) ([]entity.CheckRun, error) {
 	return nil, nil
 }

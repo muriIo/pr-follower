@@ -30,11 +30,13 @@ type UseCase struct {
 	users   port.UserRepository
 	events  port.EventPublisher
 	files   port.ChangedFilesSyncer
+	reviews port.ReviewStore
 	nowFunc func() time.Time
 }
 
 // NewUseCase wires the import. files (optional) reads each open PR's changed files, so the
-// importer's turn is known as soon as the repository shows up.
+// importer's turn is known as soon as the repository shows up; reviews (optional) stores the
+// reviews read with them, so approvals already given are not ignored.
 func NewUseCase(
 	tokens port.UserTokenSource,
 	github port.GitHubUserAPI,
@@ -44,8 +46,9 @@ func NewUseCase(
 	users port.UserRepository,
 	events port.EventPublisher,
 	files port.ChangedFilesSyncer,
+	reviews port.ReviewStore,
 ) *UseCase {
-	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, files: files, nowFunc: time.Now}
+	return &UseCase{tokens: tokens, github: github, repos: repos, prs: prs, checks: checks, users: users, events: events, files: files, reviews: reviews, nowFunc: time.Now}
 }
 
 // ListAccounts returns the installations (user and organization accounts) the user can reach.
@@ -170,7 +173,7 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 			return context.Cause(ctx)
 		}
 		if existing, err := uc.prs.GetByRepoAndNumber(ctx, repo.ID, remote.Number); err == nil {
-			if err := uc.syncChangedFiles(ctx, token, repo, existing); err != nil {
+			if err := uc.syncTurnFacts(ctx, token, repo, target, existing); err != nil {
 				return err
 			}
 			continue
@@ -204,7 +207,38 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 		if err := uc.prs.Upsert(ctx, pr); err != nil {
 			return err
 		}
-		if err := uc.syncChangedFiles(ctx, token, repo, pr); err != nil {
+		if err := uc.syncTurnFacts(ctx, token, repo, target, pr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// syncTurnFacts reads what decides a PR's turn: its changed files and its reviews. Both are only
+// read for open, human PRs of a repository with CODEOWNERS: nobody else is ever given a turn.
+func (uc *UseCase) syncTurnFacts(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, pr *entity.PullRequest) error {
+	if err := uc.syncChangedFiles(ctx, token, repo, pr); err != nil {
+		return err
+	}
+	return uc.syncReviews(ctx, token, repo, target, pr)
+}
+
+// syncReviews stores the reviews GitHub already recorded on a PR; webhooks keep them current
+// afterwards. Storing is idempotent, and a dismissed review is never revived.
+func (uc *UseCase) syncReviews(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, pr *entity.PullRequest) error {
+	if uc.reviews == nil || pr.IsDependabot || pr.State != entity.PRStateOpen || repo.CodeownersStatus != entity.CodeownersPresent {
+		return nil
+	}
+	reviews, err := uc.github.ListPullRequestReviews(ctx, token, target.Owner, target.Name, pr.Number)
+	if err != nil {
+		return err
+	}
+	for _, review := range reviews {
+		if err := ctx.Err(); err != nil {
+			return context.Cause(ctx)
+		}
+		review.PullRequestID = pr.ID
+		if _, err := uc.reviews.UpsertReview(ctx, review); err != nil {
 			return err
 		}
 	}

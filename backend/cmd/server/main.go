@@ -105,13 +105,14 @@ func main() {
 		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo)
 		filesSyncer = changedFilesUC
-		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC)
+		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer)
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer)
+	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
@@ -121,6 +122,7 @@ func main() {
 		ActionUC:       actionUC,
 		AnalyzeUC:      analyzeUC,
 		WebhookUC:      webhookUC,
+		ReviewUC:       reviewUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,
 		WebhookSecret:  cfg.GitHubWebhookSecret,

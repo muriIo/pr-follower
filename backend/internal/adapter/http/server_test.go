@@ -121,6 +121,10 @@ func (fakeGitHubUserAPI) ListOpenPullRequests(_ context.Context, _ string, owner
 		HTMLURL: "https://github.com/acme/web/pull/42", HeadSHA: "sha42", BaseRef: "main"}}, nil
 }
 
+func (fakeGitHubUserAPI) ListPullRequestReviews(context.Context, string, string, string, int) ([]entity.PullRequestReview, error) {
+	return nil, nil
+}
+
 func (fakeGitHubUserAPI) ListCommitCheckRuns(_ context.Context, _ string, _, _, sha string) ([]entity.CheckRun, error) {
 	if sha != "sha42" {
 		return nil, nil
@@ -245,9 +249,10 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	actionUC := action.NewUseCase(prRepo, repoRepo, userRepo, ghGw, sseHub)
 	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
 	changedFilesUC := changedfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, prRepo, repoRepo)
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC)
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, changedFilesUC, prRepo)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, changedFilesUC)
-	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC)
+	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
+	importUC := repoimport.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, fakeGitHubUserAPI{}, repoRepo, prRepo)
 
@@ -258,6 +263,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		TriageUC:       triageUC,
 		ActionUC:       actionUC,
 		WebhookUC:      webhookUC,
+		ReviewUC:       reviewUC,
 		SSEHub:         sseHub,
 		OpRegistry:     opReg,
 		WebhookSecret:  "test-secret",
@@ -1205,5 +1211,70 @@ func TestTurnEngine_MinhaVezHoldsOnlyPRsTouchingMyFiles(t *testing.T) {
 	}
 	if len(after.OwnershipPendingPRIDs) != 1 || after.Seats[0].OpenPRCount != 3 {
 		t.Fatalf("expected one pending PR among three open: pending=%v seat=%+v", after.OwnershipPendingPRIDs, after.Seats[0])
+	}
+}
+
+func TestTurnEngine_ReviewWebhooksMovePRsAwayFromMinhaVez(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat := ts.signIn(t)
+	if rec := ts.do(t, http.MethodPost, "/api/v1/repositories/import", `{"installation_id":20,"github_repo_id":900}`, octocat); rec.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", rec.Code, rec.Body.String())
+	}
+	workspace := func() triage.WorkspaceSnapshot {
+		t.Helper()
+		var body struct {
+			Snapshot triage.WorkspaceSnapshot `json:"snapshot"`
+		}
+		rec := ts.do(t, http.MethodGet, "/api/v1/workspace", "", octocat)
+		if rec.Code != http.StatusOK || json.NewDecoder(rec.Body).Decode(&body) != nil {
+			t.Fatalf("workspace: %d", rec.Code)
+		}
+		return body.Snapshot
+	}
+	review := func(id int, login, state, sha string) string {
+		return fmt.Sprintf(`{"action":"submitted","review":{"id":%d,"user":{"login":%q},"state":%q,"commit_id":%q,"submitted_at":"2026-11-10T09:00:00Z"},`+
+			`"pull_request":{"number":42},"repository":{"id":900},"sender":{"login":%q}}`, id, login, state, sha, login)
+	}
+	if got := workspace(); len(got.InboxWaitingOnMe) != 1 || len(got.InboxDimmed) != 0 {
+		t.Fatalf("PR 42 starts as octocat's turn: %+v", got)
+	}
+
+	// A teammate approves the head commit: it is no longer octocat's move.
+	if rec := ts.postWebhook(t, "pull_request_review", review(1, "bob", "approved", "sha42")); rec.Code != http.StatusAccepted {
+		t.Fatalf("review webhook: %d %s", rec.Code, rec.Body.String())
+	}
+	got := workspace()
+	if len(got.InboxWaitingOnMe) != 0 || len(got.InboxDimmed) != 1 || got.InboxDimmed[0].UserState.TurnState != entity.TurnStateTeammateApproved {
+		t.Fatalf("a teammate's approval dims the PR: %+v", got)
+	}
+	if rec := ts.postWebhook(t, "pull_request_review", review(1, "bob", "approved", "sha42")); rec.Code != http.StatusAccepted {
+		t.Fatalf("redelivery: %d", rec.Code)
+	}
+	if got := workspace(); len(got.InboxDimmed) != 1 {
+		t.Fatalf("redelivery changes nothing: %+v", got)
+	}
+
+	// The reviewer's approval is dismissed: the PR is octocat's turn again.
+	dismissed := `{"action":"dismissed","review":{"id":1,"user":{"login":"bob"},"state":"dismissed","commit_id":"sha42","submitted_at":"2026-11-10T09:00:00Z"},` +
+		`"pull_request":{"number":42},"repository":{"id":900},"sender":{"login":"alice"}}`
+	if rec := ts.postWebhook(t, "pull_request_review", dismissed); rec.Code != http.StatusAccepted {
+		t.Fatalf("dismissal: %d", rec.Code)
+	}
+	if got := workspace(); len(got.InboxWaitingOnMe) != 1 {
+		t.Fatalf("a dismissed approval no longer counts: %+v", got)
+	}
+
+	// octocat's own approval, made on GitHub, dims it as well.
+	if rec := ts.postWebhook(t, "pull_request_review", review(2, "octocat", "approved", "sha42")); rec.Code != http.StatusAccepted {
+		t.Fatalf("own review: %d", rec.Code)
+	}
+	got = workspace()
+	if len(got.InboxWaitingOnMe) != 0 || len(got.InboxDimmed) != 1 || got.InboxDimmed[0].UserState.TurnState != entity.TurnStateApprovedByMe {
+		t.Fatalf("my own approval dims the PR: %+v", got)
+	}
+
+	if rec := ts.postWebhook(t, "pull_request_review", `{not json`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a malformed payload is rejected, got %d", rec.Code)
 	}
 }

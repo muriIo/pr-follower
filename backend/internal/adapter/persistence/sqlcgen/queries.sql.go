@@ -8,6 +8,7 @@ package sqlcgen
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 const countUserRepositoryFollow = `-- name: CountUserRepositoryFollow :one
@@ -206,6 +207,35 @@ func (q *Queries) GetPullRequestByRepoAndNumber(ctx context.Context, arg GetPull
 		&i.ClaimedByUserID,
 		&i.ClaimedByLogin,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPullRequestReview = `-- name: GetPullRequestReview :one
+SELECT github_review_id, pull_request_id, reviewer_login, state, commit_sha, submitted_at
+FROM pr_reviews
+WHERE github_review_id = $1
+`
+
+type GetPullRequestReviewRow struct {
+	GithubReviewID int64     `json:"github_review_id"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	ReviewerLogin  string    `json:"reviewer_login"`
+	State          string    `json:"state"`
+	CommitSha      string    `json:"commit_sha"`
+	SubmittedAt    time.Time `json:"submitted_at"`
+}
+
+func (q *Queries) GetPullRequestReview(ctx context.Context, githubReviewID int64) (GetPullRequestReviewRow, error) {
+	row := q.db.QueryRowContext(ctx, getPullRequestReview, githubReviewID)
+	var i GetPullRequestReviewRow
+	err := row.Scan(
+		&i.GithubReviewID,
+		&i.PullRequestID,
+		&i.ReviewerLogin,
+		&i.State,
+		&i.CommitSha,
+		&i.SubmittedAt,
 	)
 	return i, err
 }
@@ -835,6 +865,36 @@ type UpsertPullRequestChangedFilesParams struct {
 
 func (q *Queries) UpsertPullRequestChangedFiles(ctx context.Context, arg UpsertPullRequestChangedFilesParams) error {
 	_, err := q.db.ExecContext(ctx, upsertPullRequestChangedFiles, arg.PullRequestID, arg.HeadSha, arg.FilesJson)
+	return err
+}
+
+const upsertPullRequestReview = `-- name: UpsertPullRequestReview :exec
+INSERT INTO pr_reviews (github_review_id, pull_request_id, reviewer_login, state, commit_sha, submitted_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+ON CONFLICT (github_review_id) DO UPDATE SET
+    state = EXCLUDED.state,
+    commit_sha = EXCLUDED.commit_sha,
+    updated_at = CURRENT_TIMESTAMP
+`
+
+type UpsertPullRequestReviewParams struct {
+	GithubReviewID int64     `json:"github_review_id"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	ReviewerLogin  string    `json:"reviewer_login"`
+	State          string    `json:"state"`
+	CommitSha      string    `json:"commit_sha"`
+	SubmittedAt    time.Time `json:"submitted_at"`
+}
+
+func (q *Queries) UpsertPullRequestReview(ctx context.Context, arg UpsertPullRequestReviewParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPullRequestReview,
+		arg.GithubReviewID,
+		arg.PullRequestID,
+		arg.ReviewerLogin,
+		arg.State,
+		arg.CommitSha,
+		arg.SubmittedAt,
+	)
 	return err
 }
 

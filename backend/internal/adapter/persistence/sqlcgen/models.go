@@ -46,6 +46,16 @@ type PrCheckRun struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type PrReview struct {
+	GithubReviewID int64     `json:"github_review_id"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	ReviewerLogin  string    `json:"reviewer_login"`
+	State          string    `json:"state"`
+	CommitSha      string    `json:"commit_sha"`
+	SubmittedAt    time.Time `json:"submitted_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 type PrUserState struct {
 	ID                    int64     `json:"id"`
 	PullRequestID         int64     `json:"pull_request_id"`
