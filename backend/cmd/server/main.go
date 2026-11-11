@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -67,8 +69,9 @@ func main() {
 	repoRepo := persistence.NewRepositoryRepository(db)
 	prRepo := persistence.NewPullRequestRepository(db)
 
-	// Recent activity is in memory (see roadmap): keep enough for every user's followed repositories.
-	sseHub := sse.NewHub(1000)
+	// Activity lives in the database and replicas wake each other through Postgres, so any number of
+	// API replicas share one timeline and one live stream.
+	sseHub := newActivityHub(ctx, cfg, db)
 	opReg := operation.NewRegistry()
 	installations := newInstallationTokens(cfg)
 	ghGateway := github.NewGateway(github.GatewayConfig{
@@ -219,4 +222,20 @@ func newTokenCipher(base64Key string) (*crypto.AESGCMCipher, error) {
 		base64Key = generated
 	}
 	return crypto.NewAESGCMCipher(base64Key)
+}
+
+// newActivityHub keeps activity in the database. Replicas wake each other through Postgres
+// LISTEN/NOTIFY; a SQLite database (local experiments) has a single process, so an in-process
+// wake-up is enough. Without a readable log the server cannot show or stream anything: stop.
+func newActivityHub(ctx context.Context, cfg *config.Config, db *sql.DB) *sse.Hub {
+	var wake port.ActivitySignal = sse.NewLocalSignal()
+	if !strings.HasPrefix(cfg.DatabaseURL, "sqlite://") {
+		wake = persistence.NewPostgresActivitySignal(db, cfg.DatabaseURL)
+	}
+	hub := sse.NewHub(persistence.NewActivityLog(db), wake)
+	if err := hub.Start(ctx); err != nil {
+		slog.Error("failed to start the activity hub", "err", err)
+		os.Exit(1)
+	}
+	return hub
 }

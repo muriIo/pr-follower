@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
+	"github.com/murilo/pr-follower/backend/internal/domain/port"
 )
 
 const (
@@ -24,24 +26,58 @@ const (
 // signed-in user follows).
 type AllowFunc func(ctx context.Context, event entity.ActivityEvent) bool
 
+const (
+	defaultPollInterval = 5 * time.Second
+	defaultRetention    = 7 * 24 * time.Hour
+	defaultPruneEvery   = time.Hour
+	// batchSize bounds one read of the log.
+	batchSize = 200
+	// overlap is how many positions behind the newest one are read again on every pass. A sequence
+	// number is taken when a row is inserted, not when it commits, so a lower number can become
+	// visible after a higher one was already delivered; re-reading the tail picks it up.
+	overlap = 64
+)
+
+// Hub fans activity out to the SSE subscribers of this replica. The ActivityLog is the single source
+// of truth: Publish appends to it and wakes every replica through the ActivitySignal, and each replica
+// (this one too) delivers what it reads back from the log, in order, to its own subscribers. Because
+// delivery comes only from the log, a restart loses nothing and any number of replicas agree.
 type Hub struct {
+	log    port.ActivityLog
+	signal port.ActivitySignal
+
 	mu          sync.RWMutex
 	subscribers map[chan entity.ActivityEvent]struct{}
-	history     []entity.ActivityEvent
-	maxHistory  int
 	heartbeat   time.Duration
+	poll        time.Duration
+	retention   time.Duration
+	pruneEvery  time.Duration
+
+	// pump state, owned by the pump goroutine once Start has returned
+	last      int64
+	delivered map[int64]struct{}
 }
 
-func NewHub(maxHistory int) *Hub {
-	if maxHistory <= 0 {
-		maxHistory = 100
-	}
+func NewHub(log port.ActivityLog, signal port.ActivitySignal) *Hub {
 	return &Hub{
+		log:         log,
+		signal:      signal,
 		subscribers: make(map[chan entity.ActivityEvent]struct{}),
-		history:     make([]entity.ActivityEvent, 0, maxHistory),
-		maxHistory:  maxHistory,
 		heartbeat:   defaultHeartbeat,
+		poll:        defaultPollInterval,
+		retention:   defaultRetention,
+		pruneEvery:  defaultPruneEvery,
+		delivered:   make(map[int64]struct{}),
 	}
+}
+
+// NewInMemoryHub is a started hub over in-process storage: for tests and for running without a
+// database. It serves one process only.
+func NewInMemoryHub(ctx context.Context) *Hub {
+	h := NewHub(NewMemoryLog(), NewLocalSignal())
+	h.poll = 20 * time.Millisecond
+	_ = h.Start(ctx) // the in-memory log cannot fail to read
+	return h
 }
 
 // SetHeartbeat sets how often an idle stream sends a comment so proxies and load balancers
@@ -49,6 +85,117 @@ func NewHub(maxHistory int) *Hub {
 func (h *Hub) SetHeartbeat(d time.Duration) {
 	if d > 0 {
 		h.heartbeat = d
+	}
+}
+
+// SetPollInterval sets how often the log is read even when no wake-up arrived (the safety net for a
+// lost signal). Call before Start.
+func (h *Hub) SetPollInterval(d time.Duration) {
+	if d > 0 {
+		h.poll = d
+	}
+}
+
+// SetRetention sets how long activity is kept and how often older activity is deleted. Call before Start.
+func (h *Hub) SetRetention(keep, every time.Duration) {
+	if keep > 0 && every > 0 {
+		h.retention, h.pruneEvery = keep, every
+	}
+}
+
+// Start begins delivering activity appended from now on, until ctx ends. History is not replayed to
+// the stream (the timeline reads it with Recent). It returns once the starting position is known, so
+// anything published after it returns is delivered.
+func (h *Hub) Start(ctx context.Context) error {
+	last, err := h.log.LatestSeq(ctx)
+	if err != nil {
+		return fmt.Errorf("read the activity log position: %w", err)
+	}
+	h.last = last
+	tail, err := h.log.ListSince(ctx, max(0, last-overlap), batchSize)
+	if err != nil {
+		return fmt.Errorf("read the activity log tail: %w", err)
+	}
+	for _, e := range tail {
+		if e.Seq <= last {
+			h.delivered[e.Seq] = struct{}{}
+		}
+	}
+	wake := h.signal.Listen(ctx)
+	go h.pump(ctx, wake)
+	return nil
+}
+
+func (h *Hub) pump(ctx context.Context, wake <-chan struct{}) {
+	poll := time.NewTicker(h.poll)
+	defer poll.Stop()
+	prune := time.NewTicker(h.pruneEvery)
+	defer prune.Stop()
+	h.pruneOld(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-wake:
+			if !ok {
+				return
+			}
+			h.drain(ctx)
+		case <-poll.C:
+			h.drain(ctx)
+		case <-prune.C:
+			h.pruneOld(ctx)
+		}
+	}
+}
+
+// drain delivers every event not delivered yet, oldest first.
+func (h *Hub) drain(ctx context.Context) {
+	for {
+		batch, err := h.log.ListSince(ctx, max(0, h.last-overlap), batchSize)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.Warn("reading the activity log failed", "err", err)
+			}
+			return
+		}
+		fresh := 0
+		for _, e := range batch {
+			if _, seen := h.delivered[e.Seq]; seen {
+				continue
+			}
+			h.delivered[e.Seq] = struct{}{}
+			h.last = max(h.last, e.Seq)
+			h.deliver(e.Event)
+			fresh++
+		}
+		for seq := range h.delivered {
+			if seq < h.last-overlap {
+				delete(h.delivered, seq)
+			}
+		}
+		if fresh == 0 || len(batch) < batchSize {
+			return
+		}
+	}
+}
+
+func (h *Hub) pruneOld(ctx context.Context) {
+	if _, err := h.log.Prune(ctx, time.Now().Add(-h.retention)); err != nil && ctx.Err() == nil {
+		slog.Warn("pruning old activity failed", "err", err)
+	}
+}
+
+func (h *Hub) deliver(event entity.ActivityEvent) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.subscribers {
+		select {
+		case ch <- event:
+		default:
+			// Non-blocking send so a slow subscriber never stalls the hub
+		}
 	}
 }
 
@@ -72,36 +219,25 @@ func (h *Hub) Subscribe(ctx context.Context) <-chan entity.ActivityEvent {
 	return ch
 }
 
+// Publish records the event in the shared log and wakes every replica to deliver it. The event is
+// not delivered here directly: it reaches this replica's subscribers like everyone else's.
 func (h *Hub) Publish(ctx context.Context, event entity.ActivityEvent) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
-
-	h.mu.Lock()
-	if len(h.history) >= h.maxHistory {
-		h.history = h.history[1:]
+	if _, err := h.log.Append(ctx, event); err != nil {
+		return fmt.Errorf("record activity: %w", err)
 	}
-	h.history = append(h.history, event)
-
-	for ch := range h.subscribers {
-		select {
-		case ch <- event:
-		default:
-			// Non-blocking send so a slow subscriber never stalls the hub
-		}
+	if err := h.signal.Notify(ctx); err != nil {
+		// The event is safe in the log; replicas poll it, only a little later.
+		slog.Warn("waking the replicas failed", "err", err)
 	}
-	h.mu.Unlock()
-
 	return nil
 }
 
-func (h *Hub) RecentEvents() []entity.ActivityEvent {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	out := make([]entity.ActivityEvent, len(h.history))
-	copy(out, h.history)
-	return out
+// Recent returns the newest activity of the given repositories, newest first.
+func (h *Hub) Recent(ctx context.Context, repositoryIDs []uint64, limit int) ([]entity.ActivityEvent, error) {
+	return h.log.Recent(ctx, repositoryIDs, limit)
 }
 
 func (h *Hub) SubscriberCount() int {

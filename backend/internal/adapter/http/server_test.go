@@ -351,7 +351,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	userRepo := persistence.NewUserRepository(db, cipher)
 	repoRepo := persistence.NewRepositoryRepository(db)
 	prRepo := persistence.NewPullRequestRepository(db)
-	sseHub := sse.NewHub(50)
+	sseHub := sse.NewInMemoryHub(t.Context())
 	opReg := operation.NewRegistry()
 	ghGw := &noopGHGateway{}
 	repoFiles := &fakeRepoFiles{files: map[string]string{"acme/web:.github/CODEOWNERS": "* @octocat\n"}}

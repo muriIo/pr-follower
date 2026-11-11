@@ -263,3 +263,29 @@ ON CONFLICT (github_review_id) DO UPDATE SET
     state = EXCLUDED.state,
     commit_sha = EXCLUDED.commit_sha,
     updated_at = CURRENT_TIMESTAMP;
+
+-- name: InsertActivityEvent :one
+-- idempotent: a log, not state. Webhooks only publish when state changed (ADR-0011), and a repeated activity is a repeated fact; readers deliver by seq, so a retry costs at most one duplicate row.
+INSERT INTO activity_events (event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING seq;
+
+-- name: ListActivityEventsSince :many
+SELECT seq, event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at
+FROM activity_events
+WHERE seq > $1
+ORDER BY seq ASC
+LIMIT $2;
+
+-- name: ListRecentActivityEventsByRepository :many
+SELECT seq, event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at
+FROM activity_events
+WHERE repository_id = $1
+ORDER BY seq DESC
+LIMIT $2;
+
+-- name: GetLatestActivitySeq :one
+SELECT CAST(COALESCE(MAX(seq), 0) AS BIGINT) AS seq FROM activity_events;
+
+-- name: DeleteActivityEventsBefore :execrows
+DELETE FROM activity_events WHERE occurred_at < $1;

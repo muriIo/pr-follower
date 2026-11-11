@@ -3,6 +3,7 @@ package port
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 )
@@ -185,6 +186,38 @@ type BlastRadiusScanner interface {
 
 type EventPublisher interface {
 	Publish(ctx context.Context, event entity.ActivityEvent) error
+}
+
+// LoggedActivity is an activity event with its position in the log. Positions only grow; every
+// replica reads the log in this order.
+type LoggedActivity struct {
+	Seq   int64
+	Event entity.ActivityEvent
+}
+
+// ActivityLog is the durable, shared record of activity (the timeline and the live stream's source).
+// It is the only state replicas share about activity: whichever replica appends, every replica reads.
+type ActivityLog interface {
+	// Append records the event and returns its position.
+	Append(ctx context.Context, event entity.ActivityEvent) (int64, error)
+	// ListSince returns up to limit events with a position after afterSeq, oldest first.
+	ListSince(ctx context.Context, afterSeq int64, limit int) ([]LoggedActivity, error)
+	// LatestSeq is the position of the newest event, 0 when the log is empty.
+	LatestSeq(ctx context.Context) (int64, error)
+	// Recent returns the newest events of the given repositories, newest first (none for no repositories).
+	Recent(ctx context.Context, repositoryIDs []uint64, limit int) ([]entity.ActivityEvent, error)
+	// Prune deletes events that occurred before the given time and reports how many.
+	Prune(ctx context.Context, before time.Time) (int64, error)
+}
+
+// ActivitySignal wakes every replica when something was appended to the ActivityLog. A wake-up carries
+// no data (readers go to the log) and may be coalesced or lost; readers must also poll.
+type ActivitySignal interface {
+	// Notify tells every replica, this one included, that the log has news.
+	Notify(ctx context.Context) error
+	// Listen returns a channel that receives a value whenever the log may have news, and once after
+	// every (re)connection so nothing appended while disconnected is missed. It closes with ctx.
+	Listen(ctx context.Context) <-chan struct{}
 }
 
 // ChangedFilesStore keeps the files each PR changes at its head commit (one row per PR).

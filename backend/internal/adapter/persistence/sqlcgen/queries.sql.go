@@ -45,6 +45,18 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 	return err
 }
 
+const deleteActivityEventsBefore = `-- name: DeleteActivityEventsBefore :execrows
+DELETE FROM activity_events WHERE occurred_at < $1
+`
+
+func (q *Queries) DeleteActivityEventsBefore(ctx context.Context, occurredAt time.Time) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteActivityEventsBefore, occurredAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE token_hash = $1
@@ -171,6 +183,17 @@ func (q *Queries) GetDependabotAnalysisByPRAndSHA(ctx context.Context, arg GetDe
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getLatestActivitySeq = `-- name: GetLatestActivitySeq :one
+SELECT CAST(COALESCE(MAX(seq), 0) AS BIGINT) AS seq FROM activity_events
+`
+
+func (q *Queries) GetLatestActivitySeq(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLatestActivitySeq)
+	var seq int64
+	err := row.Scan(&seq)
+	return seq, err
 }
 
 const getPullRequestByID = `-- name: GetPullRequestByID :one
@@ -427,6 +450,89 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 	return i, err
 }
 
+const insertActivityEvent = `-- name: InsertActivityEvent :one
+INSERT INTO activity_events (event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING seq
+`
+
+type InsertActivityEventParams struct {
+	EventID        string    `json:"event_id"`
+	Type           string    `json:"type"`
+	RepositoryID   int64     `json:"repository_id"`
+	RepositoryName string    `json:"repository_name"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	PrNumber       int64     `json:"pr_number"`
+	ActorLogin     string    `json:"actor_login"`
+	ParamsJson     string    `json:"params_json"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
+// idempotent: a log, not state. Webhooks only publish when state changed (ADR-0011), and a repeated activity is a repeated fact; readers deliver by seq, so a retry costs at most one duplicate row.
+func (q *Queries) InsertActivityEvent(ctx context.Context, arg InsertActivityEventParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertActivityEvent,
+		arg.EventID,
+		arg.Type,
+		arg.RepositoryID,
+		arg.RepositoryName,
+		arg.PullRequestID,
+		arg.PrNumber,
+		arg.ActorLogin,
+		arg.ParamsJson,
+		arg.OccurredAt,
+	)
+	var seq int64
+	err := row.Scan(&seq)
+	return seq, err
+}
+
+const listActivityEventsSince = `-- name: ListActivityEventsSince :many
+SELECT seq, event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at
+FROM activity_events
+WHERE seq > $1
+ORDER BY seq ASC
+LIMIT $2
+`
+
+type ListActivityEventsSinceParams struct {
+	Seq   int64 `json:"seq"`
+	Limit int32 `json:"limit"`
+}
+
+func (q *Queries) ListActivityEventsSince(ctx context.Context, arg ListActivityEventsSinceParams) ([]ActivityEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listActivityEventsSince, arg.Seq, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActivityEvent{}
+	for rows.Next() {
+		var i ActivityEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.EventID,
+			&i.Type,
+			&i.RepositoryID,
+			&i.RepositoryName,
+			&i.PullRequestID,
+			&i.PrNumber,
+			&i.ActorLogin,
+			&i.ParamsJson,
+			&i.OccurredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCheckRunsByHead = `-- name: ListCheckRunsByHead :many
 SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
@@ -621,6 +727,53 @@ func (q *Queries) ListOpenPullRequestsByHead(ctx context.Context, arg ListOpenPu
 			&i.ClaimedByUserID,
 			&i.ClaimedByLogin,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentActivityEventsByRepository = `-- name: ListRecentActivityEventsByRepository :many
+SELECT seq, event_id, type, repository_id, repository_name, pull_request_id, pr_number, actor_login, params_json, occurred_at
+FROM activity_events
+WHERE repository_id = $1
+ORDER BY seq DESC
+LIMIT $2
+`
+
+type ListRecentActivityEventsByRepositoryParams struct {
+	RepositoryID int64 `json:"repository_id"`
+	Limit        int32 `json:"limit"`
+}
+
+func (q *Queries) ListRecentActivityEventsByRepository(ctx context.Context, arg ListRecentActivityEventsByRepositoryParams) ([]ActivityEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentActivityEventsByRepository, arg.RepositoryID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ActivityEvent{}
+	for rows.Next() {
+		var i ActivityEvent
+		if err := rows.Scan(
+			&i.Seq,
+			&i.EventID,
+			&i.Type,
+			&i.RepositoryID,
+			&i.RepositoryName,
+			&i.PullRequestID,
+			&i.PrNumber,
+			&i.ActorLogin,
+			&i.ParamsJson,
+			&i.OccurredAt,
 		); err != nil {
 			return nil, err
 		}
