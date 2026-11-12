@@ -76,6 +76,8 @@ The NAT gateway is a third of it. The cheapest variant (tasks in public subnets,
 - A domain whose DNS you control. This guide uses a Route 53 hosted zone; with another provider, create the records it prints by hand.
 - The values generated in [`production-setup.md`](production-setup.md) §2: webhook secret, token encryption key, database password. Keep them in your password manager; this guide stores them in Secrets Manager.
 
+Every command runs as written in **bash and zsh** (the macOS default). Where the two differ, the guide uses the form both accept: prompts are a `printf` followed by `read` (zsh's `read -p` means something else), lists of IDs are split with an unquoted `$(…)` (zsh does not split an unquoted `$VAR`), and a variable followed by `:` is written `${VAR}:` (zsh reads `$VAR:x` as a modifier).
+
 Set the variables used throughout (put them in a file and `source` it in each new terminal):
 
 ```bash
@@ -116,8 +118,11 @@ export PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
 export PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
   --filters Name=vpc-id,Values=$VPC_ID Name=tag:Name,Values='*private*' \
   --query 'Subnets[].SubnetId' --output text)
-echo "$VPC_ID | public: $PUBLIC_SUBNETS | private: $PRIVATE_SUBNETS"
+export PRIVATE_CSV=$(echo "$PRIVATE_SUBNETS" | tr -s '\t ' ',')   # subnet-a,subnet-b for ECS
+echo "$VPC_ID | public: $PUBLIC_SUBNETS | private: $PRIVATE_CSV"
 ```
+
+The lists come back tab-separated. Commands that take one argument per subnet use `$(echo "$PRIVATE_SUBNETS")`, which splits into separate arguments in both shells.
 
 **Check:** two subnet IDs in each list.
 
@@ -188,7 +193,7 @@ The webhook delivers to the domain before the ALB exists, so the `ping` GitHub s
 ```bash
 # Subnet group over the private subnets
 aws rds create-db-subnet-group --db-subnet-group-name $APP \
-  --db-subnet-group-description "PR Follower" --subnet-ids $PRIVATE_SUBNETS >/dev/null
+  --db-subnet-group-description "PR Follower" --subnet-ids $(echo "$PRIVATE_SUBNETS") >/dev/null
 
 # Pick the newest PostgreSQL 17 minor offered in your region
 PG_VERSION=$(aws rds describe-db-engine-versions --engine postgres \
@@ -196,7 +201,7 @@ PG_VERSION=$(aws rds describe-db-engine-versions --engine postgres \
   | tr '\t' '\n' | sort -V | tail -1)
 echo "PostgreSQL $PG_VERSION"
 
-read -rs -p "Database password (from production-setup §2): " DB_PASS; echo
+printf 'Database password (from production-setup §2): '; read -rs DB_PASS; echo
 aws rds create-db-instance \
   --db-instance-identifier $APP \
   --engine postgres --engine-version "$PG_VERSION" \
@@ -228,8 +233,12 @@ Store the sensitive values; the non-secret ones (`GITHUB_CLIENT_ID`, `GITHUB_APP
 
 ```bash
 put_secret() {   # put_secret NAME  (reads the value without echoing it)
-  local v; read -rs -p "$1: " v; echo
-  aws secretsmanager create-secret --name "$APP/prod/$1" --secret-string "$v" --query Name --output text
+  local v
+  printf '%s: ' "$1"; read -rs v; echo
+  [ -n "$v" ] || { echo "empty value, nothing stored" >&2; return 1; }
+  # Through stdin, so the value never appears in the process list
+  printf '%s' "$v" | aws secretsmanager create-secret --name "$APP/prod/$1" \
+    --secret-string file:///dev/stdin --query Name --output text
 }
 put_secret github-client-secret      # from the GitHub App page (§6)
 put_secret github-webhook-secret     # the webhook secret from production-setup §2, also set on the app
@@ -241,7 +250,8 @@ aws secretsmanager create-secret --name "$APP/prod/database-url" --query Name --
 unset DB_PASS
 
 # The GitHub App private key as ONE line with \n for newlines (production-setup §6.2)
-read -rp "Path to the downloaded .pem: " PEM
+printf 'Path to the downloaded .pem (full path, no ~): '; read -r PEM
+[ -f "$PEM" ] || echo "not found: $PEM" >&2
 aws secretsmanager create-secret --name "$APP/prod/github-app-private-key" --query Name --output text \
   --secret-string "$(awk 'NF {sub(/\r/, ""); printf "%s\\n", $0}' "$PEM")"
 ```
@@ -305,7 +315,7 @@ aws iam attach-role-policy --role-name $APP-execution \
 # Least privilege: read only this app's secrets
 cat > read-secrets.json <<EOF
 {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"secretsmanager:GetSecretValue",
- "Resource":"arn:aws:secretsmanager:$AWS_REGION:$ACCOUNT_ID:secret:$APP/prod/*"}]}
+ "Resource":"arn:aws:secretsmanager:${AWS_REGION}:${ACCOUNT_ID}:secret:${APP}/prod/*"}]}
 EOF
 aws iam put-role-policy --role-name $APP-execution --policy-name read-secrets \
   --policy-document file://read-secrets.json
@@ -329,7 +339,7 @@ rm trust.json read-secrets.json
 
 ```bash
 LB_ARN=$(aws elbv2 create-load-balancer --name $APP --type application --scheme internet-facing \
-  --subnets $PUBLIC_SUBNETS --security-groups $ALB_SG \
+  --subnets $(echo "$PUBLIC_SUBNETS") --security-groups $ALB_SG \
   --query 'LoadBalancers[0].LoadBalancerArn' --output text)
 aws elbv2 modify-load-balancer-attributes --load-balancer-arn $LB_ARN \
   --attributes Key=idle_timeout.timeout_seconds,Value=300 >/dev/null
@@ -437,7 +447,6 @@ aws ecs create-cluster --cluster-name $APP >/dev/null
 aws ecs register-task-definition --cli-input-json file://taskdef.json \
   --query 'taskDefinition.taskDefinitionArn' --output text
 
-PRIVATE_CSV=$(echo $PRIVATE_SUBNETS | tr ' ' ',')
 aws ecs create-service --cluster $APP --service-name $APP \
   --task-definition $APP --desired-count 1 --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_CSV],securityGroups=[$APP_SG],assignPublicIp=DISABLED}" \
@@ -518,7 +527,7 @@ aws ecs wait services-stable --cluster $APP --services $APP
 
 ```bash
 aws ecs list-task-definitions --family-prefix $APP --sort DESC --max-items 5
-aws ecs update-service --cluster $APP --service $APP --task-definition $APP:PREVIOUS_REVISION
+aws ecs update-service --cluster $APP --service $APP --task-definition "${APP}:PREVIOUS_REVISION"
 ```
 
 The circuit breaker already does this automatically when a deployment cannot become healthy. As in [`production-setup.md`](production-setup.md) §13.3, roll back by task definition only if no migration shipped since; otherwise fix forward, or restore the pre-deploy snapshot as a last resort (§15.4).
