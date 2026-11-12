@@ -963,11 +963,11 @@ wait_deployed
 
 ## 22. Tear down
 
-1. Stop Floci and delete its state. Floci removes the task and database containers when it stops, but by design it keeps the registry container and the database volumes:
+1. Stop Floci and delete its state. Stopping Floci does not remove everything it started: it keeps the registry container and the database volumes by design, and stopped task containers can stay behind too. Those would block the `docker rmi` below with `conflict: unable to delete … (must be forced)`. Every container Floci starts for this setup carries the label `floci_namespace=pr-follower`, so remove them by that label:
 
    ```bash
    docker compose -f "$WORK/compose.yaml" down -v
-   docker rm -f floci-aws-pr-follower-ecr-registry
+   docker rm -f $(docker ps -aq --filter label=floci_namespace=pr-follower)
    docker volume rm $(docker volume ls -q --filter name=floci-aws-pr-follower)
    docker network rm pr-follower-net
    docker rmi $(docker images --format '{{.Repository}}:{{.Tag}}' | grep "^localhost:4566/000000000000/")
