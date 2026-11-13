@@ -1,6 +1,6 @@
 # PR Follower — Roadmap
 
-What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
+What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](../../docs/adr/README.md).
 
 Last reviewed: 2026-11-11 (open items checked against the code after #30).
 
@@ -12,7 +12,7 @@ Last reviewed: 2026-11-11 (open items checked against the code after #30).
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses, sync after downtime): the open "not verified" items below. Step-by-step: [`real-github-verification.md`](real-github-verification.md).
+1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses, sync after downtime): the open "not verified" items below. Step-by-step: [`real-github-verification.md`](../guides/real-github-verification.md).
 2. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
 
 ## 1. Identity & sessions

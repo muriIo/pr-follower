@@ -1,11 +1,13 @@
 # PR Follower
 
-A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec: `manifest.md`. Design, data model, analysis and turn-state behaviour: `docs/implementation-plan.md`. What is done and open, by module, with priorities: `docs/roadmap.md` (read it before starting a feature; tick items off in the PR that finishes them). UI direction (Hive-inspired): `design/`.
+A team-shared dashboard that turns CODEOWNERS review requests and Dependabot PRs into one live triage workspace. Product spec: `manifest.md`. Design, data model, analysis and turn-state behaviour: `notes/plans/implementation-plan.md`. What is done and open, by module, with priorities: `notes/plans/roadmap.md` (read it before starting a feature; tick items off in the PR that finishes them). UI direction (Hive-inspired): `design/`.
 
 ```
 backend/    Go 1.27 · chi/net/http · pgx + sqlc · goose (embedded) · SSE hub
 frontend/   Angular 22 standalone · Signals · Vitest (ng test) · nginx in prod
 docs/adr/   Architecture Decision Records, each enforced by an executable gate
+notes/      Versioned project documentation (FrankMD vault): plans/ (plan, roadmap),
+            guides/ (deploy and setup), reports/ (analyses)
 ```
 
 The apps talk only over HTTP under `/api/v1`. The frontend calls relative `/api/...` paths: `proxy.conf.json` in dev, nginx (`frontend/nginx.conf.template`) in the image.
@@ -35,7 +37,7 @@ Run `make check` from the root (ADR gate, gofmt, vet, migration and architecture
 - Full dev stack: `make dev` (`docker-compose.local.yml`): panel :4200, API :8080, Postgres :5433. Go changes need `docker compose -f docker-compose.local.yml restart api`. `down -v` resets the database.
 - Postgres only, for running the apps on the host: `make db-up`, then `cd backend && go run ./cmd/server` and `cd frontend && pnpm start`.
 - Migrations run automatically when the server starts.
-- Production images: `make docker-build`. Deploying, the production GitHub App, secrets and rotation: `docs/production-setup.md` (update it when env vars, routes or deploy shape change); the AWS mapping of it is `docs/aws-setup.md`, and `docs/floci-setup.md` rehearses that AWS setup locally on the Floci emulator (real GitHub App, webhooks through smee.io).
+- Production images: `make docker-build`. Deploying, the production GitHub App, secrets and rotation: `notes/guides/production-setup.md` (update it when env vars, routes or deploy shape change); the AWS mapping of it is `notes/guides/aws-setup.md`, and `notes/guides/floci-setup.md` rehearses that AWS setup locally on the Floci emulator (real GitHub App, webhooks through smee.io).
 
 ## Gotchas
 
