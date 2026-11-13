@@ -36,3 +36,7 @@ frontend/coverage/
 !.vscode/mcp.json
 .DS_Store
 Thumbs.db
+
+# FrankMD state files (the notes/ folder is versioned, its locks are not)
+.frankmd-*.lock
+.fed

@@ -2,7 +2,7 @@
 
 Product design and roadmap behind `manifest.md`. Ported on 2026-11-10 from the plan written in the first build session (Antigravity CLI, 2026-11-09) and reconciled against the code at that date.
 
-- **Rules** (layers, TDD, migrations, resilience, cancellation, i18n, Angular shape) live in [`docs/adr/`](adr/README.md) and are enforced by `make adr-check`. This document does not restate them.
+- **Rules** (layers, TDD, migrations, resilience, cancellation, i18n, Angular shape) live in [`docs/adr/`](../../docs/adr/README.md) and are enforced by `make adr-check`. This document does not restate them.
 - **Status** of every module, done and open, is in [`roadmap.md`](roadmap.md).
 
 ## 1. System overview
