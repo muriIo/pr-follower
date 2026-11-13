@@ -21,7 +21,7 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
                        tag vX.Y.Z ──▶ images :X.Y.Z + GitHub Release ──▶ approval ──▶ production
 ```
 
-1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`).
+1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`). Implemented in `.github/workflows/ci.yml` as two parallel jobs, `backend` and `frontend`; the backend job runs a Postgres 17 service so the tests that need a real database run instead of skipping.
 2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). A tag builds both images (`pr-follower-api`, `pr-follower-panel`) and publishes them to GitHub Container Registry (`ghcr.io`) tagged with the version and the commit SHA. A GitHub Release is created with notes generated from the Conventional Commits since the previous tag. Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from those commits (minor or patch until launch; major only from `1.0.0` on), summarizes them, and tags only after approval.
 3. **Staging (homologation).** Every merge to `main` builds images tagged with the commit SHA and deploys them to staging automatically. Production gets only tagged releases, after a manual approval (a GitHub Environment with required reviewers).
 
@@ -29,4 +29,5 @@ Open:
 
 - [ ] Where staging and production run (the AWS shape in [`aws-setup.md`](aws-setup.md) or another host) and how the deploy job reaches them.
 - [ ] Staging needs its own GitHub App (webhook URL, callback) and its own database, so test data never touches production.
-- [ ] Implement the workflows: `ci.yml`, `release.yml`, `deploy.yml` in `.github/workflows/`, then update [`production-setup.md`](production-setup.md) (§7 deploys commit SHAs today).
+- [ ] Mark both CI jobs as required status checks on `main` (repository settings, branch protection).
+- [ ] Implement the remaining workflows: `release.yml`, `deploy.yml` in `.github/workflows/`, then update [`production-setup.md`](production-setup.md) (§7 deploys commit SHAs today).
