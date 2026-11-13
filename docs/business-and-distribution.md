@@ -29,5 +29,15 @@ Open:
 
 - [ ] Where staging and production run (the AWS shape in [`aws-setup.md`](aws-setup.md) or another host) and how the deploy job reaches them.
 - [ ] Staging needs its own GitHub App (webhook URL, callback) and its own database, so test data never touches production.
-- [ ] Mark both CI jobs as required status checks on `main` (repository settings, branch protection).
+- [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
 - [ ] Implement the remaining workflows: `release.yml`, `deploy.yml` in `.github/workflows/`, then update [`production-setup.md`](production-setup.md) (§7 deploys commit SHAs today).
+
+## 3. Going public
+
+**Decided (2026-11-13):** the repository stays private until launch and becomes public then; no paid GitHub plan in the meantime. Until then, the rulesets saved in the repository settings are not enforced, so `main` relies on the PR habit alone.
+
+Before flipping the visibility:
+
+- [ ] `LICENSE` chosen and added (§1).
+- [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
+- [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.
