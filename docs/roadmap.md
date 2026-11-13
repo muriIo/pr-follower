@@ -144,6 +144,7 @@ Decisions and open questions: [`business-and-distribution.md`](business-and-dist
 - [ ] **P2** Choose and add the open-source `LICENSE`, together with the services.
 - [x] Distribution model: CI on every PR, semver tags publish images to GHCR with a GitHub Release, `main` deploys to staging, production after approval (2026-11-13).
 - [x] CI workflow running `make check` on PRs and `main` (`.github/workflows/ci.yml`; Postgres-backed tests included).
-- [ ] **P2** Make both CI jobs required status checks on `main`.
+- [ ] **P2** Required CI checks on `main`: rulesets configured but not enforced while the repository is private on GitHub Free; enforced once it goes public ([going public](business-and-distribution.md#3-going-public)).
+- [ ] **P2** Go public at launch: `LICENSE`, secrets check of the git history, then verify the rulesets are enforced.
 - [ ] **P2** Release workflow: `vX.Y.Z` tag builds and publishes both images to GHCR and creates the GitHub Release.
 - [ ] **P2** Staging environment (own GitHub App and database) with automatic deploys from `main`; production deploys of tagged releases behind a manual approval.
