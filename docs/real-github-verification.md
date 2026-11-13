@@ -61,4 +61,4 @@ Use PRs of the test repository authored by someone other than you.
 
 ## 7. Recording the result
 
-Tick the matching items in [`roadmap.md`](../plans/roadmap.md) (§2, §3, §5, §6 "Not verified" lines). Anything that failed becomes a bug there, with the delivery id or log line.
+Tick the matching items in [`roadmap.md`](roadmap.md) (§2, §3, §5, §6 "Not verified" lines). Anything that failed becomes a bug there, with the delivery id or log line.
