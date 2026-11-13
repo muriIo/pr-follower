@@ -70,9 +70,11 @@ services:
       - sh
       - -c
       - |
-        hash=$$(sha1sum package-lock.json)
-        [ "$$(cat node_modules/.lock-hash 2>/dev/null)" = "$$hash" ] || { npm ci && echo "$$hash" > node_modules/.lock-hash; }
-        npm start -- --host 0.0.0.0 --poll 1000
+        corepack enable
+        # The store lives inside the node_modules volume: pnpm hardlinks from it, and
+        # hardlinks cannot cross volumes. An up-to-date install is a sub-second no-op.
+        pnpm install --frozen-lockfile --store-dir /app/node_modules/.pnpm-store --config.confirmModulesPurge=false
+        pnpm start --host 0.0.0.0 --poll 1000
     environment:
       CHOKIDAR_USEPOLLING: 'true'
       TSC_WATCHFILE: DynamicPriorityPolling

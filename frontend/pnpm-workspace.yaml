@@ -1,0 +1,7 @@
+# Dependency install scripts stay off: these packages ship prebuilt binaries,
+# so build, tests and the image work without running them.
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: false
+  lmdb: false
+  msgpackr-extract: false

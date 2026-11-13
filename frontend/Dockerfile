@@ -1,9 +1,11 @@
 FROM node:24-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY . .
-RUN npm run build -- --configuration production \
+RUN pnpm run build --configuration production \
     && mkdir /out \
     && cp -r "$(dirname "$(find dist -name index.html | head -1)")"/. /out/
 

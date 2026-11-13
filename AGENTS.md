@@ -35,7 +35,7 @@ Run `make check` from the root (ADR gate, gofmt, vet, migration and architecture
 ## Running it
 
 - Full dev stack: `make dev` (`docker-compose.local.yml`): panel :4200, API :8080, Postgres :5433. Go changes need `docker compose -f docker-compose.local.yml restart api`. `down -v` resets the database.
-- Postgres only, for running the apps on the host: `make db-up`, then `cd backend && go run ./cmd/server` and `cd frontend && npm start`.
+- Postgres only, for running the apps on the host: `make db-up`, then `cd backend && go run ./cmd/server` and `cd frontend && pnpm start`.
 - Migrations run automatically when the server starts.
 - Production images: `make docker-build`. Deploying, the production GitHub App, secrets and rotation: `notes/guides/production-setup.md` (update it when env vars, routes or deploy shape change); the AWS mapping of it is `notes/guides/aws-setup.md`, and `notes/guides/floci-setup.md` rehearses that AWS setup locally on the Floci emulator (real GitHub App, webhooks through smee.io).
 

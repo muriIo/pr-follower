@@ -80,10 +80,10 @@ backend-coverage: backend-test
 backend-check: adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test
 
 frontend-lint:
-	@if [ -d frontend ]; then cd frontend && npm run lint; fi
+	@if [ -d frontend ]; then cd frontend && pnpm run lint; fi
 
 frontend-test:
-	@if [ -d frontend ]; then cd frontend && npm test -- --watch=false; fi
+	@if [ -d frontend ]; then cd frontend && pnpm test --watch=false; fi
 
 frontend-check: frontend-lint frontend-test
 
