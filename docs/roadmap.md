@@ -134,3 +134,15 @@ No P1 item is open. In order of value:
 
 - [x] ADR-0001 to ADR-0011, each with an executable gate (`make adr-check`).
 - [x] `AGENTS.md` / `CLAUDE.md` for agents; implementation plan; production runbook; this roadmap.
+
+## 12. Business & distribution
+
+Decisions and open questions: [`business-and-distribution.md`](business-and-distribution.md).
+
+- [x] Business model: open source + services (2026-11-13).
+- [ ] **P2** Define the paid services (which, for whom, price). Needs its own session before a public launch.
+- [ ] **P2** Choose and add the open-source `LICENSE`, together with the services.
+- [x] Distribution model: CI on every PR, semver tags publish images to GHCR with a GitHub Release, `main` deploys to staging, production after approval (2026-11-13).
+- [ ] **P2** CI workflow running `make check` on PRs and `main`, required on `main`.
+- [ ] **P2** Release workflow: `vX.Y.Z` tag builds and publishes both images to GHCR and creates the GitHub Release.
+- [ ] **P2** Staging environment (own GitHub App and database) with automatic deploys from `main`; production deploys of tagged releases behind a manual approval.
