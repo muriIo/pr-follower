@@ -22,7 +22,7 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
 ```
 
 1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`).
-2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). A tag builds both images (`pr-follower-api`, `pr-follower-panel`) and publishes them to GitHub Container Registry (`ghcr.io`) tagged with the version and the commit SHA. A GitHub Release is created with notes generated from the Conventional Commits since the previous tag.
+2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). A tag builds both images (`pr-follower-api`, `pr-follower-panel`) and publishes them to GitHub Container Registry (`ghcr.io`) tagged with the version and the commit SHA. A GitHub Release is created with notes generated from the Conventional Commits since the previous tag. Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from those commits (minor or patch until launch; major only from `1.0.0` on), summarizes them, and tags only after approval.
 3. **Staging (homologation).** Every merge to `main` builds images tagged with the commit SHA and deploys them to staging automatically. Production gets only tagged releases, after a manual approval (a GitHub Environment with required reviewers).
 
 Open:
