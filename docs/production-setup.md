@@ -1,6 +1,6 @@
 # Production Setup
 
-Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-11 (`main` after #31). The sign-in model is [ADR-0010](../../docs/adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
+Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-11 (`main` after #31). The sign-in model is [ADR-0010](adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
 
 Work through the sections in order: each one uses what the previous ones produced. Deploying on AWS? [`aws-setup.md`](aws-setup.md) maps these steps to AWS services (and explains the choices); it reuses §2, §4–5, §10–11 and §13 from here.
 
@@ -25,7 +25,7 @@ Work through the sections in order: each one uses what the previous ones produce
 
 ### Readiness
 
-Open items in [`roadmap.md`](../plans/roadmap.md) that matter in production. None blocks a deploy, but know them before users arrive:
+Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks a deploy, but know them before users arrive:
 
 - [ ] **Verified against real GitHub.** Approve, merge and comment act with the user's token, and background reads use the app's installation token, but neither has run against a real repository yet. Run [`real-github-verification.md`](real-github-verification.md) with a dev app first.
 - **One API replica only** (§1, §13.10).
@@ -106,7 +106,7 @@ GitHub produces the rest in §5: the client secret and the app's private key.
    psql 'postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=require' -c 'select version()'
    ```
 
-Don't run migrations by hand. The API applies the forward-only migrations ([ADR-0004](../../docs/adr/0004-forward-only-goose-migrations-and-sqlc.md)) at start; `SELECT max(version_id) FROM goose_db_version;` shows the applied version afterwards.
+Don't run migrations by hand. The API applies the forward-only migrations ([ADR-0004](adr/0004-forward-only-goose-migrations-and-sqlc.md)) at start; `SELECT max(version_id) FROM goose_db_version;` shows the applied version afterwards.
 
 ## 4. Create the production GitHub App
 
@@ -478,7 +478,7 @@ Acting on PRs (approve, merge, `@dependabot` comments), the Dependabot analysis 
 
 ### 13.1 What to watch
 
-- **Recent Deliveries** (app → **Advanced**). GitHub does not retry a failed delivery, and only deliveries from the last 3 days can be redelivered. Check after every deploy or outage and **Redeliver** the failures: ingestion is idempotent ([ADR-0011](../../docs/adr/0011-idempotent-integrations.md)), so redelivering one that already arrived changes nothing. After a longer outage, users click **Sincronizar** to bring the repositories they follow back in line.
+- **Recent Deliveries** (app → **Advanced**). GitHub does not retry a failed delivery, and only deliveries from the last 3 days can be redelivered. Check after every deploy or outage and **Redeliver** the failures: ingestion is idempotent ([ADR-0011](adr/0011-idempotent-integrations.md)), so redelivering one that already arrived changes nothing. After a longer outage, users click **Sincronizar** to bring the repositories they follow back in line.
 - **API logs.** Alert on any `ERROR`, and on `dependabot analysis failed`, `dependabot analysis queue full`, `activity listener disconnected`, `reading the activity log failed` and `pruning old activity failed` ([Troubleshooting](#troubleshooting)).
 - **An uptime probe** on `https://app.example.com/api/v1/auth/me` expecting `401`: that answer needs the TLS proxy, the panel and the API all up. The panel's `/healthz` covers only the panel, and the API's own `/healthz` does not touch the database.
 - **GitHub's emails** to installation owners about permission requests (§13.8).
