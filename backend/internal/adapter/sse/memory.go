@@ -14,6 +14,8 @@ const memoryLogCapacity = 1000
 
 // MemoryLog is an in-process port.ActivityLog for tests and for running without a database. It is
 // not shared between processes, so it cannot back more than one replica.
+//
+// replica-local: the activity log for a single process (tests, SQLite); a server on Postgres uses the shared log.
 type MemoryLog struct {
 	mu     sync.Mutex
 	events []port.LoggedActivity
@@ -104,6 +106,8 @@ func (l *MemoryLog) Prune(ctx context.Context, before time.Time) (int64, error) 
 }
 
 // LocalSignal is an in-process port.ActivitySignal: it wakes the listeners of this process only.
+//
+// replica-local: wake-ups within a single process (tests, SQLite); a server on Postgres uses LISTEN/NOTIFY.
 type LocalSignal struct {
 	mu        sync.Mutex
 	listeners map[chan struct{}]struct{}

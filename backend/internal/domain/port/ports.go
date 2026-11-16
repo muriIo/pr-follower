@@ -220,6 +220,32 @@ type ActivitySignal interface {
 	Listen(ctx context.Context) <-chan struct{}
 }
 
+// SyncJobStore keeps each user's latest sync where every API replica sees it (one row per user).
+type SyncJobStore interface {
+	// ClaimSyncJob starts run runID for the user, unless a run is going whose heartbeat is not older
+	// than staleBefore; it reports whether the claim was made. It is atomic across replicas.
+	ClaimSyncJob(ctx context.Context, userID uint64, runID string, now, staleBefore time.Time) (bool, error)
+	// GetSyncJob returns the user's latest sync, or entity.ErrNotFound when they never ran one.
+	GetSyncJob(ctx context.Context, userID uint64) (entity.SyncJob, error)
+	// HeartbeatSyncJob records the run's progress and that it is alive, and reports whether a cancel
+	// was asked. It is entity.ErrNotFound when the run is no longer the user's running one.
+	HeartbeatSyncJob(ctx context.Context, userID uint64, runID string, progress entity.SyncProgress, now time.Time) (cancelRequested bool, err error)
+	// FinishSyncJob records how run job.RunID ended; it changes nothing when another run took over.
+	FinishSyncJob(ctx context.Context, job entity.SyncJob) error
+	// RequestSyncJobCancel asks the user's running sync (heartbeat not older than staleBefore) to
+	// stop, and reports whether there was one.
+	RequestSyncJobCancel(ctx context.Context, userID uint64, staleBefore time.Time) (bool, error)
+}
+
+// ReplicaBroadcast delivers short messages to every API replica, this one included. Delivery is at most
+// once: a replica that is disconnected when a message is sent never sees it.
+type ReplicaBroadcast interface {
+	// Broadcast sends message to every replica.
+	Broadcast(ctx context.Context, message string) error
+	// Subscribe returns a channel receiving every message broadcast from now on. It closes with ctx.
+	Subscribe(ctx context.Context) <-chan string
+}
+
 // ChangedFilesStore keeps the files each PR changes at its head commit (one row per PR).
 type ChangedFilesStore interface {
 	SaveChangedFiles(ctx context.Context, files entity.PRChangedFiles) error

@@ -166,6 +166,7 @@ type inflightCall[T any] struct {
 	err  error
 }
 
+// replica-local: joins identical calls in flight in this process; another replica making the same call only costs a request.
 type SingleFlightGroup[T any] struct {
 	mu    sync.Mutex
 	calls map[string]*inflightCall[T]

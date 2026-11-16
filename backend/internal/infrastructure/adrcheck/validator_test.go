@@ -297,6 +297,66 @@ func (u *UseCase) ExecuteWithoutContext(id uint64) error { return nil }
 		}
 	})
 
+	t.Run("ADR-0012: detects in-memory shared state that does not say why it can be per replica", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		dir := filepath.Join(root, "backend", "internal", "adapter", "jobs")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		files := map[string]string{
+			"jobs.go": `package jobs
+
+import "sync"
+
+// Tracker keeps every job's progress.
+type Tracker struct {
+	mu   sync.Mutex
+	jobs map[string]int
+}
+
+// Cache memoizes reads.
+//
+// replica-local: a cache; a miss on another replica only costs a read.
+type Cache struct {
+	mu sync.RWMutex
+}
+
+type (
+	// Counter counts things.
+	Counter struct {
+		mu *sync.Mutex
+	}
+)
+
+// Plain has no lock.
+type Plain struct{ n int }
+`,
+			"jobs_test.go": "package jobs\nimport \"testing\"\nfunc TestJobs(t *testing.T) {}\n",
+		}
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected ADR-0012 violations, got nil")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{"ADR-0012: type Tracker", "ADR-0012: type Counter"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected a violation containing %q, got:\n%s", want, joined)
+			}
+		}
+		for _, allowed := range []string{"type Cache", "type Plain"} {
+			if strings.Contains(joined, allowed) {
+				t.Errorf("%s must not be reported:\n%s", allowed, joined)
+			}
+		}
+	})
+
 	t.Run("ADR-0011: detects non-idempotent writes, schema, retries and missing redelivery tests", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)

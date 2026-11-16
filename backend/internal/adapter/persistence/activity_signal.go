@@ -3,13 +3,9 @@ package persistence
 import (
 	"context"
 	"database/sql"
-	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/murilo/pr-follower/backend/internal/domain/port"
-	"github.com/murilo/pr-follower/backend/internal/infrastructure/resilience"
 )
 
 // activityChannel is the Postgres NOTIFY channel replicas use to tell each other the activity log
@@ -59,45 +55,8 @@ func (s *PostgresActivitySignal) Listen(ctx context.Context) <-chan struct{} {
 	}
 	go func() {
 		defer close(out)
-		for ctx.Err() == nil {
-			err := s.listenOnce(ctx, wake)
-			if ctx.Err() != nil {
-				return
-			}
-			slog.Warn("activity listener disconnected; reconnecting", "err", err, "in", s.reconnectDelay)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(s.reconnectDelay):
-			}
-		}
+		// Waking right after every (re)connection reads whatever was appended while disconnected.
+		listenLoop(ctx, s.dsn, activityChannel, s.reconnectDelay, wake, func(string) { wake() })
 	}()
 	return out
-}
-
-// listenOnce holds one LISTEN connection until it fails or ctx ends. It wakes the reader right after
-// subscribing, so anything appended while there was no connection is read.
-func (s *PostgresActivitySignal) listenOnce(ctx context.Context, wake func()) error {
-	conn, err := resilience.Retry(ctx, resilience.DefaultBackoffConfig(), func(ctx context.Context) (*pgx.Conn, error) {
-		return pgx.Connect(ctx, s.dsn)
-	})
-	if err != nil {
-		return err
-	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-		defer cancel()
-		_ = conn.Close(closeCtx)
-	}()
-
-	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{activityChannel}.Sanitize()); err != nil {
-		return err
-	}
-	wake()
-	for {
-		if _, err := conn.WaitForNotification(ctx); err != nil {
-			return err
-		}
-		wake()
-	}
 }

@@ -279,11 +279,17 @@ func (h *Handler) AnalyzePR(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CancelOperation(w http.ResponseWriter, r *http.Request) {
 	opID := chi.URLParam(r, "id")
-	if !h.deps.OpRegistry.Cancel(opID) {
+	outcome, err := h.deps.OpRegistry.Cancel(r.Context(), currentUserID(r), opID)
+	switch {
+	case err != nil:
+		writeDomainError(w, err)
+	case outcome == operation.Canceled:
+		writeJSON(w, http.StatusOK, map[string]any{"canceled": true, "operation_id": opID})
+	case outcome == operation.Requested: // another replica may run it: every replica was asked
+		writeJSON(w, http.StatusAccepted, map[string]any{"cancel_requested": true, "operation_id": opID})
+	default:
 		writeDomainError(w, entity.ErrNotFound)
-		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"canceled": true, "operation_id": opID})
 }
 
 // githubPushCommitLimit is how many commits GitHub includes in a push webhook.
@@ -524,7 +530,7 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) beginOperation(r *http.Request) (context.Context, func()) {
 	opID := strings.TrimSpace(r.Header.Get("X-Operation-ID"))
-	return h.deps.OpRegistry.Begin(r.Context(), opID)
+	return h.deps.OpRegistry.Begin(r.Context(), currentUserID(r), opID)
 }
 
 func parseUintParam(r *http.Request, key string) (uint64, error) {
@@ -562,6 +568,8 @@ func statusAndCode(err error) (int, string) {
 		status, code = StatusClientClosedRequest, "canceled"
 	case errors.Is(err, entity.ErrRateLimited):
 		status, code = http.StatusTooManyRequests, "rate_limited"
+	case errors.Is(err, entity.ErrSyncInterrupted):
+		status, code = http.StatusServiceUnavailable, "sync_interrupted"
 	case errors.Is(err, entity.ErrChecksRunning):
 		status, code = http.StatusConflict, "checks_running"
 	case errors.Is(err, entity.ErrOwnPullRequest):

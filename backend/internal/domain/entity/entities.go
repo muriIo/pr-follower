@@ -34,6 +34,9 @@ var (
 	// ErrOwnPullRequest means the user tried to approve a pull request they authored: GitHub
 	// does not allow it.
 	ErrOwnPullRequest = errors.New("you cannot approve your own pull request")
+	// ErrSyncInterrupted means a sync stopped reporting before it finished: the API replica running it
+	// went away (a deploy, a crash). Nothing it did is lost; running it again finishes the job.
+	ErrSyncInterrupted = errors.New("the sync was interrupted")
 )
 
 type PRState string

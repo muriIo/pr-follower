@@ -43,6 +43,8 @@ const (
 // of truth: Publish appends to it and wakes every replica through the ActivitySignal, and each replica
 // (this one too) delivers what it reads back from the log, in order, to its own subscribers. Because
 // delivery comes only from the log, a restart loses nothing and any number of replicas agree.
+//
+// replica-local: the live streams connected to this replica and where it has read the activity log to; the activity itself is in Postgres.
 type Hub struct {
 	log    port.ActivityLog
 	signal port.ActivitySignal

@@ -138,6 +138,21 @@ type Session struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type SyncJob struct {
+	UserID          int64        `json:"user_id"`
+	RunID           string       `json:"run_id"`
+	State           string       `json:"state"`
+	ProgressTotal   int64        `json:"progress_total"`
+	ProgressDone    int64        `json:"progress_done"`
+	ProgressCurrent string       `json:"progress_current"`
+	ResultJson      string       `json:"result_json"`
+	ErrorJson       string       `json:"error_json"`
+	CancelRequested bool         `json:"cancel_requested"`
+	StartedAt       time.Time    `json:"started_at"`
+	HeartbeatMs     int64        `json:"heartbeat_ms"`
+	FinishedAt      sql.NullTime `json:"finished_at"`
+}
+
 type User struct {
 	ID                    int64     `json:"id"`
 	GithubID              int64     `json:"github_id"`

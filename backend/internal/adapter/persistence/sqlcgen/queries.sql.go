@@ -11,6 +11,51 @@ import (
 	"time"
 )
 
+const claimSyncJob = `-- name: ClaimSyncJob :one
+INSERT INTO sync_jobs (
+    user_id, run_id, state, progress_total, progress_done, progress_current,
+    result_json, error_json, cancel_requested, started_at, heartbeat_ms, finished_at
+) VALUES (
+    $1, $2, 'running', 0, 0, '', '', '', FALSE, $3, $4, NULL
+)
+ON CONFLICT (user_id) DO UPDATE SET
+    run_id = EXCLUDED.run_id,
+    state = 'running',
+    progress_total = 0,
+    progress_done = 0,
+    progress_current = '',
+    result_json = '',
+    error_json = '',
+    cancel_requested = FALSE,
+    started_at = EXCLUDED.started_at,
+    heartbeat_ms = EXCLUDED.heartbeat_ms,
+    finished_at = NULL
+WHERE sync_jobs.state <> 'running' OR sync_jobs.heartbeat_ms < $5
+RETURNING run_id
+`
+
+type ClaimSyncJobParams struct {
+	UserID        int64     `json:"user_id"`
+	RunID         string    `json:"run_id"`
+	StartedAt     time.Time `json:"started_at"`
+	HeartbeatMs   int64     `json:"heartbeat_ms"`
+	StaleBeforeMs int64     `json:"stale_before_ms"`
+}
+
+// Starts a run unless one is going (running with a fresh heartbeat). No row back means not claimed.
+func (q *Queries) ClaimSyncJob(ctx context.Context, arg ClaimSyncJobParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, claimSyncJob,
+		arg.UserID,
+		arg.RunID,
+		arg.StartedAt,
+		arg.HeartbeatMs,
+		arg.StaleBeforeMs,
+	)
+	var run_id string
+	err := row.Scan(&run_id)
+	return run_id, err
+}
+
 const countUserRepositoryFollow = `-- name: CountUserRepositoryFollow :one
 SELECT COUNT(*) FROM user_repo_follows
 WHERE user_id = $1 AND repository_id = $2
@@ -64,6 +109,48 @@ WHERE token_hash = $1
 
 func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := q.db.ExecContext(ctx, deleteSession, tokenHash)
+	return err
+}
+
+const finishSyncJob = `-- name: FinishSyncJob :exec
+UPDATE sync_jobs
+SET state = $1,
+    progress_total = $2,
+    progress_done = $3,
+    progress_current = $4,
+    result_json = $5,
+    error_json = $6,
+    heartbeat_ms = $7,
+    finished_at = $8
+WHERE user_id = $9 AND run_id = $10
+`
+
+type FinishSyncJobParams struct {
+	State           string       `json:"state"`
+	ProgressTotal   int64        `json:"progress_total"`
+	ProgressDone    int64        `json:"progress_done"`
+	ProgressCurrent string       `json:"progress_current"`
+	ResultJson      string       `json:"result_json"`
+	ErrorJson       string       `json:"error_json"`
+	HeartbeatMs     int64        `json:"heartbeat_ms"`
+	FinishedAt      sql.NullTime `json:"finished_at"`
+	UserID          int64        `json:"user_id"`
+	RunID           string       `json:"run_id"`
+}
+
+func (q *Queries) FinishSyncJob(ctx context.Context, arg FinishSyncJobParams) error {
+	_, err := q.db.ExecContext(ctx, finishSyncJob,
+		arg.State,
+		arg.ProgressTotal,
+		arg.ProgressDone,
+		arg.ProgressCurrent,
+		arg.ResultJson,
+		arg.ErrorJson,
+		arg.HeartbeatMs,
+		arg.FinishedAt,
+		arg.UserID,
+		arg.RunID,
+	)
 	return err
 }
 
@@ -368,6 +455,33 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 	return i, err
 }
 
+const getSyncJob = `-- name: GetSyncJob :one
+SELECT user_id, run_id, state, progress_total, progress_done, progress_current, result_json, error_json,
+       cancel_requested, started_at, heartbeat_ms, finished_at
+FROM sync_jobs
+WHERE user_id = $1
+`
+
+func (q *Queries) GetSyncJob(ctx context.Context, userID int64) (SyncJob, error) {
+	row := q.db.QueryRowContext(ctx, getSyncJob, userID)
+	var i SyncJob
+	err := row.Scan(
+		&i.UserID,
+		&i.RunID,
+		&i.State,
+		&i.ProgressTotal,
+		&i.ProgressDone,
+		&i.ProgressCurrent,
+		&i.ResultJson,
+		&i.ErrorJson,
+		&i.CancelRequested,
+		&i.StartedAt,
+		&i.HeartbeatMs,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getUserByGitHubID = `-- name: GetUserByGitHubID :one
 SELECT id, github_id, login, name, avatar_url, teams_json, encrypted_token, created_at, updated_at, encrypted_refresh_token, access_token_expires_at, refresh_token_expires_at
 FROM users
@@ -448,6 +562,39 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const heartbeatSyncJob = `-- name: HeartbeatSyncJob :one
+UPDATE sync_jobs
+SET progress_total = $1,
+    progress_done = $2,
+    progress_current = $3,
+    heartbeat_ms = $4
+WHERE user_id = $5 AND run_id = $6 AND state = 'running'
+RETURNING cancel_requested
+`
+
+type HeartbeatSyncJobParams struct {
+	ProgressTotal   int64  `json:"progress_total"`
+	ProgressDone    int64  `json:"progress_done"`
+	ProgressCurrent string `json:"progress_current"`
+	HeartbeatMs     int64  `json:"heartbeat_ms"`
+	UserID          int64  `json:"user_id"`
+	RunID           string `json:"run_id"`
+}
+
+func (q *Queries) HeartbeatSyncJob(ctx context.Context, arg HeartbeatSyncJobParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, heartbeatSyncJob,
+		arg.ProgressTotal,
+		arg.ProgressDone,
+		arg.ProgressCurrent,
+		arg.HeartbeatMs,
+		arg.UserID,
+		arg.RunID,
+	)
+	var cancel_requested bool
+	err := row.Scan(&cancel_requested)
+	return cancel_requested, err
 }
 
 const insertActivityEvent = `-- name: InsertActivityEvent :one
@@ -858,6 +1005,25 @@ func (q *Queries) ListRepositoryFollowerIDs(ctx context.Context, repositoryID in
 		return nil, err
 	}
 	return items, nil
+}
+
+const requestSyncJobCancel = `-- name: RequestSyncJobCancel :execrows
+UPDATE sync_jobs
+SET cancel_requested = TRUE
+WHERE user_id = $1 AND state = 'running' AND heartbeat_ms >= $2
+`
+
+type RequestSyncJobCancelParams struct {
+	UserID        int64 `json:"user_id"`
+	StaleBeforeMs int64 `json:"stale_before_ms"`
+}
+
+func (q *Queries) RequestSyncJobCancel(ctx context.Context, arg RequestSyncJobCancelParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, requestSyncJobCancel, arg.UserID, arg.StaleBeforeMs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const unfollowRepository = `-- name: UnfollowRepository :exec

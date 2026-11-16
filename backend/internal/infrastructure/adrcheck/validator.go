@@ -43,6 +43,7 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0008And0009FrontendIfPresent(repoRoot, report)
 	validateADR0010GitHubOnlyIdentity(repoRoot, report)
 	validateADR0011IdempotentIntegrations(repoRoot, report)
+	validateADR0012ReplicaSharedState(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",
@@ -802,6 +803,71 @@ func validateADR0010GitHubOnlyIdentity(repoRoot string, report *ValidationReport
 				fmt.Sprintf("ADR-0010: migration %s defines a password column; GitHub is the only identity provider", entry.Name()))
 		}
 	}
+}
+
+// replicaLocalNote marks in-memory shared state that is allowed to differ between API replicas.
+const replicaLocalNote = "replica-local:"
+
+// validateADR0012ReplicaSharedState reports every struct in backend/internal that guards memory with
+// a sync.Mutex or sync.RWMutex (state shared across requests) without a "replica-local:" note in its
+// doc comment saying why that state may live in one replica's memory. Everything else belongs in
+// Postgres, where every replica sees it.
+func validateADR0012ReplicaSharedState(repoRoot string, report *ValidationReport) {
+	root := filepath.Join(repoRoot, "backend", "internal")
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == "adrcheck" || d.Name() == "sqlcgen" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if parseErr != nil {
+			return nil
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts := spec.(*ast.TypeSpec)
+				st, ok := ts.Type.(*ast.StructType)
+				if !ok || !holdsLock(st) {
+					continue
+				}
+				doc := ts.Doc
+				if doc == nil && len(gen.Specs) == 1 {
+					doc = gen.Doc
+				}
+				if doc == nil || !strings.Contains(doc.Text(), replicaLocalNote) {
+					report.Violations = append(report.Violations, fmt.Sprintf(
+						"ADR-0012: type %s in %s keeps state in memory behind a lock; move it to Postgres or say why it may differ per replica with a %q note",
+						ts.Name.Name, relPath(repoRoot, path), replicaLocalNote))
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func holdsLock(st *ast.StructType) bool {
+	for _, field := range st.Fields.List {
+		typ := field.Type
+		if star, ok := typ.(*ast.StarExpr); ok {
+			typ = star.X
+		}
+		if isSelector(typ, "sync", "Mutex") || isSelector(typ, "sync", "RWMutex") {
+			return true
+		}
+	}
+	return false
 }
 
 func relPath(root, target string) string {

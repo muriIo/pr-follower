@@ -265,6 +265,7 @@ type testServer struct {
 	gh     *noopGHGateway
 	files  *fakeRepoFiles
 	ended  *fakeEndedPRs
+	syncs  *persistence.SyncJobStore
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -376,7 +377,8 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	importUC := repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo)
 	syncCtx, stopSync := context.WithCancel(context.Background())
 	t.Cleanup(stopSync)
-	syncJobs := syncjob.NewManager(syncCtx, importUC)
+	syncStore := persistence.NewSyncJobStore(db)
+	syncJobs := syncjob.NewManager(syncCtx, importUC, syncStore)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 
@@ -402,7 +404,7 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 		FilesUC:        filesUC,
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles, ended: ended}
+	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles, ended: ended, syncs: syncStore}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
@@ -514,9 +516,14 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 		t.Fatalf("expected 202 Accepted on webhook, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 8. Cancel active operation returns 200, missing returns 404
-	_, release := opReg.Begin(context.Background(), "op-active-55")
+	// 8. Cancel active operation returns 200; missing, or another user's, returns 404
+	_, release := opReg.Begin(context.Background(), 1, "op-active-55") // the first user signed in
 	defer release()
+	_, releaseOther := opReg.Begin(context.Background(), 2, "op-someone-elses")
+	defer releaseOther()
+	if rec := ts.do(t, http.MethodDelete, "/api/v1/operations/op-someone-elses", "", session); rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 cancelling another user's operation, got %d", rec.Code)
+	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/operations/op-active-55", nil)
 	req.AddCookie(session)
@@ -532,6 +539,32 @@ func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 on missing operation cancel, got %d", rec.Code)
+	}
+}
+
+// echoBus delivers every broadcast back to its subscribers, like Postgres NOTIFY to all replicas.
+type echoBus struct{ sent chan string }
+
+func (b *echoBus) Broadcast(_ context.Context, message string) error {
+	b.sent <- message
+	return nil
+}
+
+func (b *echoBus) Subscribe(context.Context) <-chan string { return make(chan string) }
+
+func TestCancelOperation_AsksEveryReplicaWhenThisOneDoesNotRunIt(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	bus := &echoBus{sent: make(chan string, 1)}
+	ts.opReg.Connect(t.Context(), bus)
+
+	rec := ts.do(t, http.MethodDelete, "/api/v1/operations/op-elsewhere", "", session)
+	if rec.Code != http.StatusAccepted || !strings.Contains(rec.Body.String(), `"cancel_requested":true`) {
+		t.Fatalf("expected 202 with cancel_requested, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := <-bus.sent; got != "1:op-elsewhere" {
+		t.Fatalf("broadcast %q, want the user's own operation", got)
 	}
 }
 
@@ -2023,6 +2056,26 @@ func TestSync_RunsInTheBackgroundAndBringsTheWorkspaceInLineWithGitHub(t *testin
 		if rec := ts.do(t, method, "/api/v1/sync", "", nil); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("%s /sync signed out: %d", method, rec.Code)
 		}
+	}
+}
+
+func TestSync_ASyncWhoseReplicaWentAwayReadsAsInterrupted(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	session := ts.signIn(t)
+	gone := time.Now().Add(-time.Hour)
+	if _, err := ts.syncs.ClaimSyncJob(context.Background(), 1, "dead-replica", gone, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := ts.do(t, http.MethodGet, "/api/v1/sync", "", session)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"state":"failed"`) ||
+		!strings.Contains(rec.Body.String(), `"code":"sync_interrupted"`) {
+		t.Fatalf("GET /sync of an abandoned sync: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := ts.do(t, http.MethodPost, "/api/v1/sync", "", session); rec.Code != http.StatusAccepted ||
+		!strings.Contains(rec.Body.String(), `"started":true`) {
+		t.Fatalf("an interrupted sync must not block the next one: %d %s", rec.Code, rec.Body.String())
 	}
 }
 

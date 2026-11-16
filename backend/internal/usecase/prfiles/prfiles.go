@@ -23,6 +23,7 @@ type File struct {
 	Owned bool `json:"owned"`
 }
 
+// replica-local: a cache of changed files per head commit; a miss on another replica reads GitHub once more.
 type UseCase struct {
 	tokens  port.UserTokenSource
 	github  port.GitHubUserAPI

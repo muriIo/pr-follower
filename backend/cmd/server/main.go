@@ -72,7 +72,7 @@ func main() {
 	// Activity lives in the database and replicas wake each other through Postgres, so any number of
 	// API replicas share one timeline and one live stream.
 	sseHub := newActivityHub(ctx, cfg, db)
-	opReg := operation.NewRegistry()
+	opReg := newOperationRegistry(ctx, cfg, db)
 	installations := newInstallationTokens(cfg)
 	ghGateway := github.NewGateway(github.GatewayConfig{
 		Backoff:       resilience.DefaultBackoffConfig(),
@@ -129,7 +129,8 @@ func main() {
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
 		filesSyncer = changedFilesUC
 		importUC = repoimport.NewUseCase(authUC, userAPI, repoRepo, prRepo, prRepo, userRepo, sseHub, changedFilesUC, prRepo, importOpts...)
-		syncJobs = syncjob.NewManager(ctx, importUC) // stops with the server
+		// The job is in the database, so a progress poll or a cancel may reach any replica.
+		syncJobs = syncjob.NewManager(ctx, importUC, persistence.NewSyncJobStore(db)) // stops with the server
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
 		pushUC = webhook.NewPushIngestUseCase(repoRepo, codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, installations, sseHub))
 		actionUC = action.NewUseCase(action.Deps{
@@ -222,6 +223,16 @@ func newTokenCipher(base64Key string) (*crypto.AESGCMCipher, error) {
 		base64Key = generated
 	}
 	return crypto.NewAESGCMCipher(base64Key)
+}
+
+// newOperationRegistry lets a user cancel an operation whichever replica runs it: a cancel that lands
+// on another replica reaches it through Postgres NOTIFY. SQLite means one process: local is enough.
+func newOperationRegistry(ctx context.Context, cfg *config.Config, db *sql.DB) *operation.Registry {
+	reg := operation.NewRegistry()
+	if !strings.HasPrefix(cfg.DatabaseURL, "sqlite://") {
+		reg.Connect(ctx, persistence.NewPostgresReplicaBroadcast(db, cfg.DatabaseURL, persistence.OperationCancelChannel))
+	}
+	return reg
 }
 
 // newActivityHub keeps activity in the database. Replicas wake each other through Postgres

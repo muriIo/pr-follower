@@ -13,6 +13,8 @@ type flightCall[T any] struct {
 
 // flightGroup lets concurrent callers for one key share a single run of fn. A waiting caller
 // gives up when its own context ends, without cancelling the run it waits for.
+//
+// replica-local: joins analyses of one PR running in this process; two replicas may analyse the same commit at once, and the result converges (stored per commit).
 type flightGroup[T any] struct {
 	mu    sync.Mutex
 	calls map[string]*flightCall[T]
