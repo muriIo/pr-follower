@@ -134,6 +134,19 @@ describe('RepositoryImportStore (Vercel-style import, ADR-0010)', () => {
     expect(store.status()).toBe('ready');
   });
 
+  it('says what GitHub said when a follow fails, e.g. when its limit lifts (ADR-0013)', async () => {
+    const { store } = setup({
+      importRepository: vi.fn(async () => Promise.reject(new RepositoryImportError('rate_limited', 'github rate limit reached', '2026-11-16T14:05:00Z'))),
+    });
+    await store.open(20);
+    await store.toggleFollow(store.visibleRepositories().find((r) => r.fullName === 'acme/web')!);
+
+    expect(store.error()).toBe('rate_limited');
+    expect(store.errorParams().detail).toBe('github rate limit reached');
+    expect(store.errorParams().time).not.toBe('');
+    expect(store.isPending(900)).toBe(false);
+  });
+
   it('reports an expired GitHub session when accounts cannot be listed', async () => {
     const { store } = setup({ listAccounts: vi.fn(async () => Promise.reject(new RepositoryImportError('unauthorized'))) });
     await store.open();

@@ -5,7 +5,11 @@ export interface BackoffConfig {
 }
 
 export class PermanentError extends Error {
-  constructor(message: string) {
+  /** `failure` is the error to report once retrying stops (e.g. the server's ActionError). */
+  constructor(
+    message: string,
+    readonly failure?: unknown,
+  ) {
     super(message);
     this.name = 'PermanentError';
   }

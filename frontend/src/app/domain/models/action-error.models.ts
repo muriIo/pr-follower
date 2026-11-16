@@ -13,6 +13,8 @@ export type ActionErrorCode =
   | 'invalid_input'
   | 'unavailable'
   | 'not_analysable'
+  | 'github_unavailable'
+  | 'canceled'
   | 'internal'
   | 'unknown';
 
@@ -30,6 +32,8 @@ const KNOWN_CODES: readonly string[] = [
   'invalid_input',
   'unavailable',
   'not_analysable',
+  'github_unavailable',
+  'canceled',
   'internal',
 ];
 

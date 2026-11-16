@@ -34,7 +34,12 @@
 }
 
 @if (action().hasNote && showNote()) {
-  @if (mode() === 'inline-sm') {
+  @if (action().dismissible) {
+    <span [class]="action().noteCls + ' pf-note-dismissible'" role="alert">
+      {{ action().note }}
+      <button type="button" class="pf-btn pf-btn-sm" (click)="action().dismiss()">{{ 'notice.dismiss' | t }}</button>
+    </span>
+  } @else if (mode() === 'inline-sm') {
     <span class="pf-srow-note">{{ action().note }}</span>
   } @else {
     <span [class]="action().noteCls">{{ action().note }}</span>

@@ -372,5 +372,16 @@
   "inbox.mute.ciFailTip": "Entra na fila quando o CI passar.",
   "inbox.mute.conflict": "🚧 Com conflitos",
   "inbox.mute.conflictTip": "Entra na fila quando o autor resolver os conflitos.",
-  "drawer.why.pending": "Ainda não verificamos os arquivos alterados neste PR."
+  "drawer.why.pending": "Ainda não verificamos os arquivos alterados neste PR.",
+  "actions.batch.mergeFailed": "Lote parado: {done} de {total} mesclados. O PR #{pr} falhou: {reason}",
+  "actions.batch.approveFailed": "Lote parado: {done} de {total} aprovados. O PR #{pr} falhou: {reason}",
+  "actions.error.github_unavailable": "O GitHub não respondeu. Nada mudou; tente de novo em instantes.",
+  "actions.error.canceled": "Ação cancelada.",
+  "import.followPending": "Importando PRs...",
+  "import.unfollowPending": "Deixando de seguir...",
+  "import.error.github_token_expired": "Seu acesso ao GitHub expirou. Entre novamente.",
+  "import.error.forbidden": "O GitHub negou o acesso. {detail}",
+  "import.error.rate_limited": "O limite de requisições do GitHub foi atingido. Tente de novo às {time}.",
+  "import.error.github_unavailable": "O GitHub não respondeu. Nada mudou; tente de novo em instantes.",
+  "import.error.conflict": "O GitHub não permitiu. {detail}"
 }

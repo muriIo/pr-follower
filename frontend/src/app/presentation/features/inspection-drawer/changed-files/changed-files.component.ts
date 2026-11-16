@@ -14,5 +14,7 @@ import { DiffViewerComponent } from '../../../common/diff-viewer/diff-viewer.com
 export class ChangedFilesComponent {
   readonly files = input.required<readonly ChangedFileCardViewModel[]>();
   readonly state = input<ChangedFilesState>('ready');
+  /** Why the load failed, in the user's language (ADR-0013). */
+  readonly errorReason = input<string>('');
   readonly toggleFile = output<number>();
 }

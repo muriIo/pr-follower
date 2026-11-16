@@ -37,5 +37,12 @@
 }
 
 @if (batchAction().hasNote) {
-  <p [class]="batchAction().noteCls" role="status">{{ batchAction().note }}</p>
+  @if (batchAction().dismissible) {
+    <p [class]="batchAction().noteCls + ' pf-note-dismissible'" role="alert">
+      {{ batchAction().note }}
+      <button type="button" class="pf-btn pf-btn-sm" (click)="batchAction().dismiss()">{{ 'notice.dismiss' | t }}</button>
+    </p>
+  } @else {
+    <p [class]="batchAction().noteCls" role="status">{{ batchAction().note }}</p>
+  }
 }

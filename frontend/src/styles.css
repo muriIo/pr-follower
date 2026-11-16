@@ -88,6 +88,8 @@ app-cancellable-action { display: inline-flex; align-items: center; gap: var(--s
 .pf-note { color: var(--text-2); }
 .pf-note-ok { color: #34D399; }
 .pf-note-err { color: #FB7185; }
+.pf-note-dismissible { display: inline-flex; align-items: center; gap: var(--space-2); }
+.pf-import-action.pf-btn-busy { display: inline-flex; align-items: center; gap: var(--space-2); cursor: progress; }
 /* Something changed under the user (e.g. the PR in the drawer was merged): one line, dismissible. */
 .pf-notice { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid rgba(59, 130, 246, .35); border-radius: 8px; background: rgba(59, 130, 246, .10); color: var(--text); }
 .pf-notice-text { min-width: 0; overflow-wrap: anywhere; }

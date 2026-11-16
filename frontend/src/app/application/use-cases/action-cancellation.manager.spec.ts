@@ -113,6 +113,46 @@ describe('ActionCancellationManager failures and cancellation between steps', ()
     expect(view.noteCls).toBe('pf-note pf-note-err');
   });
 
+  it('keeps a failure on screen until dismissed, with the controls back for a retry (ADR-0013)', async () => {
+    vi.useFakeTimers();
+    try {
+      TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+      const manager = TestBed.inject(ActionCancellationManager);
+      await manager.run(
+        'merge:8',
+        [{ label: 'Mesclando...', execute: async () => { throw new Error('blocked'); } }],
+        () => 'ok',
+        () => 'cancelado',
+        () => 'O GitHub não permitiu.',
+      );
+
+      vi.advanceTimersByTime(60_000);
+      const view = manager.getView(undefined, 'merge:8');
+      expect(view.note).toBe('O GitHub não permitiu.');
+      expect(view.idle).toBe(true);
+      expect(view.dismissible).toBe(true);
+
+      view.dismiss();
+      expect(manager.getView(undefined, 'merge:8').hasNote).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still lets a success note fade on its own', async () => {
+    vi.useFakeTimers();
+    try {
+      TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
+      const manager = TestBed.inject(ActionCancellationManager);
+      await manager.run('merge:9', [{ label: 'x', execute: async () => undefined }], () => 'Mesclado.', () => 'c');
+      expect(manager.getView(undefined, 'merge:9').dismissible).toBe(false);
+      vi.advanceTimersByTime(6_000);
+      expect(manager.getView(undefined, 'merge:9').hasNote).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('still throws when nobody handles the failure', async () => {
     TestBed.configureTestingModule({ providers: [ActionCancellationManager] });
     const manager = TestBed.inject(ActionCancellationManager);
