@@ -468,14 +468,15 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			Action      string `json:"action"`
 			Number      int    `json:"number"`
 			PullRequest struct {
-				ID             int64  `json:"id"`
-				Number         int    `json:"number"`
-				Title          string `json:"title"`
-				State          string `json:"state"`
-				Draft          bool   `json:"draft"`
-				Merged         bool   `json:"merged"`
-				HTMLURL        string `json:"html_url"`
-				MergeableState string `json:"mergeable_state"`
+				ID             int64     `json:"id"`
+				Number         int       `json:"number"`
+				Title          string    `json:"title"`
+				State          string    `json:"state"`
+				Draft          bool      `json:"draft"`
+				Merged         bool      `json:"merged"`
+				HTMLURL        string    `json:"html_url"`
+				MergeableState string    `json:"mergeable_state"`
+				UpdatedAt      time.Time `json:"updated_at"`
 				User           struct {
 					Login string `json:"login"`
 				} `json:"user"`
@@ -519,6 +520,7 @@ func (h *Handler) GitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			MergeableState: raw.PullRequest.MergeableState,
 			SenderLogin:    raw.Sender.Login,
 			Merged:         raw.PullRequest.Merged,
+			UpdatedAt:      raw.PullRequest.UpdatedAt,
 		}); err != nil {
 			writeDomainError(w, err)
 			return
@@ -576,6 +578,8 @@ func statusAndCode(err error) (int, string) {
 		status, code = http.StatusUnprocessableEntity, "own_pull_request"
 	case errors.Is(err, entity.ErrOutcomeUnknown):
 		status, code = http.StatusBadGateway, "outcome_unknown"
+	case errors.Is(err, entity.ErrGitHubUnavailable):
+		status, code = http.StatusBadGateway, "github_unavailable"
 	case errors.Is(err, entity.ErrNotAnalysable):
 		status, code = http.StatusUnprocessableEntity, "not_analysable"
 	case errors.Is(err, entity.ErrForbidden):

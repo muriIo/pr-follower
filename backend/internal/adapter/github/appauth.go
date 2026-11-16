@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,7 +69,7 @@ type AppAuth struct {
 // NewAppAuth validates the credentials. Errors never echo key material.
 func NewAppAuth(cfg AppAuthConfig) (*AppAuth, error) {
 	if strings.TrimSpace(cfg.AppID) == "" {
-		return nil, errors.New("github app id is required")
+		return nil, fmt.Errorf("%w: github app id is required", entity.ErrInvalidInput)
 	}
 	key, err := parsePrivateKey(cfg.PrivateKeyPEM)
 	if err != nil {
@@ -99,18 +98,18 @@ func parsePrivateKey(raw string) (*rsa.PrivateKey, error) {
 	text := strings.ReplaceAll(strings.TrimSpace(raw), `\n`, "\n")
 	block, _ := pem.Decode([]byte(text))
 	if block == nil {
-		return nil, errors.New("github app private key is not PEM encoded")
+		return nil, fmt.Errorf("%w: github app private key is not PEM encoded", entity.ErrInvalidInput)
 	}
 	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
 		return key, nil
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, errors.New("github app private key is neither PKCS#1 nor PKCS#8")
+		return nil, fmt.Errorf("%w: github app private key is neither PKCS#1 nor PKCS#8", entity.ErrInvalidInput)
 	}
 	key, ok := parsed.(*rsa.PrivateKey)
 	if !ok {
-		return nil, errors.New("github app private key is not an RSA key")
+		return nil, fmt.Errorf("%w: github app private key is not an RSA key", entity.ErrInvalidInput)
 	}
 	return key, nil
 }
@@ -161,7 +160,7 @@ func (a *AppAuth) exchange(ctx context.Context, installationID int64) (string, e
 		req.Header.Set("Authorization", "Bearer "+jwt)
 		resp, err := a.client.Do(req)
 		if err != nil {
-			return cachedToken{}, err
+			return cachedToken{}, noAnswer(reqCtx, err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized {
@@ -175,7 +174,7 @@ func (a *AppAuth) exchange(ctx context.Context, installationID int64) (string, e
 			ExpiresAt time.Time `json:"expires_at"`
 		}
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil || body.Token == "" {
-			return cachedToken{}, resilience.Permanent(errors.New("github returned an unreadable installation token"))
+			return cachedToken{}, resilience.Permanent(fmt.Errorf("%w: github returned an unreadable installation token", entity.ErrGitHubUnavailable))
 		}
 		return cachedToken{token: body.Token, expires: body.ExpiresAt}, nil
 	})

@@ -11,6 +11,27 @@ import (
 	"time"
 )
 
+const advancePullRequestGitHubVersion = `-- name: AdvancePullRequestGitHubVersion :execrows
+INSERT INTO pull_request_github_versions (pull_request_id, github_updated_at)
+VALUES ($1, $2)
+ON CONFLICT (pull_request_id) DO UPDATE SET github_updated_at = EXCLUDED.github_updated_at
+WHERE pull_request_github_versions.github_updated_at <= EXCLUDED.github_updated_at
+`
+
+type AdvancePullRequestGitHubVersionParams struct {
+	PullRequestID   int64 `json:"pull_request_id"`
+	GithubUpdatedAt int64 `json:"github_updated_at"`
+}
+
+// Moves a PR's GitHub version forward only: no row is written when the stored one is newer.
+func (q *Queries) AdvancePullRequestGitHubVersion(ctx context.Context, arg AdvancePullRequestGitHubVersionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, advancePullRequestGitHubVersion, arg.PullRequestID, arg.GithubUpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const claimSyncJob = `-- name: ClaimSyncJob :one
 INSERT INTO sync_jobs (
     user_id, run_id, state, progress_total, progress_done, progress_current,
@@ -96,6 +117,20 @@ DELETE FROM activity_events WHERE occurred_at < $1
 
 func (q *Queries) DeleteActivityEventsBefore(ctx context.Context, occurredAt time.Time) (int64, error) {
 	result, err := q.db.ExecContext(ctx, deleteActivityEventsBefore, occurredAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :execrows
+DELETE FROM sessions
+WHERE expires_at <= $1
+`
+
+// A session expires at expires_at (Unix seconds), like entity.Session.IsExpired.
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteExpiredSessions, expiresAt)
 	if err != nil {
 		return 0, err
 	}

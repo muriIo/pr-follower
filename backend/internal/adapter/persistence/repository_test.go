@@ -297,6 +297,16 @@ func TestSessionRepository_Lifecycle(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
+	if err := sessions.Create(ctx, &entity.Session{TokenHash: "hash-old", UserID: user.ID, ExpiresAt: expires.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := sessions.DeleteExpired(ctx, expires.Add(-time.Minute)); err != nil || n != 1 {
+		t.Fatalf("DeleteExpired() = %d, %v; want the one expired session", n, err)
+	}
+	if _, err := sessions.GetByTokenHash(ctx, "hash-old"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("expired session still there: %v", err)
+	}
+
 	if err := sessions.Delete(ctx, "hash-1"); err != nil {
 		t.Fatalf("Delete() error: %v", err)
 	}
@@ -796,5 +806,45 @@ func TestPullRequestRepository_AnalysisFailuresArePerCommitAndConverge(t *testin
 	}
 	if _, err := prs.GetAnalysisFailure(ctx, pr.ID, "sha-2"); !errors.Is(err, entity.ErrNotFound) {
 		t.Fatalf("a new commit has no failure: %v", err)
+	}
+}
+
+// ADR-0011: a PR's GitHub version (pull_request.updated_at) only moves forward, so a webhook that
+// arrives late is recognised as older; the same version again is accepted (redelivery, same second).
+func TestPullRequestRepository_GitHubVersionOnlyMovesForward(t *testing.T) {
+	t.Parallel()
+	for name, db := range syncJobDatabases(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repos := persistence.NewRepositoryRepository(db)
+			prs := persistence.NewPullRequestRepository(db)
+			ghID := testUserID(t, 3)
+			repo := &entity.Repository{GitHubRepoID: int64(ghID), Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+			if err := repos.Upsert(ctx, repo); err != nil {
+				t.Fatal(err)
+			}
+			pr := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: int64(ghID), Number: 7, State: entity.PRStateOpen,
+				MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "sha-7", BaseRef: "main"}
+			if err := prs.Upsert(ctx, pr); err != nil {
+				t.Fatal(err)
+			}
+			t0 := time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)
+
+			for _, step := range []struct {
+				at   time.Time
+				want bool
+			}{
+				{t0, true},                      // first version
+				{t0.Add(2 * time.Minute), true}, // newer
+				{t0.Add(time.Minute), false},    // arrived late: older than what is stored
+				{t0.Add(2 * time.Minute), true}, // the same version again
+				{t0.Add(-time.Hour), false},     // much older
+			} {
+				ok, err := prs.AdvancePullRequestVersion(ctx, pr.ID, step.at)
+				if err != nil || ok != step.want {
+					t.Fatalf("AdvancePullRequestVersion(%s) = %v, %v; want %v", step.at.Format(time.TimeOnly), ok, err, step.want)
+				}
+			}
+		})
 	}
 }

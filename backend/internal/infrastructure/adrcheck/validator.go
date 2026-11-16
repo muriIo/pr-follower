@@ -44,6 +44,7 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0010GitHubOnlyIdentity(repoRoot, report)
 	validateADR0011IdempotentIntegrations(repoRoot, report)
 	validateADR0012ReplicaSharedState(repoRoot, report)
+	validateADR0013AcknowledgedGitHubFailures(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",
@@ -876,4 +877,146 @@ func relPath(root, target string) string {
 		return target
 	}
 	return rel
+}
+
+// validateADR0013AcknowledgedGitHubFailures checks that every GitHub failure reaches the user with a
+// name: the GitHub adapter wraps a domain error kind in each error it builds, every code the API
+// sends is one the SPA knows and translates in both locales, and the SPA's HTTP gateways never
+// throw an error without a code.
+func validateADR0013AcknowledgedGitHubFailures(repoRoot string, report *ValidationReport) {
+	validateADR0013GitHubAdapterErrors(repoRoot, report)
+	validateADR0013ErrorCodes(repoRoot, report)
+	validateADR0013FrontendGateways(repoRoot, report)
+}
+
+func validateADR0013GitHubAdapterErrors(repoRoot string, report *ValidationReport) {
+	dir := filepath.Join(repoRoot, "backend", "internal", "adapter", "github")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		fset := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			continue
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			unclassified := isSelector(call.Fun, "errors", "New")
+			if isSelector(call.Fun, "fmt", "Errorf") && len(call.Args) > 0 {
+				format, isLit := call.Args[0].(*ast.BasicLit)
+				unclassified = isLit && !strings.Contains(format.Value, "%w")
+			}
+			if unclassified {
+				report.Violations = append(report.Violations, fmt.Sprintf(
+					"ADR-0013: %s:%d builds a GitHub error without a domain kind; wrap an entity.Err* with %%w",
+					relPath(repoRoot, path), fset.Position(call.Pos()).Line))
+			}
+			return true
+		})
+	}
+}
+
+var (
+	apiCodeAssignment = regexp.MustCompile(`code\s*=\s*[^"\n]*"([a-z_]+)"`)
+	apiCodeLiteral    = regexp.MustCompile(`"code"\s*:\s*"([a-z_]+)"`)
+	knownCodesList    = regexp.MustCompile(`(?s)KNOWN_CODES[^=]*=\s*\[(.*?)\]`)
+	quotedCode        = regexp.MustCompile(`'([a-z_]+)'`)
+)
+
+func validateADR0013ErrorCodes(repoRoot string, report *ValidationReport) {
+	modelsPath := filepath.Join(repoRoot, "frontend", "src", "app", "domain", "models", "action-error.models.ts")
+	models, err := os.ReadFile(modelsPath)
+	if err != nil {
+		return
+	}
+	known := map[string]bool{}
+	var knownOrder []string
+	if m := knownCodesList.FindSubmatch(models); m != nil {
+		for _, q := range quotedCode.FindAllSubmatch(m[1], -1) {
+			known[string(q[1])] = true
+			knownOrder = append(knownOrder, string(q[1]))
+		}
+	}
+
+	sent := map[string]bool{}
+	handlerDir := filepath.Join(repoRoot, "backend", "internal", "adapter", "http")
+	_ = filepath.WalkDir(handlerDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil
+		}
+		for _, re := range []*regexp.Regexp{apiCodeAssignment, apiCodeLiteral} {
+			for _, m := range re.FindAllSubmatch(src, -1) {
+				sent[string(m[1])] = true
+			}
+		}
+		return nil
+	})
+	sentCodes := make([]string, 0, len(sent))
+	for code := range sent {
+		sentCodes = append(sentCodes, code)
+	}
+	sort.Strings(sentCodes)
+	for _, code := range sentCodes {
+		if !known[code] {
+			report.Violations = append(report.Violations, fmt.Sprintf(
+				"ADR-0013: the API sends code %q but the SPA does not know it; add it to KNOWN_CODES in %s",
+				code, relPath(repoRoot, modelsPath)))
+		}
+	}
+
+	for _, locale := range []string{"pt-BR.json", "en-US.json"} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, "frontend", "public", "i18n", locale))
+		if err != nil {
+			continue
+		}
+		var dict map[string]any
+		if json.Unmarshal(raw, &dict) != nil {
+			continue
+		}
+		for _, code := range knownOrder {
+			if _, ok := dict["actions.error."+code]; !ok {
+				report.Violations = append(report.Violations, fmt.Sprintf(
+					"ADR-0013: code %q has no %q in %s", code, "actions.error."+code, locale))
+			}
+		}
+	}
+}
+
+var plainErrorThrow = regexp.MustCompile(`throw\s+new\s+Error\s*\(`)
+
+func validateADR0013FrontendGateways(repoRoot string, report *ValidationReport) {
+	dir := filepath.Join(repoRoot, "frontend", "src", "app", "infrastructure", "http")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".ts") || strings.HasSuffix(name, ".spec.ts") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		if plainErrorThrow.Match(src) {
+			report.Violations = append(report.Violations, fmt.Sprintf(
+				"ADR-0013: %s throws a plain Error; throw an ActionError with the server's code", relPath(repoRoot, path)))
+		}
+	}
 }

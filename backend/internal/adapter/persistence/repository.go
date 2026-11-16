@@ -181,6 +181,14 @@ func (r *SessionRepository) Delete(ctx context.Context, tokenHash string) error 
 	return r.q.DeleteSession(ctx, tokenHash)
 }
 
+// DeleteExpired removes every session expired at now (port.SessionRepository).
+func (r *SessionRepository) DeleteExpired(ctx context.Context, now time.Time) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, context.Cause(ctx)
+	}
+	return r.q.DeleteExpiredSessions(ctx, now.Unix())
+}
+
 type RepositoryRepository struct {
 	q *sqlcgen.Queries
 }
@@ -441,6 +449,22 @@ func (r *PullRequestRepository) GetByRepoAndNumber(ctx context.Context, repoID u
 		return nil, err
 	}
 	return toDomainPR(row), nil
+}
+
+// AdvancePullRequestVersion records GitHub's updated_at for the PR unless a newer one is stored
+// (port.PullRequestVersionStore): one conditional upsert, so concurrent deliveries cannot race.
+func (r *PullRequestRepository) AdvancePullRequestVersion(ctx context.Context, prID uint64, updatedAt time.Time) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, context.Cause(ctx)
+	}
+	rows, err := r.q.AdvancePullRequestGitHubVersion(ctx, sqlcgen.AdvancePullRequestGitHubVersionParams{
+		PullRequestID:   int64(prID),
+		GithubUpdatedAt: updatedAt.Unix(),
+	})
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // HeadSHA returns the stored head commit of a PR, if PR Follower has seen it.

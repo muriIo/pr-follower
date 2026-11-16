@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -125,6 +126,25 @@ func (f *fakeSessions) GetByTokenHash(_ context.Context, h string) (*entity.Sess
 		return nil, entity.ErrNotFound
 	}
 	return &s, nil
+}
+
+func (f *fakeSessions) DeleteExpired(_ context.Context, now time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for h, s := range f.byID {
+		if s.IsExpired(now) {
+			delete(f.byID, h)
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeSessions) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.byID)
 }
 
 func (f *fakeSessions) Delete(_ context.Context, h string) error {
@@ -363,6 +383,14 @@ func TestAccessToken_RequiresReloginWhenRefreshImpossible(t *testing.T) {
 		t.Fatalf("expected the user's GitHub access to be reported as gone on refresh failure, got %v", err)
 	}
 
+	h3 := newHarness(t)
+	res3, _ := h3.uc.CompleteLogin(ctx, "c", "v")
+	*h3.clock = now.Add(9 * time.Hour)
+	h3.oauth.refreshErr = fmt.Errorf("%w: github token endpoint returned 502", entity.ErrGitHubUnavailable)
+	if _, err := h3.uc.AccessToken(ctx, res3.User.ID); !errors.Is(err, entity.ErrGitHubUnavailable) || errors.Is(err, entity.ErrUnauthorized) {
+		t.Fatalf("GitHub down during a refresh must not sign the user out, got %v", err)
+	}
+
 	if _, err := h2.uc.AccessToken(ctx, 9999); !errors.Is(err, entity.ErrNotFound) {
 		t.Fatalf("unknown user: expected ErrNotFound, got %v", err)
 	}
@@ -545,5 +573,56 @@ func TestUseCase_CancellationDuringGitHubCalls(t *testing.T) {
 	uc2 := auth.NewUseCase(auth.Deps{OAuth: oauth2, Users: users, Sessions: newFakeSessions(), Now: func() time.Time { return clock }})
 	if _, err := uc2.AccessToken(ctx2, res.User.ID); !errors.Is(err, context.Canceled) {
 		t.Fatalf("refresh canceled: expected context.Canceled, got %v", err)
+	}
+}
+
+// Expired sessions used to be deleted only when their cookie came back; nobody's ever does after
+// they stop using the app, so they are purged on a timer.
+func TestPurgeExpiredSessions_RemovesOnlyExpiredOnes(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ctx := context.Background()
+	_ = h.sessions.Create(ctx, &entity.Session{TokenHash: "old", UserID: 1, ExpiresAt: now.Add(-time.Minute)})
+	_ = h.sessions.Create(ctx, &entity.Session{TokenHash: "live", UserID: 1, ExpiresAt: now.Add(time.Hour)})
+
+	n, err := h.uc.PurgeExpiredSessions(ctx)
+	if err != nil || n != 1 || h.sessions.count() != 1 {
+		t.Fatalf("PurgeExpiredSessions() = %d, %v; %d sessions left, want 1 removed and 1 left", n, err, h.sessions.count())
+	}
+	if _, err := h.sessions.GetByTokenHash(ctx, "live"); err != nil {
+		t.Fatalf("the live session must stay: %v", err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := h.uc.PurgeExpiredSessions(canceled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled: %v", err)
+	}
+}
+
+func TestPurgeExpiredSessionsEvery_RunsUntilStopped(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = h.sessions.Create(ctx, &entity.Session{TokenHash: "old", UserID: 1, ExpiresAt: now.Add(-time.Minute)})
+
+	done := make(chan struct{})
+	go func() {
+		h.uc.PurgeExpiredSessionsEvery(ctx, 5*time.Millisecond)
+		close(done)
+	}()
+	deadline := time.After(2 * time.Second)
+	for h.sessions.count() != 0 {
+		select {
+		case <-deadline:
+			t.Fatal("the expired session was never purged")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the purge loop did not stop with its context")
 	}
 }

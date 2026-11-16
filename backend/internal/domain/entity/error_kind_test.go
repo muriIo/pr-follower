@@ -21,6 +21,7 @@ func TestErrorKind_RoundTripKeepsWhatCallersCheck(t *testing.T) {
 		entity.ErrChecksRunning,
 		entity.ErrOutcomeUnknown,
 		entity.ErrSyncInterrupted,
+		fmt.Errorf("read acme/web: %w", entity.ErrGitHubUnavailable),
 		fmt.Errorf("analysis: %w", context.DeadlineExceeded),
 		&entity.RateLimitedError{ResetAt: reset},
 	} {
@@ -30,7 +31,7 @@ func TestErrorKind_RoundTripKeepsWhatCallersCheck(t *testing.T) {
 		for _, sentinel := range []error{
 			entity.ErrGitHubTokenExpired, entity.ErrUnauthorized, entity.ErrForbidden, entity.ErrNotFound,
 			entity.ErrConflict, entity.ErrChecksRunning, entity.ErrOutcomeUnknown, entity.ErrRateLimited,
-			entity.ErrSyncInterrupted, context.DeadlineExceeded,
+			entity.ErrSyncInterrupted, entity.ErrGitHubUnavailable, context.DeadlineExceeded,
 		} {
 			if errors.Is(original, sentinel) != errors.Is(restored, sentinel) {
 				t.Errorf("%q (kind %q): errors.Is(%q) = %v before, %v after", original, kind, sentinel,
