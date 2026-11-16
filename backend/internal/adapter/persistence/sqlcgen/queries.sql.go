@@ -170,6 +170,30 @@ func (q *Queries) FollowRepository(ctx context.Context, arg FollowRepositoryPara
 	return err
 }
 
+const getAnalysisFailure = `-- name: GetAnalysisFailure :one
+SELECT pull_request_id, head_sha, error_kind, message, failed_at
+FROM dependabot_analysis_failures
+WHERE pull_request_id = $1 AND head_sha = $2
+`
+
+type GetAnalysisFailureParams struct {
+	PullRequestID int64  `json:"pull_request_id"`
+	HeadSha       string `json:"head_sha"`
+}
+
+func (q *Queries) GetAnalysisFailure(ctx context.Context, arg GetAnalysisFailureParams) (DependabotAnalysisFailure, error) {
+	row := q.db.QueryRowContext(ctx, getAnalysisFailure, arg.PullRequestID, arg.HeadSha)
+	var i DependabotAnalysisFailure
+	err := row.Scan(
+		&i.PullRequestID,
+		&i.HeadSha,
+		&i.ErrorKind,
+		&i.Message,
+		&i.FailedAt,
+	)
+	return i, err
+}
+
 const getCheckRun = `-- name: GetCheckRun :one
 SELECT check_run_id, repository_id, head_sha, name, status, conclusion, title, details_url
 FROM pr_check_runs
@@ -1055,6 +1079,34 @@ type UpdateRepositoryAccessParams struct {
 
 func (q *Queries) UpdateRepositoryAccess(ctx context.Context, arg UpdateRepositoryAccessParams) error {
 	_, err := q.db.ExecContext(ctx, updateRepositoryAccess, arg.ID, arg.InstallationID, arg.Access)
+	return err
+}
+
+const upsertAnalysisFailure = `-- name: UpsertAnalysisFailure :exec
+INSERT INTO dependabot_analysis_failures (pull_request_id, head_sha, error_kind, message, failed_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (pull_request_id, head_sha) DO UPDATE SET
+    error_kind = EXCLUDED.error_kind,
+    message = EXCLUDED.message,
+    failed_at = EXCLUDED.failed_at
+`
+
+type UpsertAnalysisFailureParams struct {
+	PullRequestID int64     `json:"pull_request_id"`
+	HeadSha       string    `json:"head_sha"`
+	ErrorKind     string    `json:"error_kind"`
+	Message       string    `json:"message"`
+	FailedAt      time.Time `json:"failed_at"`
+}
+
+func (q *Queries) UpsertAnalysisFailure(ctx context.Context, arg UpsertAnalysisFailureParams) error {
+	_, err := q.db.ExecContext(ctx, upsertAnalysisFailure,
+		arg.PullRequestID,
+		arg.HeadSha,
+		arg.ErrorKind,
+		arg.Message,
+		arg.FailedAt,
+	)
 	return err
 }
 

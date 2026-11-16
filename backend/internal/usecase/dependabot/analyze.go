@@ -2,7 +2,9 @@ package dependabot
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"path"
 	"regexp"
 	"time"
@@ -24,7 +26,20 @@ type AnalyzeUseCase struct {
 	// inflight makes concurrent requests for the same commit (a webhook, an import and a click)
 	// share one analysis: one tarball scan, one stored result, one event.
 	inflight flightGroup[*entity.DependabotAnalysis]
+	// failures (optional) remembers why an analysis failed, so the Radar can say so.
+	failures port.AnalysisFailureStore
 }
+
+// AnalyzeOption adjusts an AnalyzeUseCase.
+type AnalyzeOption func(*AnalyzeUseCase)
+
+// WithFailureLog records every failed analysis (not a cancelled one) in store.
+func WithFailureLog(store port.AnalysisFailureStore) AnalyzeOption {
+	return func(uc *AnalyzeUseCase) { uc.failures = store }
+}
+
+// recordTimeout bounds recording a failure, which happens even when the analysis ran out of time.
+const recordTimeout = 5 * time.Second
 
 func NewAnalyzeUseCase(
 	prRepo port.PullRequestRepository,
@@ -33,8 +48,9 @@ func NewAnalyzeUseCase(
 	analyzers []port.DependencyAnalyzer,
 	scanner port.BlastRadiusScanner,
 	pub port.EventPublisher,
+	opts ...AnalyzeOption,
 ) *AnalyzeUseCase {
-	return &AnalyzeUseCase{
+	uc := &AnalyzeUseCase{
 		prRepo:    prRepo,
 		repoRepo:  repoRepo,
 		ghGateway: ghGateway,
@@ -42,6 +58,10 @@ func NewAnalyzeUseCase(
 		scanner:   scanner,
 		pub:       pub,
 	}
+	for _, opt := range opts {
+		opt(uc)
+	}
+	return uc
 }
 
 // AnalyzePRForUser analyses a PR on behalf of a signed-in user. The analysis reads GitHub as the
@@ -90,8 +110,29 @@ func (uc *AnalyzeUseCase) AnalyzePR(ctx context.Context, prID uint64) (*entity.D
 	}
 
 	return uc.inflight.do(ctx, fmt.Sprintf("analysis:%d:%s", pr.ID, pr.HeadSHA), func(callCtx context.Context) (*entity.DependabotAnalysis, error) {
-		return uc.analyze(callCtx, pr)
+		analysis, err := uc.analyze(callCtx, pr)
+		if err != nil {
+			uc.recordFailure(callCtx, pr, err)
+		}
+		return analysis, err
 	})
+}
+
+// recordFailure remembers why the commit's analysis failed. A cancel (the user's, or the server
+// stopping) is not a failure: the next webhook, sync or click runs it again.
+func (uc *AnalyzeUseCase) recordFailure(ctx context.Context, pr *entity.PullRequest, err error) {
+	if uc.failures == nil || errors.Is(err, context.Canceled) || errors.Is(err, entity.ErrOperationCanceled) {
+		return
+	}
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	failure := entity.AnalysisFailure{
+		PullRequestID: pr.ID, HeadSHA: pr.HeadSHA,
+		ErrorKind: entity.ErrorKindOf(err), Message: err.Error(), FailedAt: time.Now().UTC(),
+	}
+	if recordErr := uc.failures.RecordAnalysisFailure(recordCtx, failure); recordErr != nil {
+		slog.Warn("could not record a failed dependabot analysis", "pr_id", pr.ID, "err", recordErr)
+	}
 }
 
 func (uc *AnalyzeUseCase) analyze(ctx context.Context, pr *entity.PullRequest) (*entity.DependabotAnalysis, error) {

@@ -22,6 +22,8 @@ type InboxItem struct {
 type DependabotItem struct {
 	PullRequest entity.PullRequest         `json:"pull_request"`
 	Analysis    *entity.DependabotAnalysis `json:"analysis,omitempty"`
+	// AnalysisFailure is why the head commit's analysis failed; absent once it is analysed.
+	AnalysisFailure *entity.AnalysisFailure `json:"analysis_failure,omitempty"`
 	// ApprovedByMe: the reader has a standing approval of the head commit (from the review GitHub
 	// recorded, so a new commit makes it stale). ApprovedByLogin: a teammate who approved the head.
 	ApprovedByMe    bool   `json:"approved_by_me"`
@@ -62,10 +64,16 @@ type UseCase struct {
 	syncer   port.ChangedFilesSyncer
 	reviews  port.ReviewStore
 	checks   port.CheckRunBatchReader
+	failures port.AnalysisFailureStore
 }
 
 // Option adds an optional collaborator to the use case.
 type Option func(*UseCase)
+
+// WithAnalysisFailures lets the snapshot say why a Dependabot PR's analysis failed.
+func WithAnalysisFailures(store port.AnalysisFailureStore) Option {
+	return func(uc *UseCase) { uc.failures = store }
+}
 
 // WithCheckRuns lets the snapshot carry each PR's checks.
 func WithCheckRuns(reader port.CheckRunBatchReader) Option {
@@ -178,10 +186,15 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 				seat.DependabotPRCount++
 			}
 			analysis, _ := uc.prRepo.GetAnalysisByPRAndSHA(ctx, pr.ID, pr.HeadSHA)
+			var failure *entity.AnalysisFailure
+			if analysis == nil && uc.failures != nil {
+				failure, _ = uc.failures.GetAnalysisFailure(ctx, pr.ID, pr.HeadSHA)
+			}
 			facts := service.DeriveReviewFacts(reviewsByPR[pr.ID], pr, reader.Login)
 			snapshot.DependabotPRs = append(snapshot.DependabotPRs, DependabotItem{
 				PullRequest:     pr,
 				Analysis:        analysis,
+				AnalysisFailure: failure,
 				ApprovedByMe:    facts.ApprovedByMeSHA != "" && facts.ApprovedByMeSHA == pr.HeadSHA,
 				ApprovedByLogin: facts.TeammateApprovedBy,
 			})

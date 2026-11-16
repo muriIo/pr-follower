@@ -220,6 +220,14 @@ type ActivitySignal interface {
 	Listen(ctx context.Context) <-chan struct{}
 }
 
+// AnalysisFailureStore keeps why the latest analysis of a Dependabot PR's commit failed (one row per
+// PR and commit, replaced by a newer failure of the same commit).
+type AnalysisFailureStore interface {
+	RecordAnalysisFailure(ctx context.Context, failure entity.AnalysisFailure) error
+	// GetAnalysisFailure is entity.ErrNotFound when the commit's analysis never failed.
+	GetAnalysisFailure(ctx context.Context, prID uint64, headSHA string) (*entity.AnalysisFailure, error)
+}
+
 // SyncJobStore keeps each user's latest sync where every API replica sees it (one row per user).
 type SyncJobStore interface {
 	// ClaimSyncJob starts run runID for the user, unless a run is going whose heartbeat is not older

@@ -92,6 +92,7 @@ func main() {
 			[]port.DependencyAnalyzer{nodejs.NewAnalyzer()},
 			blastradius.NewScanner(),
 			sseHub,
+			dependabot.WithFailureLog(prRepo), // the Radar says why an analysis failed
 		)
 		runner := dependabot.NewRunner(analyzeUC, dependabot.RunnerConfig{})
 		go runner.Run(ctx) // stops with the server
@@ -140,7 +141,7 @@ func main() {
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triage.WithCheckRuns(prRepo))
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triage.WithCheckRuns(prRepo), triage.WithAnalysisFailures(prRepo))
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer, ingestOpts...)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 

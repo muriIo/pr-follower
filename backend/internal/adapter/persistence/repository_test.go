@@ -759,3 +759,42 @@ func TestPullRequestRepository_CommitStatusesAreListedAmongTheChecks(t *testing.
 		t.Error("GetCommitStatus: expected cancellation error")
 	}
 }
+
+func TestPullRequestRepository_AnalysisFailuresArePerCommitAndConverge(t *testing.T) {
+	t.Parallel()
+	db := openInMemoryTestDB(t)
+	ctx := context.Background()
+	repos := persistence.NewRepositoryRepository(db)
+	prs := persistence.NewPullRequestRepository(db)
+	repo := &entity.Repository{GitHubRepoID: 900, Owner: "acme", Name: "web", FullName: "acme/web", DefaultBranch: "main"}
+	_ = repos.Upsert(ctx, repo)
+	pr := &entity.PullRequest{RepositoryID: repo.ID, RepositoryName: "acme/web", GitHubPRID: 1, Number: 7, State: entity.PRStateOpen,
+		IsDependabot: true, MergeableState: entity.MergeableStateUnknown, CIStatus: entity.CIStatusNone, HeadSHA: "sha-1", BaseRef: "main"}
+	if err := prs.Upsert(ctx, pr); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := prs.GetAnalysisFailure(ctx, pr.ID, "sha-1"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("no failure yet: %v, want ErrNotFound", err)
+	}
+	first := time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)
+	failure := entity.AnalysisFailure{PullRequestID: pr.ID, HeadSHA: "sha-1", ErrorKind: "forbidden", Message: "forbidden by github", FailedAt: first}
+	for range 2 { // a retry that fails the same way converges
+		if err := prs.RecordAnalysisFailure(ctx, failure); err != nil {
+			t.Fatalf("RecordAnalysisFailure() error: %v", err)
+		}
+	}
+	later := failure
+	later.ErrorKind, later.Message, later.FailedAt = "timeout", "context deadline exceeded", first.Add(time.Minute)
+	if err := prs.RecordAnalysisFailure(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := prs.GetAnalysisFailure(ctx, pr.ID, "sha-1")
+	if err != nil || got.ErrorKind != "timeout" || got.Message != "context deadline exceeded" || !got.FailedAt.Equal(later.FailedAt) {
+		t.Fatalf("the latest failure of the commit = %+v, %v", got, err)
+	}
+	if _, err := prs.GetAnalysisFailure(ctx, pr.ID, "sha-2"); !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("a new commit has no failure: %v", err)
+	}
+}

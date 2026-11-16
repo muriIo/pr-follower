@@ -1001,3 +1001,35 @@ FROM pr_commit_statuses WHERE repository_id IN (%s) AND head_sha IN (%s) ORDER B
 	}
 	return out, statusRows.Err()
 }
+
+var _ port.AnalysisFailureStore = (*PullRequestRepository)(nil)
+
+func (r *PullRequestRepository) RecordAnalysisFailure(ctx context.Context, f entity.AnalysisFailure) error {
+	if err := ctx.Err(); err != nil {
+		return context.Cause(ctx)
+	}
+	return r.q.UpsertAnalysisFailure(ctx, sqlcgen.UpsertAnalysisFailureParams{
+		PullRequestID: int64(f.PullRequestID),
+		HeadSha:       f.HeadSHA,
+		ErrorKind:     f.ErrorKind,
+		Message:       f.Message,
+		FailedAt:      f.FailedAt.UTC(),
+	})
+}
+
+func (r *PullRequestRepository) GetAnalysisFailure(ctx context.Context, prID uint64, headSHA string) (*entity.AnalysisFailure, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, context.Cause(ctx)
+	}
+	row, err := r.q.GetAnalysisFailure(ctx, sqlcgen.GetAnalysisFailureParams{PullRequestID: int64(prID), HeadSha: headSHA})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, entity.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &entity.AnalysisFailure{
+		PullRequestID: uint64(row.PullRequestID), HeadSHA: row.HeadSha, ErrorKind: row.ErrorKind,
+		Message: row.Message, FailedAt: row.FailedAt.UTC(),
+	}, nil
+}
