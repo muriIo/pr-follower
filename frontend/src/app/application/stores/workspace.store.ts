@@ -435,9 +435,14 @@ export class WorkspaceStore {
     disconnect?.();
   }
 
+  /** Numbers each workspace request, so an older answer never replaces a newer one. */
+  private workspaceRequestSeq = 0;
+
   async loadWorkspace(options?: ActionRequestOptions): Promise<void> {
+    const request = ++this.workspaceRequestSeq;
     const dataset = await this.prGateway?.fetchWorkspace?.(options);
-    if (!dataset) {
+    // Reloads overlap (a sync's own reload and a live event's): the newest request wins.
+    if (!dataset || request !== this.workspaceRequestSeq) {
       return;
     }
     const selected = this.selectedPrId();

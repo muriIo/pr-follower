@@ -325,6 +325,35 @@ describe('WorkspaceStore live stream recovery', () => {
     setState!('conectado');
     expect(fetchWorkspace).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps the newest workspace when an older reload answers last', async () => {
+    const { prGateway, sseGateway } = createFakeGateways();
+    const all = createInitialPrDataset();
+    const older = { repos: [], prs: all, events: [] };
+    const newer = { repos: [], prs: all.slice(0, 1), events: [] };
+    const answers: ((value: typeof older) => void)[] = [];
+    prGateway.fetchWorkspace = () => new Promise((resolve) => answers.push(resolve));
+
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+
+    // A sync's reload, then a live event's reload; the server answers the second one first.
+    const first = store.loadWorkspace();
+    const second = store.loadWorkspace();
+    answers[1](newer);
+    await second;
+    answers[0](older);
+    await first;
+
+    expect(store.prs()).toEqual(newer.prs);
+  });
 });
 
 describe('WorkspaceStore truthful PR state', () => {
