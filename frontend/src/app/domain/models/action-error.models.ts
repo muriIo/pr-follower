@@ -9,6 +9,7 @@ export type ActionErrorCode =
   | 'github_token_expired'
   | 'checks_running'
   | 'rate_limited'
+  | 'sync_interrupted'
   | 'invalid_input'
   | 'unavailable'
   | 'not_analysable'
@@ -25,6 +26,7 @@ const KNOWN_CODES: readonly string[] = [
   'github_token_expired',
   'checks_running',
   'rate_limited',
+  'sync_interrupted',
   'invalid_input',
   'unavailable',
   'not_analysable',

@@ -122,7 +122,11 @@ func (h *Handler) StartSync(w http.ResponseWriter, r *http.Request) {
 	if !h.syncConfigured(w) {
 		return
 	}
-	status, started := h.deps.SyncJobs.Start(r.Context(), currentUserID(r))
+	status, started, err := h.deps.SyncJobs.Start(r.Context(), currentUserID(r))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": started, "status": syncStatusBody(status)})
 }
 
@@ -131,15 +135,25 @@ func (h *Handler) GetSync(w http.ResponseWriter, r *http.Request) {
 	if !h.syncConfigured(w) {
 		return
 	}
-	writeJSON(w, http.StatusOK, syncStatusBody(h.deps.SyncJobs.Status(r.Context(), currentUserID(r))))
+	status, err := h.deps.SyncJobs.Status(r.Context(), currentUserID(r))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, syncStatusBody(status))
 }
 
-// CancelSync stops the user's running sync.
+// CancelSync stops the user's running sync, whichever replica runs it.
 func (h *Handler) CancelSync(w http.ResponseWriter, r *http.Request) {
 	if !h.syncConfigured(w) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"canceled": h.deps.SyncJobs.Cancel(r.Context(), currentUserID(r))})
+	canceled, err := h.deps.SyncJobs.Cancel(r.Context(), currentUserID(r))
+	if err != nil {
+		writeDomainError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"canceled": canceled})
 }
 
 func syncStatusBody(st syncjob.Status) map[string]any {

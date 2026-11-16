@@ -17,6 +17,7 @@ This directory contains the **Architecture Decision Records (ADRs)** for **PR Fo
 | [ADR-0009](./0009-angular-v22-signals-and-mcp-architecture.md) | Angular v22 Standalone, Signals, and Angular CLI MCP Architecture | Accepted | `adrcheck` frontend layer & MCP check |
 | [ADR-0010](./0010-github-only-identity-and-installation-scoped-access.md) | GitHub-Only Identity and Installation-Scoped Repository Access | Accepted | `adrcheck` session-identity & no-password scan |
 | [ADR-0011](./0011-idempotent-integrations.md) | Idempotent Integrations | Accepted | `adrcheck` upsert, re-runnable schema, retry-class & redelivery-test scan |
+| [ADR-0012](./0012-shared-state-across-api-replicas.md) | Shared State Across API Replicas Lives in Postgres | Accepted | `adrcheck` scan for locked in-memory state without a `replica-local:` note |
 
 ## Required ADR Sections
 

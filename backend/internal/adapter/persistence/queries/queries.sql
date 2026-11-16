@@ -289,3 +289,58 @@ SELECT CAST(COALESCE(MAX(seq), 0) AS BIGINT) AS seq FROM activity_events;
 
 -- name: DeleteActivityEventsBefore :execrows
 DELETE FROM activity_events WHERE occurred_at < $1;
+
+-- name: ClaimSyncJob :one
+-- Starts a run unless one is going (running with a fresh heartbeat). No row back means not claimed.
+INSERT INTO sync_jobs (
+    user_id, run_id, state, progress_total, progress_done, progress_current,
+    result_json, error_json, cancel_requested, started_at, heartbeat_ms, finished_at
+) VALUES (
+    sqlc.arg(user_id), sqlc.arg(run_id), 'running', 0, 0, '', '', '', FALSE, sqlc.arg(started_at), sqlc.arg(heartbeat_ms), NULL
+)
+ON CONFLICT (user_id) DO UPDATE SET
+    run_id = EXCLUDED.run_id,
+    state = 'running',
+    progress_total = 0,
+    progress_done = 0,
+    progress_current = '',
+    result_json = '',
+    error_json = '',
+    cancel_requested = FALSE,
+    started_at = EXCLUDED.started_at,
+    heartbeat_ms = EXCLUDED.heartbeat_ms,
+    finished_at = NULL
+WHERE sync_jobs.state <> 'running' OR sync_jobs.heartbeat_ms < sqlc.arg(stale_before_ms)
+RETURNING run_id;
+
+-- name: GetSyncJob :one
+SELECT user_id, run_id, state, progress_total, progress_done, progress_current, result_json, error_json,
+       cancel_requested, started_at, heartbeat_ms, finished_at
+FROM sync_jobs
+WHERE user_id = $1;
+
+-- name: HeartbeatSyncJob :one
+UPDATE sync_jobs
+SET progress_total = sqlc.arg(progress_total),
+    progress_done = sqlc.arg(progress_done),
+    progress_current = sqlc.arg(progress_current),
+    heartbeat_ms = sqlc.arg(heartbeat_ms)
+WHERE user_id = sqlc.arg(user_id) AND run_id = sqlc.arg(run_id) AND state = 'running'
+RETURNING cancel_requested;
+
+-- name: FinishSyncJob :exec
+UPDATE sync_jobs
+SET state = sqlc.arg(state),
+    progress_total = sqlc.arg(progress_total),
+    progress_done = sqlc.arg(progress_done),
+    progress_current = sqlc.arg(progress_current),
+    result_json = sqlc.arg(result_json),
+    error_json = sqlc.arg(error_json),
+    heartbeat_ms = sqlc.arg(heartbeat_ms),
+    finished_at = sqlc.arg(finished_at)
+WHERE user_id = sqlc.arg(user_id) AND run_id = sqlc.arg(run_id);
+
+-- name: RequestSyncJobCancel :execrows
+UPDATE sync_jobs
+SET cancel_requested = TRUE
+WHERE user_id = sqlc.arg(user_id) AND state = 'running' AND heartbeat_ms >= sqlc.arg(stale_before_ms);

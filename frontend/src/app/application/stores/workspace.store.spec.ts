@@ -1262,6 +1262,13 @@ describe('WorkspaceStore "Sincronizar"', () => {
     expect(gateway.fetchWorkspace).not.toHaveBeenCalled();
   });
 
+  it('says a sync was interrupted when the server running it went away, so it can be run again', async () => {
+    const { store, t } = setup([status({ state: 'failed', error: { code: 'sync_interrupted' } })]);
+    await store.runSync();
+    expect(store.syncAction().note).toBe(t('actions.error.sync_interrupted'));
+    expect(t('actions.error.sync_interrupted')).not.toBe('actions.error.sync_interrupted');
+  });
+
   it('still reloads when the gateway cannot sync (nothing to ask GitHub)', async () => {
     const { store, gateway } = setup([], async () => null, false);
     await store.runSync();

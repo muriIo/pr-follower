@@ -249,6 +249,7 @@
   "actions.syncing.progress": "Sincronizando {done} de {total}: {current}...",
   "actions.synced.rateLimited": "O limite do GitHub foi atingido: {count} repositórios ficaram para depois. Tente de novo às {time}.",
   "actions.error.rate_limited": "O limite de requisições do GitHub foi atingido. Tente de novo às {time}.",
+  "actions.error.sync_interrupted": "A sincronização foi interrompida porque o servidor que a executava parou. Sincronize de novo.",
   "actions.syncCanceled": "Sincronização cancelada.",
   "actions.batch.approving": "Aprovando {current} de {total}...",
   "actions.batch.approveCanceledNone": "Lote cancelado. Nenhum PR foi aprovado.",

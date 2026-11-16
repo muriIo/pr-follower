@@ -35,6 +35,8 @@ type job struct {
 // Runner analyses Dependabot PRs in the background so a webhook is answered at once. It keeps one
 // pending job per PR, re-runs a PR that changed while it was being analysed, and stops with its
 // context (ADR-0007). Run it once, in its own goroutine.
+//
+// replica-local: the analyses queued and running on this replica; one lost with the replica is scheduled again by the next webhook, sync or click.
 type Runner struct {
 	analyzer port.PullRequestAnalyzer
 	cfg      RunnerConfig

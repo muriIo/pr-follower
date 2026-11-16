@@ -28,3 +28,29 @@ type SyncProgress struct {
 	Done    int
 	Current string
 }
+
+// SyncJobState is where a user's sync stands.
+type SyncJobState string
+
+const (
+	SyncJobIdle     SyncJobState = "idle" // the user never ran one
+	SyncJobRunning  SyncJobState = "running"
+	SyncJobDone     SyncJobState = "done"
+	SyncJobFailed   SyncJobState = "failed"
+	SyncJobCanceled SyncJobState = "canceled"
+)
+
+// SyncJob is a user's latest sync as every API replica sees it. RunID tells one run from the next,
+// so a run that lost its claim (its replica stalled and another started over) cannot overwrite it.
+type SyncJob struct {
+	UserID          uint64
+	RunID           string
+	State           SyncJobState
+	Progress        SyncProgress
+	Result          *SyncResult // set when done
+	Err             error       // set when failed
+	CancelRequested bool
+	StartedAt       time.Time
+	HeartbeatAt     time.Time // the running replica's latest sign of life
+	FinishedAt      time.Time
+}

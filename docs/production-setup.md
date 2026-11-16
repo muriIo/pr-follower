@@ -27,12 +27,12 @@ Work through the sections in order: each one uses what the previous ones produce
 
 Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks a deploy, but know them before users arrive:
 
-- [ ] **Verified against real GitHub.** Approve, merge and comment act with the user's token, and background reads use the app's installation token, but neither has run against a real repository yet. Run [`real-github-verification.md`](real-github-verification.md) with a dev app first.
-- **One API replica only** (§1, §13.10).
+- [x] **Verified against real GitHub** (2026-11-16, [`real-github-verification.md`](real-github-verification.md)); what is still unverified is listed in the roadmap.
+- **Several API replicas** are supported (§13.10, ADR-0012) but have not run as two processes behind one proxy yet.
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
 - **Failed Dependabot analyses are only logged**: the Radar keeps showing "Sem análise".
-- **No CI.** Nothing runs `make check` on PRs: run it before every build (§7).
+- **CI** runs `make check` on every PR and on `main`; still run it before a build from a local checkout (§7).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
@@ -58,11 +58,11 @@ The API also works in the background, in-process:
 | Work | Behaviour |
 |---|---|
 | Dependabot analysis | 2 workers, up to 256 queued, 2 minutes per PR. Only with the GitHub App credentials. |
-| Sync ("Sincronizar") | One background job per user, kept in memory. |
+| Sync ("Sincronizar") | One background job per user, kept in Postgres (`sync_jobs`) so any replica reports or cancels it. The replica running it records a heartbeat every second; a job silent for 15 s (its replica stopped) is reported as interrupted and can be run again. |
 | Activity (timeline, live stream) | Stored in Postgres. Replicas wake each other with `LISTEN/NOTIFY`, with a 5 s poll as a safety net. Events older than 7 days are pruned hourly. |
 | Installation tokens | Exchanged with the app's private key, cached, renewed 5 minutes before they expire (they last 1 hour). |
 
-**Run one API replica.** Activity is shared through Postgres, but the sync jobs and the operation-cancellation registry are still in one process's memory: with several replicas, a sync progress poll or a cancel that lands on another replica finds nothing. §13.10 lists what it takes to run more.
+**Any number of API replicas** can serve the same users: activity, sync jobs and cancel requests go through Postgres (ADR-0012). §13.10 lists what running more than one takes.
 
 ## 2. Generate the secrets
 
@@ -99,7 +99,7 @@ GitHub produces the rest in §5: the client secret and the app's private key.
 
    - `sslmode=require` encrypts the connection. `sslmode=verify-full&sslrootcert=/path/ca.pem` also checks the server's certificate (mount the provider's CA file into the API container).
    - Use a **direct** connection or a session-mode pooler. The API keeps one connection open for `LISTEN`, which a transaction-mode pooler (PgBouncer `pool_mode = transaction`) does not carry: live updates would then only arrive through the 5 s poll.
-   - Budget connections: up to `DB_MAX_OPEN_CONNS` (default 25), plus 1 for `LISTEN`, per API replica. Lower `DB_MAX_OPEN_CONNS` on small plans.
+   - Budget connections: up to `DB_MAX_OPEN_CONNS` (default 25), plus 2 for `LISTEN`, per API replica. Lower `DB_MAX_OPEN_CONNS` on small plans.
 4. Check it from a machine on that network:
 
    ```bash
@@ -552,12 +552,12 @@ Update `PUBLIC_URL`, `ALLOWED_ORIGIN` and the TLS proxy, and on the app the Home
 
 ### 13.10 Running more than one API replica
 
-Not supported yet (roadmap §10). Until the sync jobs and the operation-cancellation registry move to the database:
+Every request may land on any replica: no sticky sessions are needed. Activity, sync jobs (`sync_jobs`) and operation cancels (`NOTIFY` on `pr_follower_operation_cancel`) are shared through Postgres (ADR-0012).
 
-- Route each user's requests to one replica (sticky sessions on the `pf_session` cookie).
-- Use direct Postgres connections: replicas wake each other with `LISTEN/NOTIFY`.
+- Use direct Postgres connections: replicas wake each other with `LISTEN/NOTIFY` (a transaction-pooling proxy breaks it). Each replica holds two `LISTEN` connections (activity, cancels).
+- A deploy that stops a replica mid-sync reports that sync as interrupted ("Sincronize de novo"); nothing it already did is lost.
 - On upgrades, let one replica start (and migrate) before the others: migrations take no lock across processes.
-- Budget `DB_MAX_OPEN_CONNS` + 1 connections per replica.
+- Budget `DB_MAX_OPEN_CONNS` + 2 connections per replica.
 
 ## Troubleshooting
 

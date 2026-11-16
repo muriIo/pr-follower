@@ -52,6 +52,8 @@ type cachedToken struct {
 // AppAuth signs short-lived app JWTs and exchanges them for installation access tokens, which
 // act as the app on the repositories of one installation. It serves reads that have no user
 // behind them (webhooks, analysis). Tokens are cached per installation until near expiry.
+//
+// replica-local: a cache of installation tokens; another replica exchanges its own, at the cost of one request.
 type AppAuth struct {
 	appID   string
 	key     *rsa.PrivateKey
