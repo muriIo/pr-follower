@@ -136,8 +136,14 @@ func TestHub_StreamSendsHeartbeats(t *testing.T) {
 	hub.SetHeartbeat(5 * time.Millisecond)
 
 	body, _ := streamOnce(t, hub, allowAll, func() {})
-	if !strings.Contains(body, ": ping\n\n") {
-		t.Fatalf("expected heartbeat comments to keep proxies from closing the stream, got:\n%s", body)
+	// A comment would keep proxies from closing the stream, but EventSource never shows comments to
+	// the page: the heartbeat is a named event with data, so the client can tell a live stream from
+	// a silent, dead one (a proxy that kept the browser's side open after the API went away).
+	if !strings.Contains(body, "event: heartbeat\ndata: {}\n\n") {
+		t.Fatalf("expected heartbeat events the page can see, got:\n%s", body)
+	}
+	if strings.Contains(body, ": ping") {
+		t.Fatalf("expected no heartbeat comments any more, got:\n%s", body)
 	}
 }
 

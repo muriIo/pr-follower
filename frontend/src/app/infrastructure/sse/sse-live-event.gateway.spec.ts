@@ -148,6 +148,56 @@ describe('SseLiveEventGateway', () => {
     expect(FakeEventSource.last.closed).toBe(false);
   });
 
+  it('reconnects a stream that looks open but has gone silent (a proxy kept it open after the API died)', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(1); // take the full backoff window
+    const { states } = connect();
+    const first = FakeEventSource.last;
+    first.open();
+
+    vi.advanceTimersByTime(59_999);
+    expect(first.closed).toBe(false);
+    expect(states[states.length - 1]).toBe('conectado');
+
+    vi.advanceTimersByTime(1);
+    expect(first.closed).toBe(true);
+    expect(states[states.length - 1]).toBe('reconectando');
+
+    vi.advanceTimersByTime(1000);
+    expect(FakeEventSource.instances.length).toBe(2);
+    FakeEventSource.last.open();
+    expect(states[states.length - 1]).toBe('conectado'); // the store reloads the workspace on this
+  });
+
+  it('keeps a quiet stream open while heartbeats or activity arrive, without showing heartbeats', () => {
+    vi.useFakeTimers();
+    const { states, texts } = connect();
+    const es = FakeEventSource.last;
+    es.open();
+
+    for (let i = 0; i < 6; i++) {
+      vi.advanceTimersByTime(25_000);
+      es.emit('heartbeat', {});
+    }
+    vi.advanceTimersByTime(50_000);
+    es.emit('activity', activity('pr.opened', 'Opened #8'));
+    vi.advanceTimersByTime(50_000);
+
+    expect(FakeEventSource.instances.length).toBe(1);
+    expect(es.closed).toBe(false);
+    expect(states[states.length - 1]).toBe('conectado');
+    expect(texts).toEqual(['Opened #8']);
+  });
+
+  it('stops watching a stream once disconnected', () => {
+    vi.useFakeTimers();
+    const { disconnect } = connect();
+    FakeEventSource.last.open();
+    disconnect();
+    vi.advanceTimersByTime(120_000);
+    expect(FakeEventSource.instances.length).toBe(1);
+  });
+
   it('cancels a pending reconnect on disconnect', () => {
     vi.useFakeTimers();
     const { disconnect } = connect();

@@ -18,6 +18,7 @@ const (
 	// travels in the JSON payload. Browsers only deliver named events that have a listener,
 	// so per-type names silently dropped every type the SPA did not list.
 	streamEventName  = "activity"
+	heartbeatFrame   = "event: heartbeat\ndata: {}\n\n"
 	defaultHeartbeat = 25 * time.Second
 	reconnectHintMs  = 3000
 )
@@ -80,8 +81,10 @@ func NewInMemoryHub(ctx context.Context) *Hub {
 	return h
 }
 
-// SetHeartbeat sets how often an idle stream sends a comment so proxies and load balancers
-// keep the connection open.
+// SetHeartbeat sets how often an idle stream sends a heartbeat event. It keeps proxies and load
+// balancers from closing the connection, and lets the client tell a live stream from a dead one
+// (EventSource never shows the page a comment, so the heartbeat is an event). The SPA reconnects
+// a stream silent for 60s, so keep this well under that.
 func (h *Hub) SetHeartbeat(d time.Duration) {
 	if d > 0 {
 		h.heartbeat = d
@@ -270,7 +273,7 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
 		case <-ctx.Done():
 			return
 		case <-heartbeat.C:
-			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+			if _, err := fmt.Fprint(w, heartbeatFrame); err != nil {
 				return
 			}
 			_ = rc.Flush()

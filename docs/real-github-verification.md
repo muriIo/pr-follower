@@ -61,7 +61,7 @@ For 3.2 add a slow workflow to the default branch (a fork PR runs the base branc
 3. Cancel a sync midway: the panel stops and `GET /api/v1/sync` reports it cancelled.
 4. **Rate-limit headers:** `gh api rate_limit` shows what is left. Real exhaustion is slow to reach; instead confirm the headers the client reads with `curl -si -H "Authorization: Bearer $(gh auth token)" https://api.github.com/rate_limit | grep -i x-ratelimit`. `X-RateLimit-Remaining` and `X-RateLimit-Reset` must be present. Optional: lower the margin with many repositories until a sync answers `429 rate_limited` with `retry_at` and names the repositories left.
 
-Watch the header while the API is stopped: it should leave "Ao vivo (SSE)". If it does not, the stream is dead and the panel misses live events after the restart (roadmap §7); reload the page before judging what the panel shows.
+Watch the header while the API is stopped: within a minute it must leave "Ao vivo (SSE)" for "reconectando" (a silent stream is reopened after 60s), and after the restart come back and reload the workspace.
 
 ## 7. Recording the result
 

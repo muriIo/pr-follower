@@ -11,6 +11,14 @@ const SSE_EVENT_NAMES = ['activity', 'message'] as const;
 const RECONNECT_BACKOFF = { baseDelayMs: 1000, maxDelayMs: 30_000, maxAttempts: Number.POSITIVE_INFINITY };
 const EVENT_SOURCE_CLOSED = 2;
 
+/**
+ * The server sends a `heartbeat` event every 25s. A stream that looks open but has sent nothing
+ * for longer than this is dead (a proxy can keep the browser's side open after the API went away,
+ * and then no error ever comes): close it and reconnect, so the reload after reconnecting catches up.
+ */
+const SILENCE_LIMIT_MS = 60_000;
+const HEARTBEAT_EVENT_NAME = 'heartbeat';
+
 @Injectable({ providedIn: 'root' })
 export class SseLiveEventGateway implements LiveEventGateway {
   connect(
@@ -40,10 +48,46 @@ export class SseLiveEventGateway implements LiveEventGateway {
   ): () => void {
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
     let attempt = 0;
     let stopped = false;
 
+    const stopWatching = () => {
+      if (silenceTimer !== null) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+    };
+
+    const reconnectLater = () => {
+      const delay = computeFullJitterDelayMs(attempt, RECONNECT_BACKOFF);
+      attempt++;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        if (!stopped) {
+          open();
+        }
+      }, delay);
+    };
+
+    /** (Re)starts the silence countdown of an open stream: every frame proves it is alive. */
+    const watch = (es: EventSource) => {
+      stopWatching();
+      silenceTimer = setTimeout(() => {
+        silenceTimer = null;
+        if (stopped || source !== es) {
+          return;
+        }
+        es.close();
+        onStateChange('reconectando');
+        reconnectLater();
+      }, SILENCE_LIMIT_MS);
+    };
+
     const handleMessage = (msg: MessageEvent) => {
+      if (source) {
+        watch(source);
+      }
       try {
         const parsed = JSON.parse(String(msg.data)) as ApiActivityEventDto;
         if (parsed && parsed.type) {
@@ -59,26 +103,23 @@ export class SseLiveEventGateway implements LiveEventGateway {
       source = es;
       es.onopen = () => {
         attempt = 0;
+        watch(es);
         onStateChange('conectado');
       };
       es.onerror = () => {
+        // Not open any more: the browser retries (and onopen watches again) or we reconnect.
+        stopWatching();
         onStateChange('reconectando');
         if (es.readyState !== EVENT_SOURCE_CLOSED || stopped) {
           return; // the browser is retrying on its own
         }
         es.close();
-        const delay = computeFullJitterDelayMs(attempt, RECONNECT_BACKOFF);
-        attempt++;
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          if (!stopped) {
-            open();
-          }
-        }, delay);
+        reconnectLater();
       };
       for (const name of SSE_EVENT_NAMES) {
         es.addEventListener(name, handleMessage as EventListener);
       }
+      es.addEventListener(HEARTBEAT_EVENT_NAME, () => watch(es));
     };
 
     onStateChange('reconectando');
@@ -86,6 +127,7 @@ export class SseLiveEventGateway implements LiveEventGateway {
 
     return () => {
       stopped = true;
+      stopWatching();
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
       }
