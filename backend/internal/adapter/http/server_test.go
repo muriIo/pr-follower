@@ -895,14 +895,22 @@ func openStream(t *testing.T, baseURL string, session *http.Cookie) <-chan strin
 	return out
 }
 
-func nextEvent(t *testing.T, events <-chan string) string {
+// nextEventOfType returns the next live event of the given type. Others are skipped: an event
+// published just before the stream opened (the import's "repository.followed") may still reach it,
+// since the hub delivers to whoever is subscribed when it reads the log.
+func nextEventOfType(t *testing.T, events <-chan string, eventType string) string {
 	t.Helper()
-	select {
-	case ev := <-events:
-		return ev
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for a live event")
-		return ""
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			if strings.Contains(ev, `"type":"`+eventType+`"`) {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for a %s live event", eventType)
+			return ""
+		}
 	}
 }
 
@@ -941,11 +949,12 @@ func TestLiveEvents_OnlyReachUsersWhoFollowTheRepository(t *testing.T) {
 		}
 	}
 
-	first, second := nextEvent(t, octocatEvents), nextEvent(t, octocatEvents)
-	if !strings.Contains(first, `"type":"pr.opened"`) || !strings.Contains(first, "acme/web") || !strings.Contains(second, "acme/api") {
+	first, second := nextEventOfType(t, octocatEvents, "pr.opened"), nextEventOfType(t, octocatEvents, "pr.opened")
+	if !strings.Contains(first, "acme/web") || !strings.Contains(second, "acme/api") {
 		t.Fatalf("octocat follows both repositories and must see both PRs:\n%s\n%s", first, second)
 	}
-	if got := nextEvent(t, hubotEvents); !strings.Contains(got, "acme/api") {
+	// The acme/web PR was opened first: had it leaked, it would be hubot's first PR event.
+	if got := nextEventOfType(t, hubotEvents, "pr.opened"); !strings.Contains(got, "acme/api") {
 		t.Fatalf("hubot follows only acme/api; acme/web activity leaked:\n%s", got)
 	}
 }
