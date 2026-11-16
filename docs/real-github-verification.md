@@ -8,8 +8,8 @@ The automated tests use fakes for GitHub. This is the manual checklist for the r
 2. Expose the webhook endpoint (`smee.io` or `ngrok http 8080`) and set the app's Webhook URL to `<tunnel>/api/v1/webhooks/github` with a secret equal to `GITHUB_WEBHOOK_SECRET`.
 3. Fill `.env` with `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY`: the `.pem` as one line, made with the `awk` command in production-setup §6.2 (`.env` is git-ignored). `make dev` does not pass `GITHUB_APP_PRIVATE_KEY_FILE` to the API container.
 4. `make dev`, then `docker compose -f docker-compose.local.yml logs -f api`. The API must **not** print `GitHub App credentials not set`.
-5. Test repository: a `.github/CODEOWNERS` assigning a path to you, a second GitHub account (or a teammate) for reviews, and a `package.json` + `package-lock.json` (npm v2/v3) with an outdated dependency so Dependabot opens a PR.
-6. Install the app on the test repository, sign in, import it. Keep **Recent Deliveries** (app → Advanced) open: every delivery must be `2xx`.
+5. Test repository, owned by you: a `.github/CODEOWNERS` assigning a path to you, a `package.json` + `package-lock.json` (npm v2/v3) with an outdated dependency, and a `.github/dependabot.yml` for `npm` so Dependabot opens a PR. A second GitHub account forks it and opens PRs **into your repository**: those are the "someone else's PR" of §3. Import your repository, not the fork (a fork runs no Dependabot).
+6. Install the app on the test repository, sign in, import it. Use one browser profile per account. Keep **Recent Deliveries** (app → Advanced) open: every delivery must be `2xx`.
 
 Useful: `docker exec pr-follower-local-postgres-1 psql -U prfollower pr_follower_local -c '<sql>'`.
 
@@ -30,6 +30,8 @@ Useful: `docker exec pr-follower-local-postgres-1 psql -U prfollower pr_follower
 ## 3. Acting as the user (§6)
 
 Use PRs of the test repository authored by someone other than you.
+
+For 3.2 add a slow workflow to the default branch (a fork PR runs the base branch's workflows): `.github/workflows/slow.yml` with one job that runs `sleep 300` `on: [pull_request]`. Pushing it with a `gh` token needs the `workflow` scope (`gh auth refresh -s workflow`), or create it in the web editor. A first-time contributor's run may wait for **Approve and run**.
 
 1. **Approve** from the drawer: GitHub shows the review under *your* name, not the app's. Approve again: nothing is repeated.
 2. **Checks running:** push a commit while a workflow runs; approve and merge are disabled with the reason, and `409 checks_running` comes from the API.
@@ -59,6 +61,11 @@ Use PRs of the test repository authored by someone other than you.
 3. Cancel a sync midway: the panel stops and `GET /api/v1/sync` reports it cancelled.
 4. **Rate-limit headers:** `gh api rate_limit` shows what is left. Real exhaustion is slow to reach; instead confirm the headers the client reads with `curl -si -H "Authorization: Bearer $(gh auth token)" https://api.github.com/rate_limit | grep -i x-ratelimit`. `X-RateLimit-Remaining` and `X-RateLimit-Reset` must be present. Optional: lower the margin with many repositories until a sync answers `429 rate_limited` with `retry_at` and names the repositories left.
 
+Watch the header while the API is stopped: it should leave "Ao vivo (SSE)". If it does not, the stream is dead and the panel misses live events after the restart (roadmap §7); reload the page before judging what the panel shows.
+
 ## 7. Recording the result
+
+Last run: 2026-11-16, everything above except 4.4, 6.3 and a real Vercel/Jenkins status; results in the roadmap.
+
 
 Tick the matching items in [`roadmap.md`](roadmap.md) (§2, §3, §5, §6 "Not verified" lines). Anything that failed becomes a bug there, with the delivery id or log line.
