@@ -6,6 +6,7 @@ import (
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
 	"github.com/murilo/pr-follower/backend/internal/usecase/triage"
+	"time"
 )
 
 type fakeUserRepo struct {
@@ -221,5 +222,62 @@ func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
 	}
 	if len(pub.events) != 2 {
 		t.Errorf("expected 2 published SSE events, got %d", len(pub.events))
+	}
+}
+
+type fakeFailures map[uint64]entity.AnalysisFailure
+
+func (f fakeFailures) RecordAnalysisFailure(context.Context, entity.AnalysisFailure) error {
+	return nil
+}
+func (f fakeFailures) GetAnalysisFailure(_ context.Context, prID uint64, headSHA string) (*entity.AnalysisFailure, error) {
+	if failure, ok := f[prID]; ok && failure.HeadSHA == headSHA {
+		return &failure, nil
+	}
+	return nil, entity.ErrNotFound
+}
+
+func TestTriageUseCase_ADependabotPRWhoseAnalysisFailedSaysWhy(t *testing.T) {
+	t.Parallel()
+	bump := func(id uint64, sha string) entity.PullRequest {
+		return entity.PullRequest{ID: id, RepositoryID: 10, RepositoryName: "arvore/hive-web", Number: int(id),
+			Title: "chore(deps): bump vitest from 2.1.0 to 2.1.1", AuthorLogin: "dependabot[bot]", IsDependabot: true,
+			State: entity.PRStateOpen, CIStatus: entity.CIStatusSuccess, MergeableState: entity.MergeableStateClean, HeadSHA: sha}
+	}
+	prRepo := &fakePRRepo{
+		prs:    []entity.PullRequest{bump(201, "sha-new"), bump(202, "sha-202"), bump(203, "sha-203")},
+		states: map[uint64]entity.UserPRState{},
+		analyses: map[uint64]*entity.DependabotAnalysis{
+			202: {PullRequestID: 202, HeadSHA: "sha-202", RiskVerdict: entity.RiskVerdictLow},
+		},
+	}
+	failedAt := time.Date(2026, 11, 16, 20, 0, 0, 0, time.UTC)
+	failures := fakeFailures{
+		201: {PullRequestID: 201, HeadSHA: "sha-old", ErrorKind: "forbidden"}, // an older commit: stale
+		202: {PullRequestID: 202, HeadSHA: "sha-202", ErrorKind: "timeout"},   // analysed since: superseded
+		203: {PullRequestID: 203, HeadSHA: "sha-203", ErrorKind: "forbidden", Message: "forbidden by github", FailedAt: failedAt},
+	}
+	userRepo := &fakeUserRepo{user: &entity.User{ID: 1, Login: "murilo"}}
+	repoRepo := &fakeRepoRepo{repos: []entity.Repository{{ID: 10, Owner: "arvore", Name: "hive-web", FullName: "arvore/hive-web"}}}
+	files := &fakeFiles{byPR: map[uint64]entity.PRChangedFiles{}}
+	uc := triage.NewUseCase(userRepo, repoRepo, prRepo, &fakePublisher{}, files, &fakeSyncer{store: files}, nil,
+		triage.WithAnalysisFailures(failures))
+
+	snapshot, err := uc.GetWorkspaceSnapshot(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetWorkspaceSnapshot() error: %v", err)
+	}
+	byID := map[uint64]triage.DependabotItem{}
+	for _, item := range snapshot.DependabotPRs {
+		byID[item.PullRequest.ID] = item
+	}
+	if f := byID[201].AnalysisFailure; f != nil {
+		t.Errorf("a failure of an older commit says nothing about the new one: %+v", f)
+	}
+	if f := byID[202].AnalysisFailure; f != nil || byID[202].Analysis == nil {
+		t.Errorf("an analysis of the commit supersedes its failure: %+v", byID[202])
+	}
+	if f := byID[203].AnalysisFailure; f == nil || f.ErrorKind != "forbidden" || !f.FailedAt.Equal(failedAt) {
+		t.Errorf("the head commit's failure must be reported: %+v", f)
 	}
 }

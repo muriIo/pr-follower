@@ -430,6 +430,29 @@ describe('workspace-api.mapper', () => {
       expect(unparsed.radarTitle).toBe('Bump the npm group across 3 directories');
       expect(unparsed.owners).toBe('unknown');
     });
+
+    it('says an analysis failed, and why, instead of "not analysed"', () => {
+      const failed = (id: number, kind: string) => ({
+        pull_request: pr(id, 'acme/web', { is_dependabot: true, author_login: 'dependabot[bot]', title: 'chore(deps): bump axios from 1.7.7 to 2.0.0' }),
+        analysis_failure: { error_kind: kind, message: 'GitHub said no', failed_at: '2026-11-16T20:00:00Z' },
+      });
+      const [forbidden, unknown, unreadable] = map([repo('acme/web')], [], [], [
+        failed(41, 'forbidden'),
+        failed(42, 'something_new'),
+        failed(43, 'not_analysable'),
+      ]);
+
+      expect(forbidden.verdict).toBeNull();
+      expect(forbidden.analysisFailed).toBe(true);
+      expect(forbidden.analysisRetryable).toBe(true);
+      expect(forbidden.radarMeta).toEqual({ key: 'radar.meta.failed' });
+      expect(forbidden.rvDetail).toEqual({ key: 'impact.rvDetail.failed.forbidden' });
+      expect(forbidden.why).toEqual({ key: 'drawer.why.depFailed' });
+      expect(unknown.rvDetail).toEqual({ key: 'impact.rvDetail.failed.error' });
+      // A lockfile no analyzer reads will fail again: say so, and offer no retry.
+      expect(unreadable.rvDetail).toEqual({ key: 'impact.rvDetail.failed.not_analysable' });
+      expect(unreadable.analysisRetryable).toBe(false);
+    });
   });
 
   it('keeps the activity type, actor and id, and marks only live activity as new', () => {

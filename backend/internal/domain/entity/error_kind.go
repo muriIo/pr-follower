@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -24,6 +25,7 @@ var errorKinds = []struct {
 	{"not_found", ErrNotFound},
 	{"conflict", ErrConflict},
 	{"invalid_input", ErrInvalidInput},
+	{"timeout", context.DeadlineExceeded},
 }
 
 // otherErrorKind is any error that is none of the above.

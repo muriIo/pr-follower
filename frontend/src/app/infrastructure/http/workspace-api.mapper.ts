@@ -174,6 +174,16 @@ export interface ApiActivityEventDto {
   readonly occurred_at: string;
 }
 
+export interface ApiAnalysisFailureDto {
+  /** The server's error kind: forbidden, not_found, rate_limited, timeout, not_analysable, ... */
+  readonly error_kind: string;
+  readonly message?: string;
+  readonly failed_at?: string;
+}
+
+/** Failure kinds with their own explanation; any other is phrased generically. */
+const ANALYSIS_FAILURE_KINDS: readonly string[] = ['forbidden', 'not_found', 'rate_limited', 'timeout', 'unauthorized', 'not_analysable'];
+
 export interface ApiWorkspaceResponseDto {
   readonly snapshot?: {
     readonly inbox_waiting_on_me?: readonly { pull_request: ApiPullRequestDto; user_state: ApiUserPrStateDto }[];
@@ -181,6 +191,8 @@ export interface ApiWorkspaceResponseDto {
     readonly dependabot_prs?: readonly {
       pull_request: ApiPullRequestDto;
       analysis?: ApiDependabotAnalysisDto;
+      /** Why the head commit's analysis failed; absent once it is analysed. */
+      analysis_failure?: ApiAnalysisFailureDto;
       /** I have a standing approval of the head commit (from GitHub's review). */
       approved_by_me?: boolean;
       /** A teammate approved the head commit. */
@@ -259,7 +271,7 @@ export function mapApiWorkspaceResponseToDataset(dto: ApiWorkspaceResponseDto): 
 
   for (const item of snapshot.dependabot_prs ?? []) {
     listed.add(item.pull_request.id);
-    const bump = mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name));
+    const bump = mapDependabotPrToModel(item.pull_request, item.analysis, codeownersOf(item.pull_request.repository_name), item.analysis_failure);
     // Approval comes from the review GitHub recorded: a reload must not forget it.
     if (item.approved_by_me) {
       approvedMap[bump.id] = true;
@@ -529,6 +541,7 @@ function mapDependabotPrToModel(
   pr: ApiPullRequestDto,
   analysis: ApiDependabotAnalysisDto | undefined,
   codeowners: CodeownersState | undefined,
+  failure?: ApiAnalysisFailureDto,
 ): PullRequestItem {
   const { ci, ciText } = mapCiStatus(pr.ci_status);
   const owners = ownersForNonOwner(codeowners);
@@ -554,6 +567,27 @@ function mapDependabotPrToModel(
     // Nothing analysed this bump yet: say only what the PR title tells us.
     const match = DEPENDABOT_TITLE.exec(pr.title);
     const [pkg, from, to] = match ? [match[1], match[2], match[3]] : [undefined, undefined, undefined];
+    if (failure) {
+      // It was tried and failed: say so, and why, rather than "not analysed".
+      const kind = ANALYSIS_FAILURE_KINDS.includes(failure.error_kind) ? failure.error_kind : 'error';
+      return {
+        ...base,
+        verdict: null,
+        analysisFailed: true,
+        analysisRetryable: kind !== 'not_analysable',
+        radarTitle: pkg ? `${pkg} (${from} -> ${to})` : pr.title,
+        radarMeta: { key: 'radar.meta.failed' },
+        pkg,
+        from,
+        to,
+        rvDetail: { key: `impact.rvDetail.failed.${kind}` },
+        via: [],
+        blasts: [],
+        note: '',
+        noteWarn: false,
+        why: { key: 'drawer.why.depFailed' },
+      };
+    }
     return {
       ...base,
       verdict: null,

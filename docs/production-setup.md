@@ -31,7 +31,7 @@ Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks 
 - **Several API replicas** are supported (§13.10, ADR-0012) and were run as two processes behind one proxy; a cancel landing on the other replica is covered by tests only.
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
-- **Failed Dependabot analyses are only logged**: the Radar keeps showing "Sem análise".
+- **Failed Dependabot analyses** show in the Radar as "Análise falhou" with the reason and a retry; the reason is also logged.
 - **CI** runs `make check` on every PR and on `main`; still run it before a build from a local checkout (§7).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.

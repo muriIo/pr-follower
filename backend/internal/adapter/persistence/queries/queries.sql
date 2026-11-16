@@ -344,3 +344,16 @@ WHERE user_id = sqlc.arg(user_id) AND run_id = sqlc.arg(run_id);
 UPDATE sync_jobs
 SET cancel_requested = TRUE
 WHERE user_id = sqlc.arg(user_id) AND state = 'running' AND heartbeat_ms >= sqlc.arg(stale_before_ms);
+
+-- name: UpsertAnalysisFailure :exec
+INSERT INTO dependabot_analysis_failures (pull_request_id, head_sha, error_kind, message, failed_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (pull_request_id, head_sha) DO UPDATE SET
+    error_kind = EXCLUDED.error_kind,
+    message = EXCLUDED.message,
+    failed_at = EXCLUDED.failed_at;
+
+-- name: GetAnalysisFailure :one
+SELECT pull_request_id, head_sha, error_kind, message, failed_at
+FROM dependabot_analysis_failures
+WHERE pull_request_id = $1 AND head_sha = $2;

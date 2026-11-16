@@ -42,6 +42,14 @@ type DependabotAnalysis struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+type DependabotAnalysisFailure struct {
+	PullRequestID int64     `json:"pull_request_id"`
+	HeadSha       string    `json:"head_sha"`
+	ErrorKind     string    `json:"error_kind"`
+	Message       string    `json:"message"`
+	FailedAt      time.Time `json:"failed_at"`
+}
+
 type PrChangedFile struct {
 	PullRequestID int64     `json:"pull_request_id"`
 	HeadSha       string    `json:"head_sha"`
