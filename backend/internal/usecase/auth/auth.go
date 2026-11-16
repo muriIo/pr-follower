@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -212,6 +213,9 @@ func (uc *UseCase) AccessToken(ctx context.Context, userID uint64) (string, erro
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", context.Cause(ctx)
 		}
+		if errors.Is(err, entity.ErrGitHubUnavailable) {
+			return "", err // GitHub is down, the access is not gone: never sign the user out for it
+		}
 		return "", fmt.Errorf("%w: github token refresh failed: %v", entity.ErrGitHubTokenExpired, err)
 	}
 	user.GitHubToken = refreshed
@@ -234,4 +238,33 @@ func randomToken() (string, error) {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// PurgeExpiredSessions deletes every session that has expired and reports how many. An expired
+// session is otherwise deleted only when its cookie comes back, which never happens once someone
+// stops using the app.
+func (uc *UseCase) PurgeExpiredSessions(ctx context.Context) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, context.Cause(ctx)
+	}
+	return uc.sessions.DeleteExpired(ctx, uc.now())
+}
+
+// PurgeExpiredSessionsEvery purges expired sessions now and then every interval until ctx is done.
+// Every replica may run it: deleting what has expired is the same however often it runs (ADR-0012).
+func (uc *UseCase) PurgeExpiredSessionsEvery(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		if n, err := uc.PurgeExpiredSessions(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("purge expired sessions failed", "error", err)
+		} else if n > 0 {
+			slog.Info("purged expired sessions", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

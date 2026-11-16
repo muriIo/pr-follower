@@ -357,6 +357,80 @@ type Plain struct{ n int }
 		}
 	})
 
+	t.Run("ADR-0013: detects unclassified GitHub errors and codes the SPA cannot show", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		files := map[string]string{
+			"backend/internal/adapter/github/reads.go": `package github
+
+import (
+	"errors"
+	"fmt"
+
+	"example/entity"
+)
+
+func bare(status int) error    { return fmt.Errorf("github server error (%d)", status) }
+func plain() error             { return errors.New("github said no") }
+func wrapped(status int) error { return fmt.Errorf("%w: github server error (%d)", entity.ErrGitHubUnavailable, status) }
+`,
+			"backend/internal/adapter/github/reads_test.go": "package github\nimport \"errors\"\nvar _ = errors.New(\"tests may\")\n",
+			"backend/internal/adapter/http/handler.go": `package httpadapter
+
+func statusAndCode(err error) (int, string) {
+	status, code := 500, "internal"
+	switch {
+	case err == nil:
+		status, code = 409, "conflict"
+	case err != nil:
+		status, code = 502, "github_unavailable"
+	}
+	return status, code
+}
+
+var unconfigured = map[string]string{"error": "x", "code": "brand_new"}
+`,
+			"backend/internal/adapter/http/handler_test.go":                   "package httpadapter\nimport \"testing\"\nfunc TestHandler(t *testing.T) {}\n",
+			"frontend/src/app/domain/models/action-error.models.ts":           "const KNOWN_CODES: readonly string[] = [\n  'internal',\n  'conflict',\n  'forbidden',\n];\n",
+			"frontend/public/i18n/pt-BR.json":                                 `{"actions.error.internal": "Erro", "actions.error.conflict": "Conflito"}`,
+			"frontend/public/i18n/en-US.json":                                 `{"actions.error.internal": "Error", "actions.error.conflict": "Conflict", "actions.error.forbidden": "Denied"}`,
+			"frontend/src/app/infrastructure/http/http-thing.gateway.ts":      "export async function get(): Promise<void> {\n  throw new Error('unavailable');\n}\n",
+			"frontend/src/app/infrastructure/http/http-thing.gateway.spec.ts": "it('x', () => { throw new Error('specs may'); });\n",
+		}
+		for rel, content := range files {
+			path := filepath.Join(root, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", rel, err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", rel, err)
+			}
+		}
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected ADR-0013 violations")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{
+			"ADR-0013: backend/internal/adapter/github/reads.go:10",
+			"ADR-0013: backend/internal/adapter/github/reads.go:11",
+			`ADR-0013: the API sends code "github_unavailable"`,
+			`ADR-0013: the API sends code "brand_new"`,
+			`ADR-0013: code "forbidden" has no "actions.error.forbidden" in pt-BR.json`,
+			"ADR-0013: frontend/src/app/infrastructure/http/http-thing.gateway.ts throws a plain Error",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected violation %q, got:\n%s", want, joined)
+			}
+		}
+		for _, unwanted := range []string{"reads.go:12", "reads_test.go", `code "internal"`, `code "conflict"`, `"forbidden" has no "actions.error.forbidden" in en-US.json`, "spec.ts"} {
+			if strings.Contains(joined, unwanted) {
+				t.Errorf("%s is compliant and must not be reported:\n%s", unwanted, joined)
+			}
+		}
+	})
+
 	t.Run("ADR-0011: detects non-idempotent writes, schema, retries and missing redelivery tests", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionExpiryMonitor } from '../../application/use-cases/session-expiry.monitor';
+import { ActionError } from '../../domain/models/action-error.models';
 import { HttpPullRequestGateway } from './http-pull-request.gateway';
 
 describe('HttpPullRequestGateway', () => {
@@ -144,6 +145,34 @@ describe('HttpPullRequestGateway changed files', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 502 }));
     TestBed.configureTestingModule({ providers: [HttpPullRequestGateway] });
     await expect(TestBed.inject(HttpPullRequestGateway).fetchChangedFiles('acme/web', 7)).rejects.toThrow();
+    vi.restoreAllMocks();
+  });
+
+  it('rejects with the server\'s code and GitHub\'s explanation, so the drawer can say why (ADR-0013)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 'forbidden', error: 'Resource not accessible by integration' }), { status: 403 }),
+    );
+    TestBed.configureTestingModule({ providers: [HttpPullRequestGateway] });
+
+    const failure = await TestBed.inject(HttpPullRequestGateway).fetchChangedFiles('acme/web', 7).catch((err: unknown) => err);
+
+    expect(failure).toBeInstanceOf(ActionError);
+    expect((failure as ActionError).code).toBe('forbidden');
+    expect((failure as ActionError).detail).toBe('Resource not accessible by integration');
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // a refusal is not retried
+    vi.restoreAllMocks();
+  });
+
+  it('retries a GitHub outage once, then reports it as one', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () => new Response(JSON.stringify({ code: 'github_unavailable', error: 'github server error (502)' }), { status: 502 }),
+    );
+    TestBed.configureTestingModule({ providers: [HttpPullRequestGateway] });
+
+    const failure = await TestBed.inject(HttpPullRequestGateway).fetchChangedFiles('acme/web', 7).catch((err: unknown) => err);
+
+    expect((failure as ActionError).code).toBe('github_unavailable');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     vi.restoreAllMocks();
   });
 });

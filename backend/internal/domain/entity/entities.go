@@ -22,6 +22,9 @@ var (
 	// ErrOutcomeUnknown means a write may or may not have been applied on GitHub (a timeout, a
 	// dropped connection, a 5xx): the caller must check GitHub, never assume either way.
 	ErrOutcomeUnknown = errors.New("could not confirm the outcome on github")
+	// ErrGitHubUnavailable means GitHub gave no usable answer to a read (a 5xx after retries, no
+	// answer at all, a body that cannot be read): nothing changed, and the same request may work later.
+	ErrGitHubUnavailable = errors.New("github is unavailable")
 	// ErrRateLimited means GitHub refused because a rate limit was reached; the error carries when it
 	// resets (see RateLimitedError). The same request works after that time.
 	ErrRateLimited = errors.New("github rate limit reached")

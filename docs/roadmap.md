@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub-facing paths verified against a real repository, see [`real-github-verification.md`](real-github-verification.md)).
+Last reviewed: 2026-11-16 (open items checked against the code after #47 and the v1 hardening; GitHub-facing paths verified against a real repository, see [`real-github-verification.md`](real-github-verification.md)).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -21,7 +21,7 @@ No P1 item is open. In order of value:
 - [x] Identity only from the session; no `X-User-ID`, no password columns (gated by ADR-0010).
 - [x] Expired session in the SPA: any API call refused as unauthenticated (401) makes the app ask `/auth/me`; if the server no longer knows the session it returns to the sign-in screen saying so, stopping the live stream and closing the drawer. A 401 that is not the session (GitHub refusing the app's own credentials) or a server that cannot be reached never signs anyone out.
 - [x] When the signed-in user's own GitHub access is gone (token expired and not refreshable, or revoked) the server answers `github_token_expired` and the app signs out at once, clearing the server session, instead of leaving a valid session that can do nothing (#25).
-- [ ] **P2** Purge expired sessions (rows are only deleted when an expired token is used again).
+- [x] Expired sessions are purged every hour (and at start) by every replica; they used to be deleted only when their cookie came back, which never happens once someone stops using the app.
 
 ## 2. Repositories & GitHub App installation
 
@@ -30,6 +30,8 @@ No P1 item is open. In order of value:
 - [x] CODEOWNERS read at import: present / absent / unknown, never guessed (#12).
 - [x] CODEOWNERS freshness: a `push` to the default branch that touches a CODEOWNERS path (or that GitHub truncated at 20 commits) re-reads the file as the GitHub App, with a follower's token as fallback; the cached rules and status are stored only when they changed and the change is announced, so every user's turn follows. A file that disappears is recorded as "no CODEOWNERS"; a read that cannot tell never is, and fails the delivery so it can be redelivered. Needs the app subscribed to Push events (#26).
 - [x] Verified against real GitHub (2026-11-16): a push that edits CODEOWNERS refreshes the rules within seconds, deleting the file records "no CODEOWNERS" and restoring it brings the rules back, and a push of 26 commits with the CODEOWNERS edit first (GitHub truncates the list) still refreshes.
+- [x] Following or unfollowing a repository shows that it is under way on its button ("Importando PRs..." with a spinner, the button disabled) until GitHub answers; it used to show nothing during the backfill.
+- [x] The import screen shows the server's code and GitHub's explanation (rate limit with the time it lifts, permission refused, GitHub unavailable, access expired, refused) instead of "Could not reach GitHub" for everything (ADR-0013).
 - [ ] **P2** Not verified against real GitHub yet: a `push` delivery that fails without the app credentials and a follower's token, then passes on **Redeliver** (covered by the `*Redeliver*` tests only).
 
 ## 3. PR state from GitHub
@@ -47,12 +49,13 @@ No P1 item is open. In order of value:
 - [ ] **P2** A sync reads repositories one by one and every open PR in full: conditional requests (ETag), skipping PRs whose head did not change, and a little parallelism across repositories would cut its time and its share of the 5,000 requests/hour per user.
 - [x] Reviews ingested: `pull_request_review` webhooks (approved / changes requested / commented / dismissed) are stored by GitHub's review id, idempotently (a redelivery changes nothing, a dismissal is never revived), and the open human PRs' reviews are read at import for repositories with CODEOWNERS.
 - [x] Reviews of PRs stored before reviews were ingested are filled in by "Sincronizar" (or a re-import), which re-reads the reviews of every open human PR of a repository with CODEOWNERS (#29).
-- [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown. Seen on 2026-11-16: a PR stayed `UNKNOWN` in the panel while GitHub said `unstable`; with a required check (`blocked`) the panel would have offered a merge GitHub refuses.
+- [x] `mergeable_state` is often `unknown` in the opening webhook (and after an import or a new commit) and GitHub sends no event when it is computed: a workspace load asks GitHub, with the reader's token, for up to 10 open PRs still unknown and stores an answer for the same head commit. GitHub still computing, failing, or the reader having no token leaves it unknown and never fails the load. Seen on 2026-11-16: a PR stayed `UNKNOWN` in the panel while GitHub said `unstable`.
+- [ ] **P2** Not verified against real GitHub yet: an `UNKNOWN` merge state turning into GitHub's value on the next workspace load.
 - [x] Legacy commit statuses (Jenkins, Vercel) count like checks: the `status` webhook and a commit's combined status at import are stored (own table, own id space), listed beside check runs, the latest status of each context decides, and a pending one keeps a PR from looking green. Needs the app subscribed to Status events (#28).
 - [x] Statuses of PRs stored before statuses were ingested are filled in by "Sincronizar", which re-reads the check runs and statuses of every open PR's head commit (#29).
 - [x] Verified against real GitHub (2026-11-16) with statuses created through the API: pending, success and failure arrive by the `status` webhook within seconds, a pending one disables approve and merge, and a status created while no webhook could arrive is read by the sync.
 - [ ] **P2** Not verified against real GitHub yet: a real Vercel or Jenkins status.
-- [ ] **P2** Out-of-order webhooks: ignore a delivery older than the stored state (ADR-0011 consequence).
+- [x] Out-of-order `pull_request` webhooks: GitHub's `pull_request.updated_at` of the newest delivery applied is kept per PR (`pull_request_github_versions`, migration 00012, one conditional upsert so replicas cannot race), and an older delivery changes and publishes nothing: a late `synchronize` can no longer reopen or move a PR merged after it. Same-second deliveries both apply. Check runs, statuses and reviews were already ordered by GitHub's ids.
 
 ## 4. CODEOWNERS inbox ("Minha Vez")
 
@@ -91,6 +94,7 @@ No P1 item is open. In order of value:
 - [x] The SPA shows action failures in the user's language instead of swallowing them (a 502 used to look like success), sends each write once, and no longer invents a merge commit.
 - [x] Artificial delays removed from every action: they finish when the server answers.
 - [x] Verified against real GitHub (2026-11-16): approve, squash merge and `@dependabot rebase` are written under the user's name (the comment shows "via" the app, as GitHub marks every user-to-server token); a second approve of the same head writes nothing; a running check disables approve and merge in the drawer; the merge webhook that follows the panel's own merge publishes no second `pr.merged`; the user's own PR offers merge and not approve.
+- [x] Every GitHub failure is acknowledged and recoverable (ADR-0013, gated): the adapter names each GitHub answer with a domain kind (a new `github_unavailable` for a read GitHub did not answer, never `500 internal`), every API error carries a code the SPA translates, an error note stays until dismissed with the buttons back for a retry, a stopped batch says how many PRs went through and which one failed, `not_found` re-reads the workspace like `conflict` does, the drawer says why the changed files could not be loaded, and a GitHub outage during a token refresh no longer signs the user out.
 - [ ] **P2** Show why GitHub blocks a merge ("needs 2 approvals, has 1", "required check `ci` failing") instead of only "blocked by branch protection": needs reading the branch's rules (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) or the protection with *Administration: read*.
 
 ## 7. Live updates & timeline
@@ -141,7 +145,7 @@ No P1 item is open. In order of value:
 
 ## 11. Engineering guidelines
 
-- [x] ADR-0001 to ADR-0011, each with an executable gate (`make adr-check`).
+- [x] ADR-0001 to ADR-0013, each with an executable gate (`make adr-check`).
 - [x] `AGENTS.md` / `CLAUDE.md` for agents; implementation plan; production runbook; this roadmap.
 
 ## 12. Business & distribution

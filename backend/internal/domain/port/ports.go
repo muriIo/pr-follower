@@ -18,6 +18,8 @@ type SessionRepository interface {
 	Create(ctx context.Context, session *entity.Session) error
 	GetByTokenHash(ctx context.Context, tokenHash string) (*entity.Session, error)
 	Delete(ctx context.Context, tokenHash string) error
+	// DeleteExpired removes every session expired at now and reports how many.
+	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
 }
 
 // TokenCipher encrypts GitHub tokens at rest (ADR-0010).
@@ -218,6 +220,15 @@ type ActivitySignal interface {
 	// Listen returns a channel that receives a value whenever the log may have news, and once after
 	// every (re)connection so nothing appended while disconnected is missed. It closes with ctx.
 	Listen(ctx context.Context) <-chan struct{}
+}
+
+// PullRequestVersionStore keeps, per PR, the newest GitHub updated_at applied from a webhook, so a
+// delivery that arrives out of order is recognised as older (ADR-0011). The check and the write are
+// one atomic step, whichever replica handles the delivery (ADR-0012).
+type PullRequestVersionStore interface {
+	// AdvancePullRequestVersion records updatedAt unless a newer version is stored, and reports
+	// whether it did (the same version again counts as applied).
+	AdvancePullRequestVersion(ctx context.Context, prID uint64, updatedAt time.Time) (bool, error)
 }
 
 // AnalysisFailureStore keeps why the latest analysis of a Dependabot PR's commit failed (one row per

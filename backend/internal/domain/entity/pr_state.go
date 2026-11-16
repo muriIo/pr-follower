@@ -212,4 +212,6 @@ type RemotePullRequestState struct {
 	Merged      bool
 	HeadSHA     string
 	AuthorLogin string
+	// MergeableState is what GitHub computed for HeadSHA; MergeableStateUnknown while it computes.
+	MergeableState MergeableState
 }

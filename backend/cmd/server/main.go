@@ -82,7 +82,8 @@ func main() {
 	// The Dependabot analysis reads lockfiles and tarballs as the GitHub App, so it only exists
 	// when the app credentials are set; without them PRs stay "not analysed".
 	var analyzeUC *dependabot.AnalyzeUseCase
-	var ingestOpts []webhook.IngestOption
+	// A pull_request delivery older than the newest applied is dropped (ADR-0011).
+	ingestOpts := []webhook.IngestOption{webhook.WithDeliveryOrdering(prRepo)}
 	var importOpts []repoimport.Option
 	if installations != nil {
 		analyzeUC = dependabot.NewAnalyzeUseCase(
@@ -114,6 +115,7 @@ func main() {
 	var filesSyncer port.ChangedFilesSyncer
 	// Keeps the cached CODEOWNERS current on pushes; nil without sign-in.
 	var pushUC *webhook.PushIngestUseCase
+	triageOpts := []triage.Option{triage.WithCheckRuns(prRepo), triage.WithAnalysisFailures(prRepo)}
 	if cfg.GitHubLoginConfigured() {
 		authUC = auth.NewUseCase(auth.Deps{
 			OAuth: github.NewOAuthClient(github.OAuthConfig{
@@ -125,6 +127,7 @@ func main() {
 			Users:    userRepo,
 			Sessions: sessionRepo,
 		})
+		go authUC.PurgeExpiredSessionsEvery(ctx, time.Hour) // stops with the server
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
 		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
@@ -133,6 +136,8 @@ func main() {
 		// The job is in the database, so a progress poll or a cancel may reach any replica.
 		syncJobs = syncjob.NewManager(ctx, importUC, persistence.NewSyncJobStore(db)) // stops with the server
 		filesUC = prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
+		// GitHub computes a PR's merge state after the fact and sends no event: a load asks again.
+		triageOpts = append(triageOpts, triage.WithMergeStateRefresh(authUC, userAPI))
 		pushUC = webhook.NewPushIngestUseCase(repoRepo, codeowners.NewUseCase(repoRepo, userAPI, authUC, repoRepo, installations, sseHub))
 		actionUC = action.NewUseCase(action.Deps{
 			PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
@@ -141,7 +146,7 @@ func main() {
 	} else {
 		slog.Warn("GitHub sign-in disabled: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET")
 	}
-	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triage.WithCheckRuns(prRepo), triage.WithAnalysisFailures(prRepo))
+	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triageOpts...)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer, ingestOpts...)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
 

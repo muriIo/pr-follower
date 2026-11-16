@@ -28,6 +28,9 @@ type PullRequestEventPayload struct {
 	Merged bool
 	// SenderLogin is who triggered the event (who merged, pushed, edited); the PR author may differ.
 	SenderLogin string
+	// UpdatedAt is pull_request.updated_at: GitHub's version of the PR this delivery describes (zero
+	// when the payload has none, which skips the ordering check).
+	UpdatedAt time.Time
 }
 
 type IngestUseCase struct {
@@ -37,6 +40,7 @@ type IngestUseCase struct {
 	pub      port.EventPublisher
 	files    port.ChangedFilesSyncer
 	analysis port.AnalysisScheduler
+	versions port.PullRequestVersionStore
 }
 
 // IngestOption adds an optional collaborator to IngestUseCase.
@@ -45,6 +49,12 @@ type IngestOption func(*IngestUseCase)
 // WithAnalysisScheduler has every change to an open Dependabot PR schedule its analysis.
 func WithAnalysisScheduler(s port.AnalysisScheduler) IngestOption {
 	return func(uc *IngestUseCase) { uc.analysis = s }
+}
+
+// WithDeliveryOrdering drops a pull_request delivery older than the newest one applied to the PR
+// (ADR-0011: GitHub may deliver webhooks out of order).
+func WithDeliveryOrdering(versions port.PullRequestVersionStore) IngestOption {
+	return func(uc *IngestUseCase) { uc.versions = versions }
 }
 
 // NewIngestUseCase wires webhook ingestion. files (optional) reads a PR's changed files with a
@@ -99,6 +109,16 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 	if err != nil && !errors.Is(err, entity.ErrNotFound) {
 		return err
 	}
+	found := err == nil
+	if found {
+		applied, versionErr := uc.advanceVersion(ctx, existing.ID, p.UpdatedAt)
+		if versionErr != nil {
+			return versionErr
+		}
+		if !applied {
+			return nil // an older delivery that arrived late: what is stored is newer
+		}
+	}
 	sameCommit := err == nil && existing.HeadSHA == pr.HeadSHA
 	if err == nil {
 		pr.CIStatus = existing.CIStatus
@@ -118,6 +138,11 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 	if err := uc.prRepo.Upsert(ctx, pr); err != nil {
 		return err
 	}
+	if !found {
+		if _, err := uc.advanceVersion(ctx, pr.ID, p.UpdatedAt); err != nil {
+			return err
+		}
+	}
 	if err := uc.syncChangedFiles(ctx, repo, pr); err != nil {
 		return err
 	}
@@ -136,6 +161,15 @@ func (uc *IngestUseCase) IngestPullRequestEvent(ctx context.Context, p PullReque
 		Params:         map[string]string{"title": pr.Title},
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// advanceVersion records the delivery's GitHub version for the PR and reports whether it is not older
+// than what was applied before. Without a store, or a payload without a version, everything applies.
+func (uc *IngestUseCase) advanceVersion(ctx context.Context, prID uint64, updatedAt time.Time) (bool, error) {
+	if uc.versions == nil || updatedAt.IsZero() {
+		return true, nil
+	}
+	return uc.versions.AdvancePullRequestVersion(ctx, prID, updatedAt)
 }
 
 // syncChangedFiles reads the files of an open, human PR when the repository has CODEOWNERS:

@@ -129,10 +129,36 @@ describe('HttpRepositoryImportGateway', () => {
     ];
     for (const [response, code] of cases) {
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response);
-      await expect(gateway.listAccounts()).rejects.toEqual(new RepositoryImportError(code as never));
+      await expect(gateway.listAccounts()).rejects.toMatchObject({ code });
     }
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('offline'));
     await expect(gateway.listAccounts()).rejects.toEqual(new RepositoryImportError('failed'));
+  });
+
+  it('keeps the server\'s code and GitHub\'s explanation instead of a catch-all (ADR-0013)', async () => {
+    const gateway = setup();
+    const cases: [Response, RepositoryImportError][] = [
+      [json({ code: 'rate_limited', error: 'github rate limit reached', retry_at: '2026-11-16T14:05:00Z' }, 429), new RepositoryImportError('rate_limited', 'github rate limit reached', '2026-11-16T14:05:00Z')],
+      [json({ code: 'forbidden', error: 'Resource not accessible by integration' }, 403), new RepositoryImportError('forbidden', 'Resource not accessible by integration')],
+      [json({ code: 'github_unavailable', error: 'github server error (502)' }, 502), new RepositoryImportError('github_unavailable', 'github server error (502)')],
+      [json({ code: 'conflict', error: 'Repository access blocked' }, 409), new RepositoryImportError('conflict', 'Repository access blocked')],
+      [json({ code: 'github_token_expired', error: 'Bad credentials' }, 401), new RepositoryImportError('github_token_expired', 'Bad credentials')],
+      [json({ error: 'github_import_not_configured', code: 'unavailable' }, 503), new RepositoryImportError('not_configured')],
+    ];
+    for (const [response, expected] of cases) {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response);
+      const err = (await gateway.importRepository(20, 900).catch((e: unknown) => e)) as RepositoryImportError;
+      expect([err.code, err.detail, err.retryAt]).toEqual([expected.code, expected.detail, expected.retryAt]);
+    }
+  });
+
+  it('tells sign-in when the user\'s own GitHub access is gone', async () => {
+    const gateway = setup();
+    const reported = vi.fn();
+    TestBed.inject(SessionExpiryMonitor).listen(reported);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ code: 'github_token_expired', error: 'Bad credentials' }, 401));
+    await gateway.listAccounts().catch(() => undefined);
+    expect(reported).toHaveBeenCalledWith('github_token_expired');
   });
 
   it('lets aborts through untouched', async () => {
@@ -164,7 +190,7 @@ describe('HttpRepositoryImportGateway', () => {
     expect(reported).not.toHaveBeenCalled();
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ error: 'unauthorized' }, 401));
-    await expect(gateway.listAccounts()).rejects.toEqual(new RepositoryImportError('unauthorized'));
+    await expect(gateway.listAccounts()).rejects.toMatchObject({ code: 'unauthorized' });
     expect(reported).toHaveBeenCalledTimes(1);
   });
 });

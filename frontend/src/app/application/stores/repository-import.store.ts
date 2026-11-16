@@ -7,7 +7,7 @@ import {
   RepositoryImportErrorCode,
   filterImportableRepositories,
 } from '../../domain/models/repository-import.models';
-import { WorkspaceStore } from './workspace.store';
+import { WorkspaceStore, formatClock } from './workspace.store';
 
 export type RepositoryImportStatus = 'idle' | 'loading-accounts' | 'loading-repositories' | 'ready' | 'error';
 
@@ -24,6 +24,8 @@ export class RepositoryImportStore {
   readonly query = signal('');
   readonly status = signal<RepositoryImportStatus>('idle');
   readonly error = signal<RepositoryImportErrorCode | null>(null);
+  /** What GitHub said and, for a limit, when to come back: the `{detail}` and `{time}` of the message. */
+  readonly errorParams = signal<{ readonly detail: string; readonly time: string }>({ detail: '', time: '' });
   private readonly pending = signal<ReadonlySet<number>>(new Set());
 
   readonly selectedAccount = computed(
@@ -120,7 +122,7 @@ export class RepositoryImportStore {
       }
       void this.workspace.loadWorkspace();
     } catch (err) {
-      this.error.set(err instanceof RepositoryImportError ? err.code : 'failed');
+      this.report(err);
     } finally {
       this.setPending(repository.githubRepoId, false);
     }
@@ -143,7 +145,13 @@ export class RepositoryImportStore {
   }
 
   private fail(err: unknown): void {
-    this.error.set(err instanceof RepositoryImportError ? err.code : 'failed');
+    this.report(err);
     this.status.set('error');
+  }
+
+  private report(err: unknown): void {
+    const known = err instanceof RepositoryImportError ? err : null;
+    this.error.set(known?.code ?? 'failed');
+    this.errorParams.set({ detail: known?.detail ?? '', time: known?.retryAt ? formatClock(known.retryAt) : '' });
   }
 }

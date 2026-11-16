@@ -88,6 +88,13 @@ RETURNING id, repository_id, repository_name, github_pr_id, number, title, autho
           is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
           claimed_by_user_id, claimed_by_login, updated_at;
 
+-- name: AdvancePullRequestGitHubVersion :execrows
+-- Moves a PR's GitHub version forward only: no row is written when the stored one is newer.
+INSERT INTO pull_request_github_versions (pull_request_id, github_updated_at)
+VALUES ($1, $2)
+ON CONFLICT (pull_request_id) DO UPDATE SET github_updated_at = EXCLUDED.github_updated_at
+WHERE pull_request_github_versions.github_updated_at <= EXCLUDED.github_updated_at;
+
 -- name: GetPullRequestByID :one
 SELECT id, repository_id, repository_name, github_pr_id, number, title, author_login, html_url,
        is_dependabot, is_draft, state, mergeable_state, ci_status, head_sha, base_ref,
@@ -169,6 +176,11 @@ WHERE token_hash = $1;
 -- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE token_hash = $1;
+
+-- name: DeleteExpiredSessions :execrows
+-- A session expires at expires_at (Unix seconds), like entity.Session.IsExpired.
+DELETE FROM sessions
+WHERE expires_at <= $1;
 
 -- name: ListRepositoriesByInstallation :many
 SELECT id, github_repo_id, installation_id, owner, name, full_name, default_branch, codeowners_json, created_at, updated_at, access, codeowners_status

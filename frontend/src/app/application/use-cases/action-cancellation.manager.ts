@@ -23,7 +23,10 @@ export interface ActionViewModel {
   readonly pct: number;
   readonly note: string;
   readonly noteCls: string;
+  /** A failure stays until the user dismisses it (ADR-0013); other notes fade on their own. */
+  readonly dismissible: boolean;
   readonly cancel: () => void;
+  readonly dismiss: () => void;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -52,14 +55,17 @@ export class ActionCancellationManager {
     const running = Boolean(entry && entry.status === 'running');
     const hasNote = Boolean(entry && !running && entry.note);
     return {
-      idle: !entry,
+      // Not running: the controls are back, also beside a note, so a failure can be retried at once.
+      idle: !running,
       running,
       hasNote,
       label: entry?.label ?? '',
       pct: entry?.pct ?? 0,
       note: entry?.note ?? '',
       noteCls: entry?.status === 'ok' ? 'pf-note pf-note-ok' : entry?.status === 'error' ? 'pf-note pf-note-err' : 'pf-note',
+      dismissible: entry?.status === 'error' && hasNote,
       cancel: () => this.cancel(key),
+      dismiss: () => this.dismiss(key),
     };
   }
 
@@ -126,6 +132,15 @@ export class ActionCancellationManager {
     this.finish(key, 'cancel', null);
   }
 
+  /** Clears a finished action's note (a failure the user has read). */
+  dismiss(key: string): void {
+    if (this.controllers.has(key)) {
+      return; // still running: nothing to dismiss
+    }
+    this.clearTimer(key);
+    this.setAction(key, null);
+  }
+
   private setAction(key: string, entry: ActionStateEntry | null): void {
     this.actionsState.update((current) => {
       const next = { ...current };
@@ -145,6 +160,9 @@ export class ActionCancellationManager {
       return;
     }
     this.setAction(key, { status, note });
+    if (status === 'error') {
+      return; // a failure the user has not seen must not vanish (ADR-0013)
+    }
     const timer = setTimeout(() => {
       this.noteTimers.delete(key);
       this.setAction(key, null);

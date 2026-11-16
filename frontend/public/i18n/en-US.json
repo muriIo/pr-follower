@@ -372,5 +372,16 @@
   "inbox.mute.ciFailTip": "Joins the queue when CI passes.",
   "inbox.mute.conflict": "🚧 Has conflicts",
   "inbox.mute.conflictTip": "Joins the queue when the author resolves the conflicts.",
-  "drawer.why.pending": "We have not checked the files changed in this PR yet."
+  "drawer.why.pending": "We have not checked the files changed in this PR yet.",
+  "actions.batch.mergeFailed": "Batch stopped: {done} of {total} merged. PR #{pr} failed: {reason}",
+  "actions.batch.approveFailed": "Batch stopped: {done} of {total} approved. PR #{pr} failed: {reason}",
+  "actions.error.github_unavailable": "GitHub did not answer. Nothing changed; try again in a moment.",
+  "actions.error.canceled": "Action canceled.",
+  "import.followPending": "Importing PRs...",
+  "import.unfollowPending": "Unfollowing...",
+  "import.error.github_token_expired": "Your GitHub access expired. Please sign in again.",
+  "import.error.forbidden": "GitHub denied access. {detail}",
+  "import.error.rate_limited": "GitHub's rate limit was reached. Try again at {time}.",
+  "import.error.github_unavailable": "GitHub did not answer. Nothing changed; try again in a moment.",
+  "import.error.conflict": "GitHub did not allow it. {detail}"
 }

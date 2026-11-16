@@ -18,7 +18,7 @@ import (
 
 func (h *Handler) importConfigured(w http.ResponseWriter) bool {
 	if h.deps.ImportUC == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "github_import_not_configured"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "github_import_not_configured", "code": "unavailable"})
 		return false
 	}
 	return true

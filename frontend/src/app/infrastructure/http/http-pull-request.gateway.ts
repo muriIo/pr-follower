@@ -118,16 +118,52 @@ export class HttpPullRequestGateway implements PullRequestGateway {
     number: number,
     options?: ActionRequestOptions,
   ): Promise<readonly ChangedFileItem[]> {
-    const res = await this.requestJson<{ files?: ApiPullRequestFileDto[] }>(
+    const res = await this.readOrThrow<{ files?: ApiPullRequestFileDto[] }>(
       `/api/v1/repositories/${repo}/pulls/${number}/files`,
-      'GET',
-      undefined,
       options,
     );
-    if (!res) {
-      throw new Error('changed files unavailable');
-    }
     return (res.files ?? []).map(mapPullRequestFile);
+  }
+
+  /**
+   * A read whose failure the user is shown (ADR-0013): an outage is tried once more, a refusal is
+   * not, and either rejects with the server's code and explanation.
+   */
+  private async readOrThrow<T>(url: string, options?: ActionRequestOptions): Promise<T> {
+    try {
+      return await retryWithJitter(
+        async () => {
+          let response: Response;
+          try {
+            response = await fetch(url, { method: 'GET', signal: options?.signal });
+          } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === 'AbortError') {
+              throw err;
+            }
+            throw new ActionError('unknown'); // the API itself did not answer
+          }
+          if (response.status === 401) {
+            await this.reportUnauthorized(response);
+          }
+          if (response.ok) {
+            return (await response.json()) as T;
+          }
+          const payload = (await response.json().catch(() => null)) as { error?: string; code?: string; retry_at?: string } | null;
+          const failure = new ActionError(toActionErrorCode(payload?.code), payload?.error ?? '', payload?.retry_at);
+          if (response.status >= 500 && response.status !== 501) {
+            throw failure; // GitHub or the API hiccuped: worth one more try
+          }
+          throw new PermanentError(`HTTP ${response.status}`, failure);
+        },
+        { baseDelayMs: 40, maxDelayMs: 500, maxAttempts: 2 },
+        options?.signal,
+      );
+    } catch (err: unknown) {
+      if (err instanceof PermanentError && err.failure !== undefined) {
+        throw err.failure;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -195,7 +231,7 @@ export class HttpPullRequestGateway implements PullRequestGateway {
             throw new PermanentError(`HTTP ${response.status}`);
           }
           if (!response.ok) {
-            throw new Error(`Transient HTTP ${response.status}`);
+            throw new ActionError('unknown', `HTTP ${response.status}`); // transient: the caller reads null
           }
           return (await response.json()) as T;
         } catch (err: unknown) {

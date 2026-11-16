@@ -19,6 +19,7 @@ var errorKinds = []struct {
 	{"own_pull_request", ErrOwnPullRequest},
 	{"not_analysable", ErrNotAnalysable},
 	{"outcome_unknown", ErrOutcomeUnknown},
+	{"github_unavailable", ErrGitHubUnavailable},
 	{"operation_canceled", ErrOperationCanceled},
 	{"forbidden", ErrForbidden},
 	{"unauthorized", ErrUnauthorized},

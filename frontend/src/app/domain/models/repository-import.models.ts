@@ -29,10 +29,36 @@ export interface ImportableRepository {
   readonly repositoryId: number | null;
 }
 
-export type RepositoryImportErrorCode = 'unauthorized' | 'not_found' | 'not_configured' | 'failed';
+/** Why the import screen could not do what was asked; the server's codes where it sent one (ADR-0013). */
+export type RepositoryImportErrorCode =
+  | 'unauthorized'
+  | 'github_token_expired'
+  | 'not_found'
+  | 'not_configured'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'github_unavailable'
+  | 'conflict'
+  | 'failed';
+
+/** Server codes the import screen explains on its own; any other is shown as `failed`. */
+export const SERVER_IMPORT_ERROR_CODES: readonly RepositoryImportErrorCode[] = [
+  'github_token_expired',
+  'forbidden',
+  'rate_limited',
+  'github_unavailable',
+  'conflict',
+  'not_found',
+];
 
 export class RepositoryImportError extends Error {
-  constructor(readonly code: RepositoryImportErrorCode) {
+  constructor(
+    readonly code: RepositoryImportErrorCode,
+    /** GitHub's (or the server's) explanation. */
+    readonly detail: string = '',
+    /** For `rate_limited`: when GitHub's limit lifts (ISO). */
+    readonly retryAt?: string,
+  ) {
     super(`repository import failed: ${code}`);
     this.name = 'RepositoryImportError';
   }

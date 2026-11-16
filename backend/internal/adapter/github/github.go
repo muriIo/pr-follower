@@ -125,7 +125,7 @@ func (g *Gateway) GetFileContent(ctx context.Context, repo entity.Repository, re
 
 			resp, err := g.httpClient.Do(req)
 			if err != nil {
-				return nil, err
+				return nil, noAnswer(reqCtx, err)
 			}
 			defer resp.Body.Close()
 
@@ -159,7 +159,7 @@ func (g *Gateway) ListPRChangedFiles(ctx context.Context, repo entity.Repository
 
 			resp, err := g.httpClient.Do(req)
 			if err != nil {
-				return nil, err
+				return nil, noAnswer(reqCtx, err)
 			}
 			defer resp.Body.Close()
 
@@ -208,7 +208,7 @@ func (g *Gateway) StreamRepoTarball(ctx context.Context, repo entity.Repository,
 
 		resp, err := g.httpClient.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, noAnswer(reqCtx, err)
 		}
 		if err := classifyHTTPStatus(resp); err != nil {
 			_ = resp.Body.Close()
@@ -318,7 +318,7 @@ func classifyWrite(resp *http.Response) error {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrGitHubTokenExpired, message))
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return fmt.Errorf("github rate limited (429)")
+		return unannouncedLimit()
 	case resp.StatusCode == http.StatusForbidden:
 		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrForbidden, message))
 	case resp.StatusCode == http.StatusNotFound:
@@ -328,7 +328,7 @@ func classifyWrite(resp *http.Response) error {
 	case resp.StatusCode >= 500:
 		return fmt.Errorf("%w: github server error (%d)", entity.ErrOutcomeUnknown, resp.StatusCode)
 	default:
-		return resilience.Permanent(fmt.Errorf("github refused the change (%d): %s", resp.StatusCode, message))
+		return resilience.Permanent(fmt.Errorf("%w: %s (%d)", entity.ErrConflict, message, resp.StatusCode))
 	}
 }
 
@@ -363,7 +363,7 @@ func classifyRateLimit(resp *http.Response, message string) error {
 	}
 	limited := func(wait time.Duration) error {
 		if wait <= maxRateLimitWait {
-			return resilience.RetryAfter(fmt.Errorf("github rate limited (%d)", resp.StatusCode), wait)
+			return resilience.RetryAfter(&entity.RateLimitedError{ResetAt: time.Now().Add(wait)}, wait)
 		}
 		return resilience.Permanent(&entity.RateLimitedError{ResetAt: time.Now().Add(wait)})
 	}
@@ -383,27 +383,45 @@ func classifyRateLimit(resp *http.Response, message string) error {
 	return nil
 }
 
+// unannouncedLimit is a 429 that says neither when nor how long: retried, and if it lasts reported as
+// a limit with GitHub's recommended minimum wait (ADR-0013: never a bare error).
+func unannouncedLimit() error {
+	return &entity.RateLimitedError{ResetAt: time.Now().Add(secondaryLimitWait)}
+}
+
+// classifyHTTPStatus maps GitHub's answer to a read to a domain kind (ADR-0013). 5xx is retried
+// and, if it lasts, entity.ErrGitHubUnavailable; a refusal keeps GitHub's explanation.
 func classifyHTTPStatus(resp *http.Response) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
 	}
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
-		message := ""
-		if resp.StatusCode == http.StatusForbidden {
-			message = githubMessage(resp) // only a secondary limit hides in the message
-		}
-		if err := classifyRateLimit(resp, message); err != nil {
-			return err
-		}
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return fmt.Errorf("github rate limited (429)")
-		}
-	}
 	if resp.StatusCode >= 500 {
-		return fmt.Errorf("github server error (%d)", resp.StatusCode)
+		return fmt.Errorf("%w: github server error (%d)", entity.ErrGitHubUnavailable, resp.StatusCode)
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return resilience.Permanent(entity.ErrNotFound)
 	}
-	return resilience.Permanent(fmt.Errorf("github permanent error (%d)", resp.StatusCode))
+	message := githubMessage(resp)
+	if err := classifyRateLimit(resp, message); err != nil {
+		return err
+	}
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		return unannouncedLimit()
+	case http.StatusUnauthorized:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrUnauthorized, message))
+	case http.StatusForbidden:
+		return resilience.Permanent(fmt.Errorf("%w: %s", entity.ErrForbidden, message))
+	default:
+		return resilience.Permanent(fmt.Errorf("%w: %s (%d)", entity.ErrConflict, message, resp.StatusCode))
+	}
+}
+
+// noAnswer classifies a request GitHub never answered (a transport failure). A canceled caller keeps
+// its own error; anything else is entity.ErrGitHubUnavailable, which a retry may fix.
+func noAnswer(reqCtx context.Context, err error) error {
+	if reqCtx.Err() != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %v", entity.ErrGitHubUnavailable, err)
 }

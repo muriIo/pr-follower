@@ -14,7 +14,7 @@ import (
 // repository, read from GitHub with the user's token and flagged by CODEOWNERS ownership.
 func (h *Handler) ListPullRequestFiles(w http.ResponseWriter, r *http.Request) {
 	if h.deps.FilesUC == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "github_files_not_configured"})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "github_files_not_configured", "code": "unavailable"})
 		return
 	}
 	number, err := strconv.Atoi(chi.URLParam(r, "number"))

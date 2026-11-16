@@ -138,7 +138,7 @@ func (c *UserClient) GetRepositoryFile(ctx context.Context, accessToken, owner, 
 		req.Header.Set("Authorization", "Bearer "+accessToken)
 		resp, err := c.cfg.HTTPClient.Do(req)
 		if err != nil {
-			return nil, err
+			return nil, noAnswer(reqCtx, err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized {
@@ -233,9 +233,10 @@ func (c *UserClient) GetPullRequest(ctx context.Context, accessToken, owner, nam
 		return entity.RemotePullRequestState{}, context.Cause(ctx)
 	}
 	var raw struct {
-		State  string `json:"state"`
-		Merged bool   `json:"merged"`
-		User   *struct {
+		State          string `json:"state"`
+		Merged         bool   `json:"merged"`
+		MergeableState string `json:"mergeable_state"`
+		User           *struct {
 			Login string `json:"login"`
 		} `json:"user"`
 		Head struct {
@@ -246,7 +247,8 @@ func (c *UserClient) GetPullRequest(ctx context.Context, accessToken, owner, nam
 	if err := getUserJSON(ctx, c.cfg.HTTPClient, c.cfg.Backoff, c.cfg.APIBaseURL, accessToken, target, &raw); err != nil {
 		return entity.RemotePullRequestState{}, err
 	}
-	state := entity.RemotePullRequestState{Open: raw.State == "open", Merged: raw.Merged, HeadSHA: raw.Head.SHA}
+	state := entity.RemotePullRequestState{Open: raw.State == "open", Merged: raw.Merged, HeadSHA: raw.Head.SHA,
+		MergeableState: entity.MergeableStateFromGitHub(raw.MergeableState)}
 	if raw.User != nil {
 		state.AuthorLogin = raw.User.Login
 	}
@@ -409,7 +411,7 @@ func getUserJSON(ctx context.Context, client *http.Client, backoff resilience.Ba
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return struct{}{}, err
+			return struct{}{}, noAnswer(reqCtx, err)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized {
@@ -418,7 +420,10 @@ func getUserJSON(ctx context.Context, client *http.Client, backoff resilience.Ba
 		if err := classifyHTTPStatus(resp); err != nil {
 			return struct{}{}, err
 		}
-		return struct{}{}, json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(out)
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(out); err != nil {
+			return struct{}{}, resilience.Permanent(fmt.Errorf("%w: unreadable answer: %v", entity.ErrGitHubUnavailable, err))
+		}
+		return struct{}{}, nil
 	})
 	return err
 }

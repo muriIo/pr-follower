@@ -784,8 +784,8 @@ func TestRepositoryImport_NotConfigured(t *testing.T) {
 	req.AddCookie(session)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when GitHub import is not configured, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"code":"unavailable"`) {
+		t.Fatalf("expected 503 with code unavailable when GitHub import is not configured, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1224,8 +1224,8 @@ func TestPullRequestFiles_ListsChangedFilesWithOwnership(t *testing.T) {
 	req.AddCookie(session)
 	rr := httptest.NewRecorder()
 	unconfigured.ServeHTTP(rr, req)
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Errorf("without the files use case: expected 503, got %d", rr.Code)
+	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), `"code":"unavailable"`) {
+		t.Errorf("without the files use case: expected 503 with code unavailable, got %d %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -1504,6 +1504,7 @@ func TestActions_SurfaceGitHubsAnswerHonestly(t *testing.T) {
 	}{
 		"checks still running":             {entity.ErrChecksRunning, http.StatusConflict, "checks_running", ""},
 		"no answer from GitHub":            {entity.ErrOutcomeUnknown, http.StatusBadGateway, "outcome_unknown", ""},
+		"GitHub unreachable on a read":     {fmt.Errorf("%w: github server error (502)", entity.ErrGitHubUnavailable), http.StatusBadGateway, "github_unavailable", ""},
 		"GitHub refused (perms)":           {fmt.Errorf("%w: Resource not accessible", entity.ErrForbidden), http.StatusForbidden, "forbidden", "Resource not accessible"},
 		"the user's GitHub access is gone": {fmt.Errorf("%w: Bad credentials", entity.ErrGitHubTokenExpired), http.StatusUnauthorized, "github_token_expired", ""},
 		"GitHub refused (state)":           {fmt.Errorf("%w: Pull Request is not mergeable", entity.ErrConflict), http.StatusConflict, "conflict", "Pull Request is not mergeable"},

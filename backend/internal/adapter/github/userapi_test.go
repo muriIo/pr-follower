@@ -382,7 +382,7 @@ func TestUserClient_GetPullRequest(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/repos/acme/web/pulls/7":
-			_ = json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "merged": false, "user": map[string]any{"login": "bia"}, "head": map[string]any{"sha": "sha7"}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"number": 7, "state": "open", "merged": false, "mergeable_state": "blocked", "user": map[string]any{"login": "bia"}, "head": map[string]any{"sha": "sha7"}})
 		case "/repos/acme/web/pulls/8":
 			_ = json.NewEncoder(w).Encode(map[string]any{"number": 8, "state": "closed", "merged": true, "user": map[string]any{"login": "bia"}, "head": map[string]any{"sha": "sha8"}})
 		case "/repos/acme/web/pulls/9":
@@ -396,7 +396,7 @@ func TestUserClient_GetPullRequest(t *testing.T) {
 	ctx := context.Background()
 
 	open, err := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 7)
-	if err != nil || open != (entity.RemotePullRequestState{Open: true, HeadSHA: "sha7", AuthorLogin: "bia"}) {
+	if err != nil || open != (entity.RemotePullRequestState{Open: true, HeadSHA: "sha7", AuthorLogin: "bia", MergeableState: entity.MergeableStateBlocked}) {
 		t.Fatalf("open PR = %+v, %v", open, err)
 	}
 	merged, _ := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 8)
@@ -404,7 +404,7 @@ func TestUserClient_GetPullRequest(t *testing.T) {
 		t.Fatalf("merged PR = %+v", merged)
 	}
 	closed, _ := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 9)
-	if closed.Open || closed.Merged || closed.AuthorLogin != "" {
+	if closed.Open || closed.Merged || closed.AuthorLogin != "" || closed.MergeableState != entity.MergeableStateUnknown {
 		t.Fatalf("closed PR = %+v", closed)
 	}
 	if _, err := c.GetPullRequest(ctx, "ghu_a", "acme", "web", 10); !errors.Is(err, entity.ErrNotFound) {

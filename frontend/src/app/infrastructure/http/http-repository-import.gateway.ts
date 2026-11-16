@@ -6,6 +6,7 @@ import {
   GitHubAccountsResult,
   ImportableRepository,
   RepositoryImportError,
+  SERVER_IMPORT_ERROR_CODES,
 } from '../../domain/models/repository-import.models';
 import { BROWSER_WINDOW } from '../browser/browser-window';
 
@@ -113,14 +114,23 @@ export class HttpRepositoryImportGateway implements RepositoryImportGateway {
       }
       throw new RepositoryImportError('failed');
     }
-    if (response.status === 401) {
-      this.session.report();
-      throw new RepositoryImportError('unauthorized');
+    if (response.ok) {
+      return (await response.json()) as T;
     }
-    if (response.status === 404) throw new RepositoryImportError('not_found');
-    if (response.status === 503) throw new RepositoryImportError('not_configured');
-    if (!response.ok) throw new RepositoryImportError('failed');
-    return (await response.json()) as T;
+    const payload = (await response.json().catch(() => null)) as { error?: string; code?: string; retry_at?: string } | null;
+    if (response.status === 401) {
+      const expired = payload?.code === 'github_token_expired';
+      this.session.report(expired ? 'github_token_expired' : 'unauthorized');
+      throw new RepositoryImportError(expired ? 'github_token_expired' : 'unauthorized', payload?.error ?? '');
+    }
+    if (response.status === 503 && (payload?.code === undefined || payload.code === 'unavailable')) {
+      throw new RepositoryImportError('not_configured');
+    }
+    const known = SERVER_IMPORT_ERROR_CODES.find((code) => code === payload?.code);
+    if (known) {
+      throw new RepositoryImportError(known, payload?.error ?? '', payload?.retry_at);
+    }
+    throw new RepositoryImportError(response.status === 404 ? 'not_found' : 'failed', payload?.error ?? '');
   }
 }
 

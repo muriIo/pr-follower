@@ -94,6 +94,47 @@ describe('RepositoryImportViewComponent', () => {
     expect(workspace.setPerspective).toHaveBeenCalledWith('seats');
   });
 
+  it('shows that a follow is under way, and on which repository, until GitHub answers', async () => {
+    let finish: (id: number) => void = () => undefined;
+    const { fixture, el } = await render({ importRepository: vi.fn(() => new Promise<number>((resolve) => (finish = resolve))) });
+    const select = el.querySelector('#pf-import-account') as HTMLSelectElement;
+    select.value = '20';
+    select.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 0));
+    fixture.detectChanges();
+
+    const web = () => Array.from(el.querySelectorAll('.pf-import-row')).find((r) => r.textContent?.includes('acme/web'))!;
+    (web().querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    const busy = web().querySelector('button') as HTMLButtonElement;
+    expect(busy.getAttribute('aria-busy')).toBe('true');
+    expect(busy.disabled).toBe(true);
+    expect(busy.querySelector('.pf-spin')).toBeTruthy();
+    expect(busy.textContent).toContain('import.followPending');
+
+    finish(7);
+    await new Promise((r) => setTimeout(r, 0));
+    fixture.detectChanges();
+    const done = web().querySelector('button') as HTMLButtonElement;
+    expect(done.getAttribute('aria-busy')).toBeNull();
+    expect(done.querySelector('.pf-spin')).toBeNull();
+  });
+
+  it('shows that an unfollow is under way too', async () => {
+    const { fixture, el } = await render({ unfollowRepository: vi.fn(() => new Promise<void>(() => undefined)) });
+    const select = el.querySelector('#pf-import-account') as HTMLSelectElement;
+    select.value = '20';
+    select.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 0));
+    fixture.detectChanges();
+
+    const api = Array.from(el.querySelectorAll('.pf-import-row')).find((r) => r.textContent?.includes('acme/api'))!;
+    (api.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(api.querySelector('button')!.textContent).toContain('import.unfollowPending');
+  });
+
   it('asks the user to install the app when no account is reachable', async () => {
     const { el } = await render({ listAccounts: vi.fn(async () => ({ accounts: [], installUrl: 'https://github.com/apps/pr-follower/installations/new' })) });
 

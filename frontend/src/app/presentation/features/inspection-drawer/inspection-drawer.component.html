@@ -95,6 +95,7 @@
       <app-changed-files
         [files]="drawer().files"
         [state]="drawer().filesState"
+        [errorReason]="drawer().filesError"
         (toggleFile)="store.toggleChangedFile($event)"
       />
     }

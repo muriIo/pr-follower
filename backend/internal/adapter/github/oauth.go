@@ -3,7 +3,6 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -107,23 +106,26 @@ func (c *OAuthClient) requestToken(ctx context.Context, form url.Values) (entity
 		if ctx.Err() != nil {
 			return entity.OAuthToken{}, context.Cause(ctx)
 		}
-		return entity.OAuthToken{}, err
+		return entity.OAuthToken{}, noAnswer(ctx, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode >= 500 {
+		return entity.OAuthToken{}, fmt.Errorf("%w: github token endpoint returned %d", entity.ErrGitHubUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return entity.OAuthToken{}, fmt.Errorf("github token endpoint returned %d", resp.StatusCode)
+		return entity.OAuthToken{}, fmt.Errorf("%w: github token endpoint returned %d", entity.ErrUnauthorized, resp.StatusCode)
 	}
 
 	var body tokenResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
-		return entity.OAuthToken{}, fmt.Errorf("decode github token response: %w", err)
+		return entity.OAuthToken{}, fmt.Errorf("%w: unreadable github token response: %v", entity.ErrGitHubUnavailable, err)
 	}
 	// GitHub reports OAuth failures as 200 with an "error" field.
 	if body.Error != "" {
-		return entity.OAuthToken{}, fmt.Errorf("github oauth error %s: %s", body.Error, body.ErrorDescription)
+		return entity.OAuthToken{}, fmt.Errorf("%w: github oauth error %s: %s", entity.ErrUnauthorized, body.Error, body.ErrorDescription)
 	}
 	if body.AccessToken == "" {
-		return entity.OAuthToken{}, errors.New("github token response has no access_token")
+		return entity.OAuthToken{}, fmt.Errorf("%w: github token response has no access_token", entity.ErrGitHubUnavailable)
 	}
 
 	now := c.cfg.Now()

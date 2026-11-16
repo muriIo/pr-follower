@@ -124,6 +124,11 @@ type PullRequest struct {
 	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
+type PullRequestGithubVersion struct {
+	PullRequestID   int64 `json:"pull_request_id"`
+	GithubUpdatedAt int64 `json:"github_updated_at"`
+}
+
 type Repository struct {
 	ID               int64     `json:"id"`
 	GithubRepoID     int64     `json:"github_repo_id"`

@@ -14,6 +14,10 @@ import (
 // their changed files; the rest stay pending until the next load.
 const MaxOwnershipSyncsPerLoad = 10
 
+// MaxMergeStateReadsPerLoad bounds how many PRs one workspace load asks GitHub for a merge state
+// that is still unknown; the rest wait for the next load.
+const MaxMergeStateReadsPerLoad = 10
+
 type InboxItem struct {
 	PullRequest entity.PullRequest `json:"pull_request"`
 	UserState   entity.UserPRState `json:"user_state"`
@@ -65,6 +69,14 @@ type UseCase struct {
 	reviews  port.ReviewStore
 	checks   port.CheckRunBatchReader
 	failures port.AnalysisFailureStore
+	tokens   port.UserTokenSource
+	live     port.PullRequestStateReader
+}
+
+// WithMergeStateRefresh lets a load ask GitHub, with the reader's token, for the merge state of PRs
+// GitHub had not computed when they were stored (it sends no event once it has).
+func WithMergeStateRefresh(tokens port.UserTokenSource, live port.PullRequestStateReader) Option {
+	return func(uc *UseCase) { uc.tokens, uc.live = tokens, live }
 }
 
 // Option adds an optional collaborator to the use case.
@@ -122,6 +134,10 @@ func (uc *UseCase) GetWorkspaceSnapshot(ctx context.Context, userID uint64) (*Wo
 
 	prs, err := uc.prRepo.ListOpenByRepoIDs(ctx, repoIDs)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := uc.refreshUnknownMergeStates(ctx, userID, repos, prs); err != nil {
 		return nil, err
 	}
 
@@ -379,4 +395,53 @@ func (uc *UseCase) ClaimPR(ctx context.Context, userID, prID uint64) error {
 		ActorLogin:     user.Login,
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// refreshUnknownMergeStates asks GitHub for the merge state of up to MaxMergeStateReadsPerLoad PRs
+// still stored as unknown, and stores (and shows) an answer for the same head commit when it
+// differs. It is best effort: GitHub failing, or the reader having no token, leaves the state
+// unknown and never fails the load (ADR-0013). Only a cancellation stops it.
+func (uc *UseCase) refreshUnknownMergeStates(ctx context.Context, userID uint64, repos []entity.Repository, prs []entity.PullRequest) error {
+	if uc.tokens == nil || uc.live == nil {
+		return nil
+	}
+	byID := make(map[uint64]entity.Repository, len(repos))
+	for _, repo := range repos {
+		byID[repo.ID] = repo
+	}
+	token, budget := "", MaxMergeStateReadsPerLoad
+	for i := range prs {
+		pr := &prs[i]
+		repo, ok := byID[pr.RepositoryID]
+		if !ok || pr.State != entity.PRStateOpen || pr.MergeableState != entity.MergeableStateUnknown {
+			continue
+		}
+		if budget == 0 {
+			return nil
+		}
+		budget--
+		if token == "" {
+			var err error
+			if token, err = uc.tokens.AccessToken(ctx, userID); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return context.Cause(ctx)
+				}
+				return nil // signed out of GitHub: the session handles that elsewhere
+			}
+		}
+		live, err := uc.live.GetPullRequest(ctx, token, repo.Owner, repo.Name, pr.Number)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return context.Cause(ctx)
+		}
+		if err != nil || !live.Open || live.HeadSHA != pr.HeadSHA || live.MergeableState == entity.MergeableStateUnknown {
+			continue // still computing, gone, a newer commit (the next webhook or sync brings it), or GitHub failing
+		}
+		next := *pr
+		next.MergeableState = live.MergeableState
+		if err := uc.prRepo.Upsert(ctx, &next); err != nil {
+			return err
+		}
+		*pr = next
+	}
+	return nil
 }

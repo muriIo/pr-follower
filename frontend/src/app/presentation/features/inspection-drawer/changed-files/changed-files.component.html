@@ -8,7 +8,7 @@
   @if (state() === 'loading') {
     <p class="pf-empty-note" aria-busy="true">{{ 'drawer.files.loading' | t }}</p>
   } @else if (state() === 'error') {
-    <p class="pf-empty-note">{{ 'drawer.files.error' | t }}</p>
+    <p class="pf-empty-note" role="alert">{{ 'drawer.files.error' | t }} {{ errorReason() }}</p>
   } @else if (files().length === 0) {
     <p class="pf-empty-note">{{ 'drawer.files.unavailable' | t }}</p>
   } @else {

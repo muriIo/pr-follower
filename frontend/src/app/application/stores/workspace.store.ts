@@ -34,6 +34,9 @@ import { LocaleStore } from './locale.store';
 /** How often the progress of a background sync is read. */
 const SYNC_POLL_MS = 1000;
 
+/** Failures after which GitHub's state may differ from ours: the workspace is read again (ADR-0013). */
+const REREAD_AFTER: ReadonlySet<string> = new Set(['outcome_unknown', 'conflict', 'checks_running', 'not_found']);
+
 /** Waits, or rejects with an AbortError the moment the signal aborts. */
 function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -54,7 +57,8 @@ function sleepUnlessAborted(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** A moment as the clock time the user reads it. */
-function formatClock(iso: string): string {
+/** A time of day in the user's locale (hh:mm), e.g. when a rate limit lifts. */
+export function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -276,6 +280,8 @@ export interface DrawerViewModel {
   readonly hasFiles: boolean;
   readonly files: readonly ChangedFileCardViewModel[];
   readonly filesState: ChangedFilesState;
+  /** Why the files could not be loaded (empty unless filesState is 'error'). */
+  readonly filesError: string;
   readonly hasVerdict: boolean;
   readonly showIdle: boolean;
   readonly showMerged: boolean;
@@ -346,6 +352,7 @@ export class WorkspaceStore {
     readonly prId: number;
     readonly state: ChangedFilesState;
     readonly files: readonly ChangedFileItem[];
+    readonly error?: string;
   } | null>(null);
   private filesLoad: AbortController | null = null;
   private lastBatchTotal = 0;
@@ -898,9 +905,10 @@ export class WorkspaceStore {
       hasFiles: files.length > 0,
       files,
       filesState,
+      filesError: loaded?.prId === pr.id ? (loaded.error ?? '') : '',
       showIdle: act.idle && !merged,
       showMerged: act.idle && merged,
-      showSecondary: !merged && !act.hasNote,
+      showSecondary: !merged,
       blocked: Boolean(blockedText),
       blockedCls: 'pf-blocked',
       blockedText,
@@ -979,9 +987,9 @@ export class WorkspaceStore {
       const firstOwned = files.findIndex((f) => f.owned);
       this.changedFileOpenMap.set({ [firstOwned >= 0 ? firstOwned : 0]: true });
       this.changedFiles.set({ prId, state: 'ready', files });
-    } catch {
+    } catch (err: unknown) {
       if (!controller.signal.aborted) {
-        this.changedFiles.set({ prId, state: 'error', files: [] });
+        this.changedFiles.set({ prId, state: 'error', files: [], error: this.failureText(err) });
       }
     }
   }
@@ -1171,10 +1179,15 @@ export class WorkspaceStore {
 
   /** The note shown when an action fails: what happened, in the user's language. */
   private failureNote(err: unknown): string {
+    if (err instanceof ActionError && REREAD_AFTER.has(err.code)) {
+      this.scheduleWorkspaceRefresh(); // GitHub's state may differ from ours: look again
+    }
+    return this.failureText(err);
+  }
+
+  /** What a failure was, in the user's language, with GitHub's explanation when it gave one. */
+  private failureText(err: unknown): string {
     if (err instanceof ActionError) {
-      if (err.code === 'outcome_unknown' || err.code === 'conflict' || err.code === 'checks_running') {
-        this.scheduleWorkspaceRefresh(); // GitHub's state may differ from ours: look again
-      }
       return this.t(`actions.error.${err.code}`, {
         detail: err.detail,
         time: err.retryAt ? formatClock(err.retryAt) : '',
@@ -1417,7 +1430,7 @@ export class WorkspaceStore {
         idx === 0
           ? this.t('actions.batch.approveCanceledNone')
           : this.n('actions.batch.approveCanceled', idx, { rest: total - idx }),
-      (err) => this.failureNote(err),
+      (err, idx) => this.t('actions.batch.approveFailed', { done: idx, total, pr: list[idx]?.number ?? '', reason: this.failureNote(err) }),
     );
   }
 
@@ -1442,7 +1455,7 @@ export class WorkspaceStore {
         idx === 0
           ? this.t('actions.batch.mergeCanceledNone')
           : this.n('actions.batch.mergeCanceled', idx, { rest: total - idx }),
-      (err) => this.failureNote(err),
+      (err, idx) => this.t('actions.batch.mergeFailed', { done: idx, total, pr: list[idx]?.number ?? '', reason: this.failureNote(err) }),
     );
   }
 

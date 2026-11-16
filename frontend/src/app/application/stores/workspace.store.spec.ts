@@ -618,6 +618,15 @@ describe('WorkspaceStore changed-files preview', () => {
     expect(store.drawer()!.files).toEqual([]);
   });
 
+  it('says why the files could not be loaded (ADR-0013)', async () => {
+    const store = setup(vi.fn(async () => Promise.reject(new ActionError('rate_limited', '', '2026-11-16T14:05:00Z'))));
+    store.openPr(142);
+    await vi.waitFor(() => expect(store.drawer()!.filesState).toBe('error'));
+    // The rate-limit sentence, up to the time it names (the clock format is the store's).
+    const before = TestBed.inject(LocaleStore).translate('actions.error.rate_limited', { time: '@' }).split('@')[0];
+    expect(store.drawer()!.filesError.startsWith(before)).toBe(true);
+  });
+
   it('does not load files for Dependabot PRs, whose drawer shows the impact analysis', () => {
     const fetch = vi.fn(async () => []);
     const store = setup(fetch);
@@ -810,6 +819,73 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
     expect(store.mergedMap()[1]).toBeUndefined();
     store.openPr(1);
     expect(store.drawer()!.act.note).toBe(translate('actions.error.conflict', { detail: 'Pull Request is not mergeable' }));
+  });
+
+  it('keeps a refused merge on screen with the buttons back, so the user can read it and retry (ADR-0013)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, translate } = setup({
+        mergePullRequest: vi.fn(async () => {
+          throw new ActionError('conflict', 'Required status check "ci" is failing.');
+        }),
+      });
+      store.openPr(1);
+      await store.mergePr(1);
+      vi.advanceTimersByTime(60_000);
+
+      const drawer = store.drawer()!;
+      expect(drawer.act.note).toBe(translate('actions.error.conflict', { detail: 'Required status check "ci" is failing.' }));
+      expect(drawer.act.dismissible).toBe(true);
+      expect(drawer.showIdle).toBe(true);
+      expect(drawer.showSecondary).toBe(true);
+
+      drawer.act.dismiss();
+      expect(store.drawer()!.act.hasNote).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('looks at GitHub again when it says the PR is gone', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchWorkspace = vi.fn(async () => null);
+      const { store } = setup({
+        fetchWorkspace,
+        mergePullRequest: vi.fn(async () => {
+          throw new ActionError('not_found', 'Not Found');
+        }),
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      fetchWorkspace.mockClear();
+      await store.mergePr(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fetchWorkspace).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says how far a batch got and which PR GitHub refused, so the rest can be retried', async () => {
+    const dep = (id: number, number: number): PullRequestItem => ({ ...prOf(id, '@dependabot[bot]'), number, dep: true, verdict: 'baixo', ci: 'ok', pkg: 'vitest' });
+    const mergePullRequest = vi.fn(async (prId: number) => {
+      if (prId === 12) {
+        throw new ActionError('conflict', 'Base branch was modified.');
+      }
+      return {};
+    });
+    const { store, translate } = setup({ mergePullRequest });
+    store.prs.set([dep(11, 101), dep(12, 102), dep(13, 103)]);
+    store.approvedMap.set({ 11: true, 12: true, 13: true });
+
+    await store.runBatchMerge();
+
+    expect(mergePullRequest).toHaveBeenCalledTimes(2);
+    expect(store.mergedMap()[11]).toBe(true);
+    expect(store.mergedMap()[12]).toBeUndefined();
+    const reason = translate('actions.error.conflict', { detail: 'Base branch was modified.' });
+    expect(store.batchAction().note).toBe(translate('actions.batch.mergeFailed', { done: 1, total: 3, pr: 102, reason }));
+    expect(store.batchAction().dismissible).toBe(true);
   });
 
   it('says "merged" without a made-up commit when GitHub returned none', async () => {
