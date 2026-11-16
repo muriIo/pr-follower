@@ -504,6 +504,46 @@ describe('WorkspaceStore truthful PR state', () => {
     expect(store.safeBatchSummary().has).toBe(false);
   });
 
+  it('groups failed analyses on their own, says why in the drawer, and offers a retry only when it may work', () => {
+    const dep = createInitialPrDataset().find((p) => p.dep)!;
+    const failed = (id: number, retryable: boolean, reason: string): PullRequestItem => ({
+      ...dep,
+      id,
+      repo: 'acme/web',
+      ci: 'ok',
+      verdict: null,
+      score: undefined,
+      pkg: 'axios',
+      analysisFailed: true,
+      analysisRetryable: retryable,
+      rvDetail: { key: reason },
+    });
+    const store = setup(
+      [{ name: 'acme/web', branch: 'main' }],
+      [failed(81, true, 'impact.rvDetail.failed.forbidden'), failed(82, false, 'impact.rvDetail.failed.not_analysable'), { ...dep, id: 83, repo: 'acme/web', verdict: null, pkg: 'vitest' }],
+    );
+    const t = TestBed.inject(LocaleStore).translate.bind(TestBed.inject(LocaleStore));
+
+    expect(store.radarGroups().map((g) => g.label)).toEqual([
+      `${t('radar.group.failed')} (2)`,
+      `${t('radar.group.none')} (1)`,
+    ]);
+    expect(store.safeBatchSummary().has).toBe(false);
+
+    store.openPr(81);
+    const retry = store.drawer()!;
+    expect(retry.rvHead).toBe(t('risk.tier.failed'));
+    expect(retry.rvDetail).toBe(t('impact.rvDetail.failed.forbidden'));
+    expect(retry.showAnalyze).toBe(true);
+    expect(retry.analyzeLabel).toBe(t('drawer.analyzeRetry'));
+
+    store.openPr(82);
+    expect(store.drawer()!.showAnalyze).toBe(false); // the lockfile will not become readable
+
+    store.openPr(83);
+    expect(store.drawer()!.analyzeLabel).toBe(t('drawer.analyze'));
+  });
+
   it('labels cards without CI as "Sem CI" in the inbox and the radar', () => {
     const dep = createInitialPrDataset().find((p) => p.dep)!;
     const store = setup(

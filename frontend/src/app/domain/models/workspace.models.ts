@@ -120,6 +120,10 @@ export interface PullRequestItem {
   readonly branch: string;
   /** Dependabot risk verdict; null for human PRs and for bumps not analysed yet. */
   readonly verdict: RiskVerdictTier | null;
+  /** The head commit's analysis was tried and failed (rvDetail says why). */
+  readonly analysisFailed?: boolean;
+  /** Running the analysis again may work (false when the reason is lasting, e.g. an unreadable lockfile). */
+  readonly analysisRetryable?: boolean;
   readonly ci: CiState;
   readonly ciText: I18nText;
   readonly owners: OwnersState;

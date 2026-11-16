@@ -288,8 +288,10 @@ export interface DrawerViewModel {
   readonly approveDis: string;
   /** Why approving is unavailable, or ''. */
   readonly approveTip: string;
-  /** A Dependabot PR with no analysis yet: the user can ask for it. */
+  /** A Dependabot PR with no analysis yet, or one that failed and may work again: the user can ask for it. */
   readonly showAnalyze: boolean;
+  /** "Analisar agora", or "Tentar de novo" after a failure. */
+  readonly analyzeLabel: string;
   /** 'true' once CI has passed (or never reports): waiting for it is pointless. */
   readonly silenceCiDis: string;
   /** Why "silence until CI passes" is unavailable, or ''. */
@@ -537,7 +539,7 @@ export class WorkspaceStore {
           const showTurn = isTurn && !p.dep;
           const mine = Boolean(approved[p.id]);
           const isApproved = Boolean(p.approvedBy || (mine && !p.dep));
-          const tier = this.t(p.verdict ? RISK_TIER_KEYS[p.verdict] : 'risk.tier.none');
+          const tier = this.t(p.verdict ? RISK_TIER_KEYS[p.verdict] : p.analysisFailed ? 'risk.tier.failed' : 'risk.tier.none');
           const dev = p.depType === 'devDependencies';
           const vLabel = p.verdict ? this.t(RISK_LABEL_KEYS[p.verdict]) : '';
           const safe = isSafeBatchCandidate(p, this.effectiveCi(p).ci);
@@ -660,17 +662,19 @@ export class WorkspaceStore {
     const deps = this.openDependabotPrs();
     const approved = this.approvedMap();
     const selected = this.selectedPrId();
-    const tiers: readonly [RiskVerdictTier | null, string][] = [
-      ['alto', this.t('radar.group.alto')],
-      ['baixo', this.t('radar.group.baixo')],
-      ['medio', this.t('radar.group.medio')],
-      [null, this.t('radar.group.none')],
+    // A failed analysis has no verdict either, but "not analysed" would hide that it was tried.
+    const tiers: readonly [(p: PullRequestItem) => boolean, string][] = [
+      [(p) => p.verdict === 'alto', this.t('radar.group.alto')],
+      [(p) => p.verdict === 'baixo', this.t('radar.group.baixo')],
+      [(p) => p.verdict === 'medio', this.t('radar.group.medio')],
+      [(p) => p.verdict === null && p.analysisFailed === true, this.t('radar.group.failed')],
+      [(p) => p.verdict === null && !p.analysisFailed, this.t('radar.group.none')],
     ];
 
     return tiers
-      .map(([verdict, label]) => {
+      .map(([inGroup, label]) => {
         const items: RadarCardViewModel[] = deps
-          .filter((p) => p.verdict === verdict)
+          .filter(inGroup)
           .map((p) => {
             const ci = this.effectiveCi(p).ci;
             return {
@@ -900,7 +904,8 @@ export class WorkspaceStore {
       blocked: Boolean(blockedText),
       blockedCls: 'pf-blocked',
       blockedText,
-      showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg),
+      showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg) && (!pr.analysisFailed || pr.analysisRetryable === true),
+      analyzeLabel: this.t(pr.analysisFailed ? 'drawer.analyzeRetry' : 'drawer.analyze'),
       silenceCiDis: this.canSilenceUntilCi(pr) ? 'false' : 'true',
       silenceCiTip: this.silenceCiReason(pr),
       hasReviews: (pr.reviews?.length ?? 0) > 0,
@@ -1498,7 +1503,7 @@ export class WorkspaceStore {
   }
 
   private buildDependabotDetail(pr: PullRequestItem) {
-    const tier = this.t(pr.verdict ? RISK_TIER_KEYS[pr.verdict] : 'risk.tier.none');
+    const tier = this.t(pr.verdict ? RISK_TIER_KEYS[pr.verdict] : pr.analysisFailed ? 'risk.tier.failed' : 'risk.tier.none');
     const bump = pr.from && pr.to ? computeSemverBumpLabel(pr.from, pr.to) : null;
     const repoShort = pr.repo.split('/')[1] ?? pr.repo;
     const nodes: { label: string; info: string; target?: boolean }[] = [
