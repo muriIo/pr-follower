@@ -1,0 +1,21 @@
+# PR Follower on any Kubernetes cluster (INSTALL.md, path B). Postgres is not included: use a
+# managed database or an operator such as CloudNativePG, and put its URL in the secret below.
+#
+#   kubectl create namespace pr-follower
+#   kubectl -n pr-follower create secret generic pr-follower --from-env-file=api.env
+#   kubectl -n pr-follower create secret generic pr-follower-github-app --from-file=github-app.pem=<key>.pem
+#   kubectl apply -k .
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pr-follower
+labels:
+  - pairs: { app.kubernetes.io/part-of: pr-follower }
+resources:
+  - api.yaml
+  - panel.yaml
+  - ingress.yaml
+images: # the release to run: a tag from https://github.com/muriIo/pr-follower/releases
+  - name: ghcr.io/muriio/pr-follower-api
+    newTag: "0.1.0"
+  - name: ghcr.io/muriio/pr-follower-panel
+    newTag: "0.1.0"

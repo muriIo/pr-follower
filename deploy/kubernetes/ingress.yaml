@@ -1,0 +1,29 @@
+# Public entry: TLS for your domain, everything forwarded to the panel. The annotations are for
+# ingress-nginx; with another controller (Traefik, a cloud load balancer, Gateway API) set the same
+# four things: bodies up to 5 MB (GitHub deliveries), 300 s read timeout (merges wait on GitHub),
+# no buffering (the live event stream), and a publicly trusted certificate (GitHub refuses others).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pr-follower
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "5m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    # With cert-manager: cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [prfollower.example.com]
+      secretName: pr-follower-tls
+  rules:
+    - host: prfollower.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pr-follower-panel
+                port: { name: http }

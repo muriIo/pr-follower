@@ -1,0 +1,8 @@
+# Caddy gets and renews a publicly trusted certificate for DOMAIN on its own (ports 80 and 443 must
+# reach this machine, and DOMAIN must point at it). Its defaults already fit PR Follower: no body
+# size limit (GitHub deliveries reach 5 MB), no response timeout (merges wait on GitHub), and the
+# live event stream is flushed as it is written.
+{$DOMAIN} {
+	reverse_proxy panel:8080
+	header Strict-Transport-Security "max-age=31536000"
+}

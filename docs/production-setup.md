@@ -2,6 +2,8 @@
 
 Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-11 (`main` after #31). The sign-in model is [ADR-0010](adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
 
+Installing it for the first time? [`INSTALL.md`](../INSTALL.md) is the short, cloud-agnostic path with ready files (Docker Compose, Kubernetes); this runbook is the detail behind each of its steps.
+
 Work through the sections in order: each one uses what the previous ones produced. Deploying on AWS? [`aws-setup.md`](aws-setup.md) maps these steps to AWS services (and explains the choices); it reuses §2, §4–5, §10–11 and §13 from here.
 
 | Placeholder | Meaning |
@@ -216,7 +218,7 @@ On the app's **General** page:
 | `GITHUB_APP_PRIVATE_KEY_FILE` | yes* | `/run/secrets/github-app.pem` | Secret. Preferred: the mounted `.pem` (§6.2). Wins over `GITHUB_APP_PRIVATE_KEY`. A file the API cannot read stops it at start. |
 | `GITHUB_APP_PRIVATE_KEY` | | the `.pem` contents | Secret. Alternative to the file for platforms that only take variables: one line, newlines written as `\n` (§6.2). A key that does not parse stops the API at start. |
 | `GITHUB_APP_SLUG` | yes | from §5 | Builds the **+ Adicionar conta do GitHub** link (`https://github.com/apps/<slug>/installations/new`). Without it the import screen has no install link. |
-| `GITHUB_WEBHOOK_SECRET` | yes | from §2 | Secret. The default is the public dev value `dev-webhook-secret`, with which anyone could forge deliveries. |
+| `GITHUB_WEBHOOK_SECRET` | yes | from §2 | Secret. Without it the API uses the public development value `dev-webhook-secret`, with which anyone could forge deliveries, so it refuses to start when `PUBLIC_URL` is https. |
 | `TOKEN_ENCRYPTION_KEY` | yes | from §2 | Secret. Standard base64 of 32 bytes. Unset: a random key on every start, so GitHub sign-ins do not survive a restart. Invalid: the API stops at start. |
 | `ALLOWED_ORIGIN` | no | `https://app.example.com` | CORS. The app is same-origin, so this only narrows the default `*`. |
 | `PORT` | no | `8080` | Default. |
@@ -567,6 +569,7 @@ The API logs one `ERROR` line and exits:
 
 | Log line | Cause | Fix |
 |---|---|---|
+| `failed to load configuration` … `GITHUB_WEBHOOK_SECRET must be set` | `PUBLIC_URL` is https and `GITHUB_WEBHOOK_SECRET` is unset (or the public development value). | Set the app's webhook secret (§2, §6.1). |
 | `failed to load configuration` … `read GITHUB_APP_PRIVATE_KEY_FILE` | The key file is missing at that path or not readable by UID 10001. | Mount it as in §6.2. |
 | `failed to connect to database` | `DATABASE_URL` is wrong, Postgres is unreachable or refuses TLS, or a migration failed. It gives up after 4 quick attempts; the restart policy retries. | Check the URL, network and `sslmode`, and that the role owns the database (§3). |
 | `invalid TOKEN_ENCRYPTION_KEY` | Not standard base64 of exactly 32 bytes. | Fix the copy first (§2 has the check). Generating a new key signs everyone out (§13.5). |
