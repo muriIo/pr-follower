@@ -12,8 +12,7 @@ Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Run two API replicas behind one proxy for real: everything they share is in Postgres now (ADR-0012), but only tests have exercised it ([Live updates](#7-live-updates--timeline)).
-2. **P2** Store failed Dependabot analyses and show them with a retry ([Dependabot](#5-dependabot-radar--analysis)).
+1. **P2** Store failed Dependabot analyses and show them with a retry ([Dependabot](#5-dependabot-radar--analysis)).
 
 ## 1. Identity & sessions
 
@@ -104,7 +103,9 @@ No P1 item is open. In order of value:
 - [x] Activity is persisted and shared: every published event is appended to the `activity_events` table (migration 00009) and each API replica delivers what it reads back from that log, in order, to its own SSE subscribers; the workspace timeline reads the same table (newest 200 of the followed repositories). Restarts lose nothing, and replicas wake each other with Postgres `LISTEN/NOTIFY` (no payload; readers go to the log), with a 5s poll as the safety net, a catch-up read after every listener reconnect, and a re-read of the newest 64 positions so a row that commits late is not missed. Activity older than 7 days is pruned hourly. A publish fails if the event cannot be recorded; a failed wake-up only delays delivery (#30).
 - [x] A dead stream is noticed: the heartbeat is a `heartbeat` event (it was an SSE comment, which `EventSource` never shows the page), and the SPA closes and reopens a stream that sent nothing for 60s, so the reload after reconnecting catches up. Found in the 2026-11-16 verification: stopping the API in dev left the browser's stream open through the Vite proxy, the panel kept saying "Ao vivo (SSE)" and missed every event after the restart (a Dependabot analysis stayed "Sem análise").
 - [x] Overlapping workspace reloads (a sync's own and a live event's) keep the newest: an older answer that arrives last is dropped.
-- [ ] **P2** Not verified with two running replicas yet: the signal is tested against a real Postgres (notify, reconnect after the connection is killed) and the hub against a shared log, but not two API processes behind one proxy. Also, a stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
+- [x] Verified with two running replicas (2026-11-16): two API processes on one Postgres behind an nginx that picks a replica per request. Webhooks accepted by either replica reached a live stream held by the other (8 real commit statuses, CI events in the drawer and timeline), and a sync started on one replica was followed to the end by progress polls answered by the other.
+- [ ] **P2** Not verified with two running replicas yet: a sync or an operation cancelled on the replica that does not run it (covered by tests only; a two-repository sync ends in about two seconds, too fast to cancel by hand).
+- [ ] **P2** A stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
 
 ## 8. Inspection drawer
 

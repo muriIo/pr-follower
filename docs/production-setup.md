@@ -28,7 +28,7 @@ Work through the sections in order: each one uses what the previous ones produce
 Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks a deploy, but know them before users arrive:
 
 - [x] **Verified against real GitHub** (2026-11-16, [`real-github-verification.md`](real-github-verification.md)); what is still unverified is listed in the roadmap.
-- **Several API replicas** are supported (§13.10, ADR-0012) but have not run as two processes behind one proxy yet.
+- **Several API replicas** are supported (§13.10, ADR-0012) and were run as two processes behind one proxy; a cancel landing on the other replica is covered by tests only.
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
 - **Failed Dependabot analyses are only logged**: the Radar keeps showing "Sem análise".
