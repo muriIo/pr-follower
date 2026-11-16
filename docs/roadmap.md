@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-11 (open items checked against the code after #30).
+Last reviewed: 2026-11-16 (open items checked against the code after #41).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -127,7 +127,7 @@ No P1 item is open. In order of value:
 - [x] The panel's nginx accepts webhook deliveries up to 5 MB, like the API: its 1 MB default refused a large `push` delivery with 413 before it reached the API. The production runbook was rechecked against the code and rewritten step by step.
 - [ ] **P2** Bound concurrent GitHub requests per token: nothing caps them today (rate-limit headers are honoured since #29, see [PR state](#3-pr-state-from-github)).
 - [ ] **P2** Several API replicas: sync jobs (`/sync`) and the operation-cancellation registry (`X-Operation-ID`) are still in one replica's memory, so a poll or a cancel that lands on another replica does not find them. Move them to the database, or route by session (sticky), before running more than one replica.
-- [ ] **P2** Continuous integration: no GitHub Actions workflow runs `make check` on PRs yet.
+- [x] Continuous integration: `.github/workflows/ci.yml` runs `make check` on PRs and `main` (#40; see [Business & distribution](#12-business--distribution)).
 - [ ] **P2** Gates from the plan not in the Makefile: `golangci-lint run`, frontend coverage.
 
 ## 11. Engineering guidelines
