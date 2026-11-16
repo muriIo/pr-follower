@@ -6,10 +6,17 @@ How the project makes money and how it reaches users. Decisions are dated; open 
 
 **Decided (2026-11-13): open source + services.** The product (backend, frontend, deploy recipes) is published as open source and anyone can self-host it. Revenue comes from services offered around it, not from gating the code.
 
+**Decided (2026-11-16): a self-hosted, open-source portfolio project with optional income.**
+
+- **Goal.** A strong open-source portfolio piece first; income is optional.
+- **First user.** The company the maintainer works for validates it on its own infrastructure, with pt-BR as the default UI language. Every team, the first one included, runs its own deployment.
+- **No hosted offer.** The maintainer takes no operations responsibility: no SaaS, no on-call, no customer code passing through infrastructure the maintainer runs.
+- **Services.** End-to-end support and setup for teams that self-host, agreed per engagement (no fixed tiers or prices until someone asks). Plus sponsorship (GitHub Sponsors / Buy Me a Coffee through `.github/FUNDING.yml`) and stars.
+
 Open:
 
-- [ ] **Define the services.** Which services, for whom, and at what price. Not discussed yet. Schedule a dedicated session for this before any public launch.
-- [ ] **Choose the license.** The repository has no `LICENSE` file yet. The license decides what others may do with the code (for example, a permissive license versus a copyleft one that requires hosted forks to publish their changes), so it should be chosen alongside the services.
+- [ ] **Written permission from the employer** to publish the code under an open-source license in the maintainer's name. It was built while employed and is validated on the company's infrastructure, so ownership must be settled before the repository goes public.
+- [ ] **License: Apache-2.0 (recommended, to confirm).** With no hosted offer to protect, a copyleft license (AGPL) would only deter companies from adopting it. Apache-2.0 is permissive and adds an explicit patent grant, which companies' legal reviews prefer.
 
 ## 2. Distribution
 
@@ -23,14 +30,13 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
 
 1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`). Implemented in `.github/workflows/ci.yml` as two parallel jobs, `backend` and `frontend`; the backend job runs a Postgres 17 service so the tests that need a real database run instead of skipping.
 2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). A tag builds both images (`pr-follower-api`, `pr-follower-panel`) and publishes them to GitHub Container Registry (`ghcr.io`) tagged with the version and the commit SHA. A GitHub Release is created with notes generated from the Conventional Commits since the previous tag. Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from those commits (minor or patch until launch; major only from `1.0.0` on), summarizes them, and tags only after approval.
-3. **Staging (homologation).** Every merge to `main` builds images tagged with the commit SHA and deploys them to staging automatically. Production gets only tagged releases, after a manual approval (a GitHub Environment with required reviewers).
+3. **Deployments belong to whoever runs it (revised 2026-11-16).** This repository ships images and recipes, not environments. Each team, the first one included, deploys tagged images from GHCR with its own pipeline, GitHub App, database and secrets ([`production-setup.md`](production-setup.md), [`aws-setup.md`](aws-setup.md)). The automatic staging deploy and the production approval planned on 2026-11-13 are dropped from this repository: the maintainer runs no environment.
 
 Open:
 
-- [ ] Where staging and production run (the AWS shape in [`aws-setup.md`](aws-setup.md) or another host) and how the deploy job reaches them.
-- [ ] Staging needs its own GitHub App (webhook URL, callback) and its own database, so test data never touches production.
+- [ ] The first deployment, at the company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
 - [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
-- [ ] Implement the remaining workflows: `release.yml`, `deploy.yml` in `.github/workflows/`, then update [`production-setup.md`](production-setup.md) (§7 deploys commit SHAs today).
+- [ ] Implement `release.yml` in `.github/workflows/` (no `deploy.yml`: see 3. above), then update [`production-setup.md`](production-setup.md) to deploy tagged images (§7 deploys commit SHAs today).
 
 ## 3. Going public
 
@@ -38,6 +44,8 @@ Open:
 
 Before flipping the visibility:
 
+- [ ] Written permission from the employer (§1).
 - [ ] `LICENSE` chosen and added (§1).
+- [ ] A README for self-hosters (what it does, screenshots, the quick start), plus `CONTRIBUTING.md`, `SECURITY.md` (how to report a vulnerability) and `.github/FUNDING.yml`.
 - [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
 - [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.
