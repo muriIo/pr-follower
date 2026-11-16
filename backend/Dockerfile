@@ -7,7 +7,7 @@ COPY . .
 # Migrations are embedded (//go:embed in internal/infrastructure/database), so the binary is self-contained.
 RUN go build -trimpath -ldflags="-s -w" -o /out/server ./cmd/server
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata \
     && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app
 COPY --from=build --chown=app:app /out/server /usr/local/bin/server
