@@ -12,8 +12,7 @@ Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** The live stream does not notice a dead connection: after an API restart the panel can stay on a stream that delivers nothing while showing "Ao vivo (SSE)" ([Live updates](#7-live-updates--timeline)). Found in the real-GitHub verification of 2026-11-16.
-2. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
+1. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
 
 ## 1. Identity & sessions
 
@@ -102,8 +101,8 @@ No P1 item is open. In order of value:
 - [x] Timeline views: all activity or only mine (who acted: the webhook sender, the user behind an app action), filtered by a repository of the Seats; one icon per activity type (merge, approval, open, close, commit, CI, claim, access...) (#16).
 - [x] Merged PRs are reported as merged (`pr.merged`, state `MERGED`), not as closed.
 - [x] Activity is persisted and shared: every published event is appended to the `activity_events` table (migration 00009) and each API replica delivers what it reads back from that log, in order, to its own SSE subscribers; the workspace timeline reads the same table (newest 200 of the followed repositories). Restarts lose nothing, and replicas wake each other with Postgres `LISTEN/NOTIFY` (no payload; readers go to the log), with a 5s poll as the safety net, a catch-up read after every listener reconnect, and a re-read of the newest 64 positions so a row that commits late is not missed. Activity older than 7 days is pruned hourly. A publish fails if the event cannot be recorded; a failed wake-up only delays delivery (#30).
-- [ ] **P2** The live stream does not notice a dead connection. In dev, stopping the API left the browser's stream open through the Vite proxy (`ECONNREFUSED` upstream, no error downstream), so the panel kept saying "Ao vivo (SSE)", never reconnected, and after the restart missed every event: a Dependabot analysis that lands two seconds after "Sincronizar" reloads stayed "Sem análise" until an unrelated event. The heartbeat is an SSE comment, which `EventSource` never surfaces to the page. Send it as an event and close and reopen a stream that is silent for about two heartbeats (the reload after a reconnect then catches up). Production through nginx is not known to be affected, but a half-open connection behind a load balancer would be.
-- [ ] **P2** `loadWorkspace` has no guard against an older response arriving after a newer one (a sync's reload racing a live-event reload): drop a response when a newer request has started.
+- [x] A dead stream is noticed: the heartbeat is a `heartbeat` event (it was an SSE comment, which `EventSource` never shows the page), and the SPA closes and reopens a stream that sent nothing for 60s, so the reload after reconnecting catches up. Found in the 2026-11-16 verification: stopping the API in dev left the browser's stream open through the Vite proxy, the panel kept saying "Ao vivo (SSE)" and missed every event after the restart (a Dependabot analysis stayed "Sem análise").
+- [x] Overlapping workspace reloads (a sync's own and a live event's) keep the newest: an older answer that arrives last is dropped.
 - [ ] **P2** Not verified with two running replicas yet: the signal is tested against a real Postgres (notify, reconnect after the connection is killed) and the hub against a shared log, but not two API processes behind one proxy. Also, a stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
 
 ## 8. Inspection drawer
