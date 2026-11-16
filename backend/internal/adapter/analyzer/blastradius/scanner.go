@@ -8,6 +8,7 @@ import (
 	"io"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -88,6 +89,13 @@ func (s *Scanner) ScanTarball(
 		}
 	}
 
+	// The archive lists files in GitHub's order; sort so every analysis shows the same list.
+	sort.SliceStable(usages, func(i, j int) bool {
+		if usages[i].FilePath != usages[j].FilePath {
+			return usages[i].FilePath < usages[j].FilePath
+		}
+		return usages[i].LineNumber < usages[j].LineNumber
+	})
 	return usages, nil
 }
 
