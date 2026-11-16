@@ -12,7 +12,7 @@ Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Store failed Dependabot analyses and show them with a retry ([Dependabot](#5-dependabot-radar--analysis)).
+1. **P2** A periodic background resync, so a repository nobody syncs after downtime does not stay stale ([PR state](#3-pr-state-from-github)).
 
 ## 1. Identity & sessions
 
@@ -73,7 +73,7 @@ No P1 item is open. In order of value:
 - [x] The analysis runs: a Dependabot `pull_request` webhook that changes an open PR, an import that finds one, or a click on "Analisar agora" (cancellable) schedules `AnalyzePR` on a bounded background runner (2 workers, 256 queued, 2 minute timeout per PR, stops with the server). A PR scheduled twice waits once, and one that gets a new commit mid-analysis is analysed again afterwards. The result is stored per commit and converges (concurrent requests share one run and one event). It reads as the GitHub App, so it only exists with the app credentials, and only followers of the repository can ask for it (#23).
 - [x] The analysis refuses what it cannot read honestly: a grouped update ("bump the X group with 3 updates", "bump a and b") or a non-npm PR stays "Sem análise", with its own explanation (`not_analysable`) and no button, instead of being analysed as package "unknown" or answered "invalid request", and the stored verdict no longer bakes in the CI of the moment (CI gates the batch merge live).
 - [x] Dependabot PRs stored before the analysis existed are scheduled for analysis by "Sincronizar" (and a re-import), besides their next webhook or a click (#29).
-- [ ] **P2** Failed analyses are only logged (`dependabot analysis failed`): the Radar keeps showing "Sem análise" as if nothing had been tried. Store the failure and show "analysis failed", with the reason and a retry.
+- [x] Failed analyses are stored per PR commit (`dependabot_analysis_failures`, the error's kind and message) and shown: the Radar groups them as "Análise falhou", and the drawer says why (GitHub refused, not found, rate limit, timeout, unreadable lockfile, unexpected error) with "Tentar de novo", except when the reason is lasting (a lockfile no analyzer reads). A cancel (the user's, or the server stopping) is not a failure. An analysis of the commit supersedes its failure, and a new commit starts clean.
 - [ ] **P2** Grouped Dependabot updates (several packages in one PR) are not analysed.
 - [x] Installation token: the server signs an app JWT (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` or `_FILE`) and exchanges it for a per-installation token, cached and renewed five minutes before expiry, one exchange shared by concurrent callers. The gateway's reads (file contents, PR files, tarballs) use it; approve, merge and comment never do, so nothing acts as the app. Without credentials the server warns and falls back to followers' tokens; invalid credentials stop it at start (#21).
 - [x] Verified against real GitHub (2026-11-16): the dev app's key is exchanged for an installation token, a PR's changed files are read with it on the opening webhook, and a real Dependabot PR (lodash) is analysed at import, after an `@dependabot rebase` (webhook) and after a sync (`MEDIUM`, path `root → lodash`).
