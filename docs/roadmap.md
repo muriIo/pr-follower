@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-16 (open items checked against the code after #41).
+Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub-facing paths verified against a real repository, see [`real-github-verification.md`](real-github-verification.md)).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -12,7 +12,7 @@ Last reviewed: 2026-11-16 (open items checked against the code after #41).
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Verify the GitHub-facing paths against a real repository (installation token, analysis, acting as the user, push refresh, commit statuses, sync after downtime): the open "not verified" items below. Step-by-step: [`real-github-verification.md`](real-github-verification.md).
+1. **P2** The live stream does not notice a dead connection: after an API restart the panel can stay on a stream that delivers nothing while showing "Ao vivo (SSE)" ([Live updates](#7-live-updates--timeline)). Found in the real-GitHub verification of 2026-11-16.
 2. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
 
 ## 1. Identity & sessions
@@ -30,7 +30,8 @@ No P1 item is open. In order of value:
 - [x] Installation webhooks keep access in sync: removed / suspended / restored, flagged in Seats with "Corrigir acesso" (#8).
 - [x] CODEOWNERS read at import: present / absent / unknown, never guessed (#12).
 - [x] CODEOWNERS freshness: a `push` to the default branch that touches a CODEOWNERS path (or that GitHub truncated at 20 commits) re-reads the file as the GitHub App, with a follower's token as fallback; the cached rules and status are stored only when they changed and the change is announced, so every user's turn follows. A file that disappears is recorded as "no CODEOWNERS"; a read that cannot tell never is, and fails the delivery so it can be redelivered. Needs the app subscribed to Push events (#26).
-- [ ] **P2** Not verified against real GitHub yet: a real push that edits CODEOWNERS (the app must be subscribed to Push events), and that a very large push (more than 20 commits) refreshes.
+- [x] Verified against real GitHub (2026-11-16): a push that edits CODEOWNERS refreshes the rules within seconds, deleting the file records "no CODEOWNERS" and restoring it brings the rules back, and a push of 26 commits with the CODEOWNERS edit first (GitHub truncates the list) still refreshes.
+- [ ] **P2** Not verified against real GitHub yet: a `push` delivery that fails without the app credentials and a follower's token, then passes on **Redeliver** (covered by the `*Redeliver*` tests only).
 
 ## 3. PR state from GitHub
 
@@ -41,14 +42,17 @@ No P1 item is open. In order of value:
 - [x] "Sincronizar" resyncs with GitHub as a background job (`POST /sync` starts or joins it, `GET /sync` reports progress, `DELETE /sync` cancels; one per user, in memory). For every repository the user follows, one after the other, it refreshes the open PRs (title, head commit, draft, checks and statuses, reviews, files), adds ones it missed, reopens ones reopened, and closes the ones GitHub no longer has open after asking GitHub what became of each (merged or closed; a PR missing only from the capped listing stays open), announcing each close so open drawers follow. The panel polls once a second ("Sincronizando 3 de 10: acme/web..."), cancelling stops the server too, and the workspace reloads when it is done. One repository failing is reported by name and does not stop the others; the user's own GitHub access failing ends it. It used to only reload what the server already had (#29).
 - [x] GitHub's rate limit is honoured, not guessed at: `Retry-After` and `X-RateLimit-Remaining: 0` + `X-RateLimit-Reset` (and the secondary-limit message). A wait up to 30s is waited out in the request; a longer one fails at once as `rate_limited` (HTTP 429, `retry_at`), and a sync stops there, names how many repositories it left for later and when to try again. nginx's `/api/` read timeout is 300s (was the 60s default) (#29).
 - [ ] **P2** A sync runs only when the user asks: a repository nobody syncs after downtime stays stale until someone does (or a webhook arrives). A periodic background resync would close that.
-- [ ] **P2** Not verified against real GitHub yet: a sync after real downtime, and the rate-limit headers.
+- [x] Verified against real GitHub (2026-11-16): after the API was down, "Sincronizar" added a PR opened meanwhile, closed one merged meanwhile (announcing `pr.merged`), took a recreated Dependabot PR's new head and re-analysed it, and read a commit status that no webhook ever delivered. GitHub sends the `X-RateLimit-Remaining` / `X-RateLimit-Reset` headers the client reads.
+- [ ] **P2** Not verified against real GitHub yet: cancelling a sync midway (with two repositories it ends in about two seconds) and a real `429 rate_limited`.
+- [ ] **P2** A PR opened and merged (or closed) while the API was down leaves no trace: the sync lists only open PRs, so it never appears in Seats or the timeline.
 - [ ] **P2** A sync reads repositories one by one and every open PR in full: conditional requests (ETag), skipping PRs whose head did not change, and a little parallelism across repositories would cut its time and its share of the 5,000 requests/hour per user.
 - [x] Reviews ingested: `pull_request_review` webhooks (approved / changes requested / commented / dismissed) are stored by GitHub's review id, idempotently (a redelivery changes nothing, a dismissal is never revived), and the open human PRs' reviews are read at import for repositories with CODEOWNERS.
 - [x] Reviews of PRs stored before reviews were ingested are filled in by "Sincronizar" (or a re-import), which re-reads the reviews of every open human PR of a repository with CODEOWNERS (#29).
-- [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown.
+- [ ] **P2** `mergeable_state` is often `unknown` in the opening webhook and GitHub sends no event when it is computed: fetch the PR when it stays unknown. Seen on 2026-11-16: a PR stayed `UNKNOWN` in the panel while GitHub said `unstable`; with a required check (`blocked`) the panel would have offered a merge GitHub refuses.
 - [x] Legacy commit statuses (Jenkins, Vercel) count like checks: the `status` webhook and a commit's combined status at import are stored (own table, own id space), listed beside check runs, the latest status of each context decides, and a pending one keeps a PR from looking green. Needs the app subscribed to Status events (#28).
 - [x] Statuses of PRs stored before statuses were ingested are filled in by "Sincronizar", which re-reads the check runs and statuses of every open PR's head commit (#29).
-- [ ] **P2** Not verified against real GitHub yet: a real Vercel or Jenkins status through the `status` webhook and the combined-status read at import.
+- [x] Verified against real GitHub (2026-11-16) with statuses created through the API: pending, success and failure arrive by the `status` webhook within seconds, a pending one disables approve and merge, and a status created while no webhook could arrive is read by the sync.
+- [ ] **P2** Not verified against real GitHub yet: a real Vercel or Jenkins status.
 - [ ] **P2** Out-of-order webhooks: ignore a delivery older than the stored state (ADR-0011 consequence).
 
 ## 4. CODEOWNERS inbox ("Minha Vez")
@@ -73,7 +77,8 @@ No P1 item is open. In order of value:
 - [ ] **P2** Failed analyses are only logged (`dependabot analysis failed`): the Radar keeps showing "Sem análise" as if nothing had been tried. Store the failure and show "analysis failed", with the reason and a retry.
 - [ ] **P2** Grouped Dependabot updates (several packages in one PR) are not analysed.
 - [x] Installation token: the server signs an app JWT (`GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` or `_FILE`) and exchanges it for a per-installation token, cached and renewed five minutes before expiry, one exchange shared by concurrent callers. The gateway's reads (file contents, PR files, tarballs) use it; approve, merge and comment never do, so nothing acts as the app. Without credentials the server warns and falls back to followers' tokens; invalid credentials stop it at start (#21).
-- [ ] **P2** Not verified against real GitHub yet: exchange a token with the dev app's key and read a PR's files through it (see the production runbook).
+- [x] Verified against real GitHub (2026-11-16): the dev app's key is exchanged for an installation token, a PR's changed files are read with it on the opening webhook, and a real Dependabot PR (lodash) is analysed at import, after an `@dependabot rebase` (webhook) and after a sync (`MEDIUM`, path `root → lodash`).
+- [ ] **P2** Not verified against real GitHub yet: a grouped Dependabot update staying "Sem análise" with its own explanation.
 - [ ] **P2** yarn / pnpm lockfiles: accepted by `CanAnalyze`, but path reconstruction only covers npm v2/v3.
 
 ## 6. Actions on GitHub
@@ -86,7 +91,8 @@ No P1 item is open. In order of value:
 - [x] "Approved by me" is the review GitHub recorded for the head commit (stored from the approve response and from webhooks), no longer a flag set in the app; a new commit makes it stale, and every Radar item reports it (`approved_by_me`, plus the teammate who approved) so a reload after an action keeps it.
 - [x] The SPA shows action failures in the user's language instead of swallowing them (a 502 used to look like success), sends each write once, and no longer invents a merge commit.
 - [x] Artificial delays removed from every action: they finish when the server answers.
-- [ ] **P2** Not verified against real GitHub yet: the Dependabot analysis of a real PR (lockfile and tarball reads as the app), and approve, merge and comment with a real user token, and the GitHub app's permission to write pull requests for the user (see the production runbook).
+- [x] Verified against real GitHub (2026-11-16): approve, squash merge and `@dependabot rebase` are written under the user's name (the comment shows "via" the app, as GitHub marks every user-to-server token); a second approve of the same head writes nothing; a running check disables approve and merge in the drawer; the merge webhook that follows the panel's own merge publishes no second `pr.merged`; the user's own PR offers merge and not approve.
+- [ ] **P2** Show why GitHub blocks a merge ("needs 2 approvals, has 1", "required check `ci` failing") instead of only "blocked by branch protection": needs reading the branch's rules (`GET /repos/{owner}/{repo}/rules/branches/{branch}`) or the protection with *Administration: read*.
 
 ## 7. Live updates & timeline
 
@@ -96,6 +102,8 @@ No P1 item is open. In order of value:
 - [x] Timeline views: all activity or only mine (who acted: the webhook sender, the user behind an app action), filtered by a repository of the Seats; one icon per activity type (merge, approval, open, close, commit, CI, claim, access...) (#16).
 - [x] Merged PRs are reported as merged (`pr.merged`, state `MERGED`), not as closed.
 - [x] Activity is persisted and shared: every published event is appended to the `activity_events` table (migration 00009) and each API replica delivers what it reads back from that log, in order, to its own SSE subscribers; the workspace timeline reads the same table (newest 200 of the followed repositories). Restarts lose nothing, and replicas wake each other with Postgres `LISTEN/NOTIFY` (no payload; readers go to the log), with a 5s poll as the safety net, a catch-up read after every listener reconnect, and a re-read of the newest 64 positions so a row that commits late is not missed. Activity older than 7 days is pruned hourly. A publish fails if the event cannot be recorded; a failed wake-up only delays delivery (#30).
+- [ ] **P2** The live stream does not notice a dead connection. In dev, stopping the API left the browser's stream open through the Vite proxy (`ECONNREFUSED` upstream, no error downstream), so the panel kept saying "Ao vivo (SSE)", never reconnected, and after the restart missed every event: a Dependabot analysis that lands two seconds after "Sincronizar" reloads stayed "Sem análise" until an unrelated event. The heartbeat is an SSE comment, which `EventSource` never surfaces to the page. Send it as an event and close and reopen a stream that is silent for about two heartbeats (the reload after a reconnect then catches up). Production through nginx is not known to be affected, but a half-open connection behind a load balancer would be.
+- [ ] **P2** `loadWorkspace` has no guard against an older response arriving after a newer one (a sync's reload racing a live-event reload): drop a response when a newer request has started.
 - [ ] **P2** Not verified with two running replicas yet: the signal is tested against a real Postgres (notify, reconnect after the connection is killed) and the hub against a shared log, but not two API processes behind one proxy. Also, a stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
 
 ## 8. Inspection drawer
