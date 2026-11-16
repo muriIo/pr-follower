@@ -249,6 +249,7 @@
   "actions.syncing.progress": "Syncing {done} of {total}: {current}...",
   "actions.synced.rateLimited": "GitHub's rate limit was reached: {count} repositories were left for later. Try again at {time}.",
   "actions.error.rate_limited": "GitHub's rate limit was reached. Try again at {time}.",
+  "actions.error.sync_interrupted": "The sync was interrupted because the server running it stopped. Sync again.",
   "actions.syncCanceled": "Sync canceled.",
   "actions.batch.approving": "Approving {current} of {total}...",
   "actions.batch.approveCanceledNone": "Batch canceled. No PR was approved.",
