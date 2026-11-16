@@ -41,7 +41,7 @@ Run `make check` from the root (ADR gate, gofmt, vet, migration and architecture
 
 ## Gotchas
 
-- `go.mod` pins Go 1.27.3; with `GOTOOLCHAIN=auto` the host Go downloads it on first use.
+- `go.mod` pins Go 1.27.4; with `GOTOOLCHAIN=auto` the host Go downloads it on first use.
 - `sqlc` is not installed on the host. Regenerate with `cd backend && docker run --rm -v "$PWD":/src -w /src sqlc/sqlc:1.28.0 generate`, matching the version in the `sqlcgen` headers.
 - Sign-in is GitHub-only (ADR-0010). Locally it needs your own GitHub App: copy `.env.example` to `.env` and fill `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` (callback `http://localhost:4200/api/v1/auth/github/callback`). Backend tests sign in through the real callback against a fake `port.GitHubOAuth`; reuse `testServer.signIn` in `internal/adapter/http`.
 - Identity comes only from the session (`currentUser(r)` behind `RequireSession`); never from a request header or body.

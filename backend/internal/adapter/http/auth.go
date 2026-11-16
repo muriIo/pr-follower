@@ -33,7 +33,8 @@ func (h *Handler) AuthGitHubLogin(w http.ResponseWriter, r *http.Request) {
 		redirectWithAuthError(w, r, "login_failed")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	// Secure follows PUBLIC_URL: on for https, off only for local http development.
+	http.SetCookie(w, &http.Cookie{ // nosemgrep: go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
 		Name:     oauthCookieName,
 		Value:    challenge.State + "." + challenge.CodeVerifier,
 		Path:     oauthCookiePath,
@@ -69,7 +70,8 @@ func (h *Handler) AuthGitHubCallback(w http.ResponseWriter, r *http.Request) {
 		redirectWithAuthError(w, r, "login_failed")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	// Secure follows PUBLIC_URL: on for https, off only for local http development.
+	http.SetCookie(w, &http.Cookie{ // nosemgrep: go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
 		Name:     sessionCookieName,
 		Value:    result.SessionToken,
 		Path:     "/",
@@ -142,7 +144,8 @@ func readOAuthFlowCookie(r *http.Request) (state, verifier string, ok bool) {
 }
 
 func (h *Handler) clearCookie(w http.ResponseWriter, name, path string) {
-	http.SetCookie(w, &http.Cookie{
+	// Secure follows PUBLIC_URL: on for https, off only for local http development.
+	http.SetCookie(w, &http.Cookie{ // nosemgrep: go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
 		Name:     name,
 		Value:    "",
 		Path:     path,

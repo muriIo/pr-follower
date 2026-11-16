@@ -264,7 +264,8 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	rc := http.NewResponseController(w)
-	_, _ = fmt.Fprintf(w, "retry: %d\n: connected\n\n", reconnectHintMs)
+	// A text/event-stream of JSON, never HTML: nothing here for a browser to render.
+	_, _ = fmt.Fprintf(w, "retry: %d\n: connected\n\n", reconnectHintMs) // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 	_ = rc.Flush()
 
 	heartbeat := time.NewTicker(h.heartbeat)
@@ -290,7 +291,7 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
 			if err != nil {
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, streamEventName, payload); err != nil {
+			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, streamEventName, payload); err != nil { // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 				return
 			}
 			_ = rc.Flush()
