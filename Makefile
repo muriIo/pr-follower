@@ -1,4 +1,4 @@
-.PHONY: help db-up db-down dev dev-down docker-build adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check
+.PHONY: help db-up db-down dev dev-down docker-build adr-check backend-fmt backend-vet backend-migration-check backend-arch-check backend-test backend-coverage backend-check frontend-test frontend-lint frontend-check check security security-secrets security-deps security-code security-workflows
 
 help:
 	@echo "PR Follower — Quality Gate & Development Commands"
@@ -16,6 +16,7 @@ help:
 	@echo "  make backend-check            Run all Backend Quality Gates (including ADR compliance)"
 	@echo "  make frontend-check           Run all Frontend Quality Gates"
 	@echo "  make check                    Run full monorepo Quality Gates"
+	@echo "  make security                 Run the security scans (secrets, dependencies, code, workflows; needs Docker)"
 
 db-up:
 	docker compose up -d postgres
@@ -88,3 +89,37 @@ frontend-test:
 frontend-check: frontend-lint frontend-test
 
 check: backend-check frontend-check
+
+# Security scans (docs/security.md). Each scanner runs from a pinned image, so a local run and CI
+# give the same answer. Every target fails on a finding.
+GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.24.3
+OSV_IMAGE      ?= ghcr.io/google/osv-scanner:v2.0.2
+SEMGREP_IMAGE  ?= semgrep/semgrep:1.122.0
+ZIZMOR_IMAGE   ?= ghcr.io/zizmorcore/zizmor:1.9.0
+
+security: security-secrets security-deps security-code security-workflows
+
+# Secrets in every commit of every branch, not only the current tree. Matches are redacted.
+security-secrets:
+	docker run --rm -v "$(CURDIR)":/repo:ro $(GITLEAKS_IMAGE) git /repo --log-opts="--all" --redact --no-banner
+
+# Known vulnerabilities (OSV) in the Go modules and the frontend packages. pnpm writes its own
+# environment as a first YAML document in pnpm-lock.yaml and OSV-Scanner reads only that one, so the
+# app's document is handed to it alone.
+security-deps:
+	@tmp=$$(mktemp -d) && \
+	awk 'n >= 2; /^---$$/ { n++ }' frontend/pnpm-lock.yaml > $$tmp/pnpm-lock.yaml && \
+	if [ ! -s $$tmp/pnpm-lock.yaml ]; then cp frontend/pnpm-lock.yaml $$tmp/pnpm-lock.yaml; fi && \
+	docker run --rm -v "$(CURDIR)":/src:ro -v $$tmp:/lock:ro $(OSV_IMAGE) scan source --no-call-analysis=go \
+		-L /src/backend/go.mod -L /lock/pnpm-lock.yaml; \
+	status=$$?; rm -rf $$tmp; exit $$status
+
+# Code patterns (injection, SSRF, unsafe crypto, Dockerfile mistakes). Rules come from the Semgrep
+# registry; no code or metrics leave the machine.
+security-code:
+	docker run --rm -v "$(CURDIR)":/src:ro $(SEMGREP_IMAGE) semgrep scan --error --metrics=off \
+		--config p/default --config p/golang --config p/typescript --config p/dockerfile /src
+
+# GitHub Actions workflows (unpinned actions, leaked credentials, injection).
+security-workflows:
+	docker run --rm -v "$(CURDIR)":/src:ro $(ZIZMOR_IMAGE) --offline /src/.github/workflows

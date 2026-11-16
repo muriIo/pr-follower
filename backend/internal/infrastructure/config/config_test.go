@@ -35,6 +35,7 @@ func TestLoadFromEnv_DefaultsAndOverrides(t *testing.T) {
 
 func TestLoadFromEnv_GitHubLoginSettings(t *testing.T) {
 	t.Setenv("PUBLIC_URL", "https://prfollower.example.com/")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "webhook-secret")
 	t.Setenv("TOKEN_ENCRYPTION_KEY", "a2V5")
 	t.Setenv("GITHUB_CLIENT_ID", "Iv1.client")
 	t.Setenv("GITHUB_CLIENT_SECRET", "shh")
@@ -125,5 +126,34 @@ func TestConfig_GitHubAppNeedsBothIDAndKey(t *testing.T) {
 	cfg, _ := config.LoadFromEnv()
 	if cfg.GitHubAppConfigured() {
 		t.Fatal("an app id without a key cannot authenticate")
+	}
+}
+
+// The local default webhook secret is public (it is in this file). On a public https deployment it
+// would let anyone sign a forged webhook, so the server refuses to start without a real one.
+func TestLoadFromEnv_APublicDeploymentNeedsItsOwnWebhookSecret(t *testing.T) {
+	t.Setenv("PUBLIC_URL", "https://prfollower.example.com")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatal("expected an error: GITHUB_WEBHOOK_SECRET is required on an https PUBLIC_URL")
+	}
+
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "dev-webhook-secret")
+	if _, err := config.LoadFromEnv(); err == nil {
+		t.Fatal("expected an error: the public development secret is not a secret")
+	}
+
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "a-real-random-secret")
+	if _, err := config.LoadFromEnv(); err != nil {
+		t.Fatalf("a real secret: %v", err)
+	}
+}
+
+func TestLoadFromEnv_LocalDevelopmentKeepsTheDefaultWebhookSecret(t *testing.T) {
+	t.Setenv("PUBLIC_URL", "http://localhost:4200")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "")
+	cfg, err := config.LoadFromEnv()
+	if err != nil || cfg.GitHubWebhookSecret == "" {
+		t.Fatalf("local development works without configuring a secret: %v %q", err, cfg.GitHubWebhookSecret)
 	}
 }
