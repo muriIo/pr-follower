@@ -12,7 +12,8 @@ Last reviewed: 2026-11-16 (open items checked against the code after #42; GitHub
 ## Next up
 
 No P1 item is open. In order of value:
-1. **P2** Run more than one API replica: the sync jobs and the operation-cancellation registry are still in one replica's memory ([Backend platform](#10-backend-platform--operations)).
+1. **P2** Run two API replicas behind one proxy for real: everything they share is in Postgres now (ADR-0012), but only tests have exercised it ([Live updates](#7-live-updates--timeline)).
+2. **P2** Store failed Dependabot analyses and show them with a retry ([Dependabot](#5-dependabot-radar--analysis)).
 
 ## 1. Identity & sessions
 
@@ -133,7 +134,7 @@ No P1 item is open. In order of value:
 - [x] Docker images, dev compose, production runbook (#1, #5).
 - [x] The panel's nginx accepts webhook deliveries up to 5 MB, like the API: its 1 MB default refused a large `push` delivery with 413 before it reached the API. The production runbook was rechecked against the code and rewritten step by step.
 - [ ] **P2** Bound concurrent GitHub requests per token: nothing caps them today (rate-limit headers are honoured since #29, see [PR state](#3-pr-state-from-github)).
-- [ ] **P2** Several API replicas: sync jobs (`/sync`) and the operation-cancellation registry (`X-Operation-ID`) are still in one replica's memory, so a poll or a cancel that lands on another replica does not find them. Move them to the database, or route by session (sticky), before running more than one replica.
+- [x] Several API replicas (ADR-0012): each user's sync is a `sync_jobs` row (an atomic claim keeps one per user, the running replica heartbeats every second and picks up a cancel asked anywhere, a silent one reads as `sync_interrupted` and can run again, a run that lost its claim overwrites nothing), and an operation cancel that lands on another replica reaches the one serving it through `NOTIFY`; a user can only cancel their own operations. The `adrcheck` gate asks every locked in-memory struct for a `replica-local:` note.
 - [x] Continuous integration: `.github/workflows/ci.yml` runs `make check` on PRs and `main` (#40; see [Business & distribution](#12-business--distribution)).
 - [ ] **P2** Gates from the plan not in the Makefile: `golangci-lint run`, frontend coverage.
 
