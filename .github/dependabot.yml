@@ -1,10 +1,12 @@
 # PR Follower triages Dependabot PRs, so it gets them too. Minor and patch updates are grouped per
 # ecosystem to keep the queue short; majors arrive one by one. A new release is proposed only after
-# a 7-day cooldown: a hijacked package is usually caught and pulled within days.
+# a 7-day cooldown: a hijacked package is usually caught and pulled within days. Version updates go
+# to `develop`, like every other change; GitHub's security updates always target the default branch.
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /backend
+    target-branch: develop
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups:
@@ -12,6 +14,7 @@ updates:
 
   - package-ecosystem: npm # pnpm-lock.yaml is read by the npm ecosystem
     directory: /frontend
+    target-branch: develop
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups:
@@ -19,6 +22,7 @@ updates:
 
   - package-ecosystem: github-actions # keeps the pinned SHAs and their version comments current
     directory: /
+    target-branch: develop
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }
     groups:
@@ -26,5 +30,6 @@ updates:
 
   - package-ecosystem: docker
     directories: [/backend, /frontend]
+    target-branch: develop
     schedule: { interval: weekly }
     cooldown: { default-days: 7 }

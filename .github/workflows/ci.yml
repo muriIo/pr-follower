@@ -1,12 +1,12 @@
 # The same gate as `make check`, split into its backend and frontend halves so they run in parallel.
-# Both jobs are required status checks on `main` (docs/business-and-distribution.md §2).
+# Both jobs are required status checks on `main` and `develop` (docs/business-and-distribution.md §2).
 # Actions are pinned to commit SHAs (the comment names the release); Dependabot keeps them current.
 name: CI
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
