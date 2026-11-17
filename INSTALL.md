@@ -20,7 +20,7 @@ GitHub ────┘           (public)     serves the web app               �
 | **Postgres 17** | any | Managed, an operator, or the bundled container. Holds all state: back it up. |
 | **TLS proxy** | any | Caddy, nginx, Traefik, an ingress or a cloud load balancer, with a **publicly trusted** certificate (GitHub refuses to deliver webhooks otherwise). |
 
-Use the **same version** for both images. Versions are the [releases](https://github.com/muriIo/pr-follower/releases). Before the first release, build the images from a checkout: `docker build -t <registry>/pr-follower-api:<tag> backend` and `docker build -t <registry>/pr-follower-panel:<tag> frontend`.
+Use the **same version** for both images. Versions are the [releases](https://github.com/muriIo/pr-follower/releases); the images are public, built for `linux/amd64` and `linux/arm64`, and signed: `gh attestation verify oci://ghcr.io/muriio/pr-follower-api:<version> --owner muriIo` checks that one came from this repository's release workflow ([runbook §7](docs/production-setup.md#7-get-the-images)). To build your own instead: `docker build -t <registry>/pr-follower-api:<tag> backend` and `docker build -t <registry>/pr-follower-panel:<tag> frontend`.
 
 **You need:** a domain you control (e.g. `prfollower.example.com`), a place to run containers, Postgres 17, and owner access to the GitHub organization (or your own account) that will own the app.
 

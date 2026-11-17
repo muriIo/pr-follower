@@ -45,6 +45,21 @@ Checked by hand and found sound: session cookies are `HttpOnly`, `SameSite=Lax` 
 | `no-fprintf-to-responsewriter` | `backend/internal/adapter/sse/hub.go` (2) | The live event stream is `text/event-stream` carrying JSON; a browser never renders it as HTML. |
 | `math-random-used` | `backend/internal/infrastructure/resilience/backoff.go` | Retry jitter only; nothing secret or guessable depends on it. |
 
+## Release supply chain
+
+Every release image (`.github/workflows/release.yml`) carries:
+
+- an **SBOM** (SPDX, by BuildKit): every package in the image and its version, to answer "does this image contain X?" when an advisory lands;
+- **build provenance** (SLSA, BuildKit `mode=max`): the commit, workflow run and build inputs that produced it;
+- a **GitHub artifact attestation** on the multi-arch digest: a Sigstore signature tied to this repository's release workflow, so a copy that did not come from it fails verification.
+
+```bash
+gh attestation verify oci://ghcr.io/muriio/pr-follower-api:X.Y.Z --owner muriIo
+docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:X.Y.Z --format '{{json .SBOM}}'
+```
+
+The workflow publishes only from a commit on `main` whose CI passed, uses no caches (a poisoned cache could reach a published image), grants each job only the permissions it needs, and keeps the tag and SHA out of shell templates. Only the admin can create `v*` tags, and none can be moved or deleted (ruleset `release tags`).
+
 ## Before launch
 
 - [ ] **Dynamic scan of a running deployment.** [Nuclei](https://github.com/projectdiscovery/nuclei) against the first real deployment (with the owner's permission), for exposed paths, headers and TLS: `nuclei -u https://<host> -as`. An AI pentest ([Strix](https://github.com/usestrix/strix)) is optional; it needs an LLM API key and sends the app's responses to that provider.
