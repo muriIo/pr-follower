@@ -4,7 +4,7 @@ What is scanned, how to run it, and what the scans found. Report a vulnerability
 
 ## The gate: `make security`
 
-Four scanners, each from a pinned Docker image (versions at the bottom of the `Makefile`), so a local run and CI give the same answer. Every target fails on a finding. CI runs them on every PR, on `main`, and every Monday (`.github/workflows/security.yml`), because a new advisory can make unchanged dependencies vulnerable.
+Four scanners, each from a pinned Docker image (versions at the bottom of the `Makefile`), so a local run and CI give the same answer. Every target fails on a finding. CI runs them on every PR and every Monday on the default branch (`.github/workflows/security.yml`), because a new advisory can make unchanged dependencies vulnerable.
 
 | Target | Scanner | Looks at |
 |---|---|---|
@@ -59,7 +59,7 @@ gh attestation verify oci://ghcr.io/muriio/pr-follower-api:X.Y.Z --owner muriIo
 docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:X.Y.Z --format '{{json .SBOM}}'
 ```
 
-The workflow publishes only from a commit on `main` whose CI passed, uses no caches (a poisoned cache could reach a published image), grants each job only the permissions it needs, and keeps the tag and SHA out of shell templates. Only the admin can create `v*` tags, and none can be moved or deleted (ruleset `release tags`).
+The workflow publishes only from a commit on `main` merged by a PR whose CI passed, uses no caches (a poisoned cache could reach a published image), grants each job only the permissions it needs, and keeps the tag and SHA out of shell templates. Only the admin can create `v*` tags, and none can be moved or deleted (ruleset `release tags`).
 
 ## Before launch
 
