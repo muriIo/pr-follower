@@ -76,6 +76,6 @@ Then ask with `AskUserQuestion`: approve `vX.Y.Z` (recommended), choose a differ
 1. Write the tag message to a file in the scratchpad: the first line is `vX.Y.Z`, then a blank line, then the approved summary's sections (Database, Breaking, Features, Fixes, Internal, Unclassified) as Markdown `## ` headings with their bullets, without the `Release …` and `Bump:` lines. Everything after the first line becomes the GitHub Release notes.
 2. `git tag -a vX.Y.Z <target sha> --cleanup=whitespace -F <that file>`, on the SHA shown in the summary, even if `origin/main` moved since. `--cleanup=whitespace` is required: the default strips every line starting with `#`, which drops the `## ` headings. Check it with `git tag -n99 vX.Y.Z`.
 3. `git push origin vX.Y.Z`. A pushed `v*` tag cannot be moved or deleted (ruleset `release tags`).
-4. Report the tag and the commit it points at, and link the release run (`gh run list --workflow release.yml -L 1`). It first waits for CI on that commit, then publishes `ghcr.io/muriio/pr-follower-{api,panel}:X.Y.Z` and the GitHub Release.
+4. Report the tag and the commit it points at, and link the release run (`gh run list --workflow release.yml -L 1`). It first checks that the commit was merged by a PR whose CI passed, then publishes `ghcr.io/muriio/pr-follower-{api,panel}:X.Y.Z` and the GitHub Release.
 
 On "different bump", go back to step 4 with the chosen version. On cancel, stop without tagging.

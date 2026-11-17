@@ -1,20 +1,20 @@
 # The same gate as `make check`, split into its backend and frontend halves so they run in parallel.
 # Both jobs are required status checks on `main` and `develop` (docs/business-and-distribution.md §2).
+# PRs only: both branches take changes only through a PR, and the checks must pass on a head that is
+# up to date with the base, so a run after the merge would repeat this one. release.yml reads these
+# results from the PR behind the tagged merge commit.
 # Actions are pinned to commit SHAs (the comment names the release); Dependabot keeps them current.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main, develop]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  # A new push to a PR supersedes the run in progress; runs on main always finish.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true # a new push to a PR supersedes the run in progress
 
 jobs:
   backend:

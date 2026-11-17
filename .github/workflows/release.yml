@@ -1,7 +1,9 @@
 # A `vX.Y.Z` tag on main publishes both images to GHCR and creates the GitHub Release
 # (docs/business-and-distribution.md §2). `vX.Y.Z-rc.N` does the same as a pre-release, for dry runs.
 #
-# verify   the tag names a commit on main whose CI run passed (make check is not run twice)
+# verify   the tag names a commit on main, merged by a PR whose CI passed on its head. CI runs only
+#          on PRs: main and develop take no direct pushes, and the required checks are strict
+#          (up to date with the base), so the PR's run tested what landed
 # build    each image for linux/amd64 and linux/arm64 on native runners, pushed by digest,
 #          with an SBOM and max-mode provenance attached by BuildKit
 # merge    one multi-arch index per image, tagged X.Y.Z, X.Y and sha-<commit>; signed with a
@@ -27,12 +29,13 @@ env:
 
 jobs:
   verify:
-    name: verify (tag on main, CI green)
+    name: verify (tag on main, PR CI green)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 5
     permissions:
       contents: read
-      actions: read
+      pull-requests: read
+      checks: read
     outputs:
       version: ${{ steps.tag.outputs.version }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
@@ -61,20 +64,29 @@ jobs:
             exit 1
           fi
 
-      - name: CI passed on that commit
+      - name: Merged by a PR whose CI passed
         run: |
-          # The tag can be pushed moments after the merge, before CI's run on main exists.
-          for _ in $(seq 1 30); do
-            run_id=$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event push \
-              --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-            [[ -n "$run_id" ]] && break
-            sleep 20
-          done
-          if [[ -z "${run_id:-}" ]]; then
-            echo "::error::no CI run on main for $SHA"
+          # The commit a PR merge creates is never run by CI itself; its PR's head was.
+          pr=$(gh api "repos/$REPO/commits/$SHA/pulls" | jq -r '
+            [.[] | select(.merged_at != null and .merge_commit_sha == env.SHA)][0]
+            // empty | "\(.number) \(.head.sha)"')
+          if [[ -z "$pr" ]]; then
+            echo "::error::$SHA is not the merge commit of a pull request"
             exit 1
           fi
-          gh run watch "$run_id" --repo "$REPO" --exit-status --interval 30
+          read -r number head <<< "$pr"
+          gh api "repos/$REPO/commits/$head/check-runs?per_page=100" > "$RUNNER_TEMP/checks.json"
+          for check in "backend (make backend-check)" "frontend (make frontend-check)"; do
+            # The newest run of each required check counts (a re-run replaces a failed one).
+            conclusion=$(jq -r --arg name "$check" \
+              '[.check_runs[] | select(.name == $name)] | max_by(.id) | .conclusion // "missing"' \
+              "$RUNNER_TEMP/checks.json")
+            if [[ "$conclusion" != "success" ]]; then
+              echo "::error::#$number: '$check' is $conclusion on its head $head"
+              exit 1
+            fi
+          done
+          echo "$TAG: merged by #$number, CI green on $head"
 
   build:
     name: build (${{ matrix.image }}, ${{ matrix.platform }})

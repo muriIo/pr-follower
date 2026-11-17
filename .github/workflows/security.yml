@@ -1,12 +1,11 @@
 # The security scans of `make security` (docs/security.md): secrets in the whole history, known
 # vulnerabilities in dependencies, code patterns, and these workflows. Weekly too, because a new
-# advisory can make yesterday's dependencies vulnerable without any commit.
+# advisory can make yesterday's dependencies vulnerable without any commit. No push trigger: changes
+# land only through PRs, which this already scanned; the schedule scans the default branch.
 name: Security
 
 on:
   pull_request:
-  push:
-    branches: [main, develop]
   schedule:
     - cron: "17 6 * * 1" # Mondays 06:17 UTC
 

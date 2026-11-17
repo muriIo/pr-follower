@@ -34,7 +34,7 @@ Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks 
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
 - **Failed Dependabot analyses** show in the Radar as "Análise falhou" with the reason and a retry; the reason is also logged.
-- **CI** runs `make check` on every PR and on `main`, and a release is published only for a commit whose CI passed (§7). Run it yourself before a build from a local checkout (§7.2).
+- **CI** runs `make check` on every PR, and a release is published only from a commit merged by a PR whose CI passed (§7). Run it yourself before a build from a local checkout (§7.2).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
