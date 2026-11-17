@@ -133,6 +133,6 @@ Something off? [Runbook troubleshooting](docs/production-setup.md#troubleshootin
 ## 6. Keep it running
 
 - **Upgrade:** back up the database, set the new version (`PR_FOLLOWER_VERSION` in `.env`, or the image tags), and redeploy (`docker compose pull && docker compose up -d`). Migrations run on start and only move forward: going back to the previous version is safe only if the release you are leaving shipped no migration (its release notes say); otherwise upgrade to a fix, and keep restoring the backup as a last resort, since it loses what was written since ([runbook §13.2–13.3](docs/production-setup.md#132-upgrades)).
-- **Back up** Postgres daily (`pg_dump`, or your provider's snapshots). The Compose bundle keeps it in the `postgres_data` volume.
+- **Back up** Postgres daily (`pg_dump`, or your provider's snapshots). The Compose bundle keeps it in the `pr-follower_postgres_data` volume.
 - **Rotate** secrets, change domains, run more replicas: [runbook §13](docs/production-setup.md#13-operate).
 - **Security issues:** report them privately ([`SECURITY.md`](SECURITY.md)).
