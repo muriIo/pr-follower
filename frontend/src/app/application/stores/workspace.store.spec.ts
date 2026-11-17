@@ -1068,6 +1068,12 @@ describe('WorkspaceStore keeps the drawer true to its PR', () => {
     return { store, emit: (e: Partial<TimelineEventItem>) => emit({ kind: 'info', text: '', repo: 'acme/web', ...e } as never), gateway, t };
   }
 
+  it('links "Abrir no GitHub" to the PR number, not the database id', () => {
+    const { store } = setup();
+    store.openPr(1);
+    expect(store.drawer()!.ghUrl).toBe('https://github.com/acme/web/pull/11');
+  });
+
   it('closes the drawer, and says why, when its PR is no longer open after a reload', async () => {
     const dataset = { repos: [{ name: 'acme/web', branch: 'main', access: 'active' as const }], prs: [prOf(2, 12)], events: [] };
     const { store, t } = setup(async () => dataset);
