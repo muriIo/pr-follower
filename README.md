@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/muriIo/pr-follower/actions/workflows/ci.yml/badge.svg)](https://github.com/muriIo/pr-follower/actions/workflows/ci.yml)
 [![Security](https://github.com/muriIo/pr-follower/actions/workflows/security.yml/badge.svg)](https://github.com/muriIo/pr-follower/actions/workflows/security.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **Português (Brasil)** · [English](README.en-US.md)
 
@@ -116,7 +117,7 @@ Se o projeto for útil para você, uma ⭐ no repositório ajuda outras pessoas 
 
 ## Licença
 
-A licença será definida antes do lançamento público (Apache-2.0 é a proposta; veja [docs/business-and-distribution.md](docs/business-and-distribution.md)).
+Distribuído sob a [Apache License 2.0](LICENSE). Copyright 2026 Murilo Cruz; veja [NOTICE](NOTICE).
 
 ## Agradecimentos
 
