@@ -7,6 +7,10 @@
 #
 # Using a managed Postgres instead of the bundled one: set DATABASE_URL and remove
 # COMPOSE_PROFILES in .env.
+#
+# The project name prefixes the volumes: the database lives in `pr-follower_postgres_data`. To try
+# the bundle on a machine that already runs it, give the try its own name (`docker compose -p
+# pr-follower-try up -d`); `down -v` deletes the volumes of that project only.
 name: pr-follower
 
 services:
