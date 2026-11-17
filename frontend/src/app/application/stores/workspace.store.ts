@@ -871,7 +871,7 @@ export class WorkspaceStore {
       number: pr.number,
       repo: pr.repo,
       title: pr.title,
-      ghUrl: `https://github.com/${pr.repo}/pull/${pr.id}`,
+      ghUrl: `https://github.com/${pr.repo}/pull/${pr.number}`,
       focused: Boolean(pr.focusRule),
       banner: pr.focusRule
         ? this.t('drawer.banner.focus', { rule: pr.focusRule })
