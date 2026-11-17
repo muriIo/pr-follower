@@ -160,7 +160,7 @@ Decisions and open questions: [`business-and-distribution.md`](business-and-dist
 - [x] `LICENSE`: Apache-2.0, copyright in `NOTICE` (2026-11-17).
 - [x] Distribution model: CI on every PR, semver tags publish images to GHCR with a GitHub Release (2026-11-13). Revised 2026-11-16: each team deploys tagged images itself; this repository runs no staging or production.
 - [x] CI workflow running `make check` on PRs and `main` (`.github/workflows/ci.yml`; Postgres-backed tests included).
-- [ ] **P2** Required CI checks on `main`: rulesets configured but not enforced while the repository is private on GitHub Free; enforced once it goes public ([going public](business-and-distribution.md#3-going-public)).
+- [x] Required CI checks enforced on `main` and `develop` since the repository went public (2026-11-17); a direct push is rejected ([distribution §2](business-and-distribution.md#2-distribution)).
 - [ ] **P2** Go public at launch: secrets check of the git history, `CONTRIBUTING.md`, `.github/FUNDING.yml` (README and `SECURITY.md` done), then verify the rulesets are enforced.
 - [x] Release workflow (`.github/workflows/release.yml`, 2026-11-17): a `vX.Y.Z` tag on a `main` commit with green CI publishes both images to GHCR for amd64 and arm64, with an SBOM, build provenance and a GitHub artifact attestation, and creates the GitHub Release from the tag's notes ([distribution §2](business-and-distribution.md#2-distribution)).
 - [ ] **P2** First release: `v0.1.0-rc.1` dry run, then `v0.1.0`.
