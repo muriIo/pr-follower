@@ -9,14 +9,11 @@ How the project makes money and how it reaches users. Decisions are dated; open 
 **Decided (2026-11-16): a self-hosted, open-source portfolio project with optional income.**
 
 - **Goal.** A strong open-source portfolio piece first; income is optional.
-- **First user.** The company the maintainer works for validates it on its own infrastructure, with pt-BR as the default UI language. Every team, the first one included, runs its own deployment.
+- **First user.** A company the maintainer works with as a contractor validates it on its own infrastructure, under an agreement between the two, with pt-BR as the default UI language. Every team, the first one included, runs its own deployment.
 - **No hosted offer.** The maintainer takes no operations responsibility: no SaaS, no on-call, no customer code passing through infrastructure the maintainer runs.
 - **Services.** End-to-end support and setup for teams that self-host, agreed per engagement (no fixed tiers or prices until someone asks). Plus sponsorship (GitHub Sponsors / Buy Me a Coffee through `.github/FUNDING.yml`) and stars.
 
-Open:
-
-- [ ] **Written permission from the employer** to publish the code under an open-source license in the maintainer's name. It was built while employed and is validated on the company's infrastructure, so ownership must be settled before the repository goes public.
-- [ ] **License: Apache-2.0 (recommended, to confirm).** With no hosted offer to protect, a copyleft license (AGPL) would only deter companies from adopting it. Apache-2.0 is permissive and adds an explicit patent grant, which companies' legal reviews prefer.
+**Decided (2026-11-17): Apache-2.0** ([`LICENSE`](../LICENSE), copyright in [`NOTICE`](../NOTICE)). The maintainer built it as a contractor with their own resources and holds the copyright; the first company's validation is an agreement between the two, not a claim on the code. With no hosted offer to protect, a copyleft license (AGPL) would only deter companies from adopting it, and source-available licenses (BSL, FSL) would weaken the open-source claim. Apache-2.0 is permissive like MIT and adds an explicit patent grant, contribution terms and a trademark clause, which companies' legal reviews prefer. Every dependency is MIT, BSD or Apache-2.0, so none constrains it.
 
 ## 2. Distribution
 
@@ -29,14 +26,21 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
 ```
 
 1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`). Implemented in `.github/workflows/ci.yml` as two parallel jobs, `backend` and `frontend`; the backend job runs a Postgres 17 service so the tests that need a real database run instead of skipping.
-2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). A tag builds both images (`pr-follower-api`, `pr-follower-panel`) and publishes them to GitHub Container Registry (`ghcr.io`) tagged with the version and the commit SHA. A GitHub Release is created with notes generated from the Conventional Commits since the previous tag. Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from those commits (minor or patch until launch; major only from `1.0.0` on), summarizes them, and tags only after approval.
+2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from the Conventional Commits since the previous tag (minor or patch until launch; major only from `1.0.0` on), summarizes them, and pushes an annotated tag carrying that summary only after approval. The tag runs `.github/workflows/release.yml` (2026-11-17):
+   - **verify:** the tag names a commit on `main` whose CI run passed; `make check` is not run a second time.
+   - **build:** both images (`pr-follower-api`, `pr-follower-panel`) for `linux/amd64` and `linux/arm64` on native runners, each with an SBOM and max-mode build provenance attached by BuildKit. No caches, since the workflow publishes.
+   - **merge:** one multi-arch image per name on `ghcr.io/muriio`, tagged `X.Y.Z`, `X.Y` and `sha-<commit>` (never `latest`), signed with a GitHub artifact attestation (`gh attestation verify`). Signing uses GitHub's attestations rather than cosign: same Sigstore keyless signing, nothing to install, verified with `gh`.
+   - **release:** the GitHub Release, its notes taken from the tag annotation plus the image references.
+
+   A `vX.Y.Z-rc.N` tag, cut by hand, runs the same workflow as a pre-release (no `X.Y` tag): the way to try a workflow change, since a pushed `v*` tag cannot be deleted.
 3. **Deployments belong to whoever runs it (revised 2026-11-16).** This repository ships images and recipes, not environments. Each team, the first one included, deploys tagged images from GHCR with its own pipeline, GitHub App, database and secrets ([`production-setup.md`](production-setup.md), [`aws-setup.md`](aws-setup.md)). The automatic staging deploy and the production approval planned on 2026-11-13 are dropped from this repository: the maintainer runs no environment.
 
 Open:
 
-- [ ] The first deployment, at the company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
+- [ ] The first deployment, at the first company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
 - [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
-- [ ] Implement `release.yml` in `.github/workflows/` (no `deploy.yml`: see 3. above), then update [`production-setup.md`](production-setup.md) to deploy tagged images (§7 deploys commit SHAs today).
+- [x] `release.yml` in `.github/workflows/` (no `deploy.yml`: see 3. above); [`production-setup.md`](production-setup.md) §7 deploys the published images (2026-11-17).
+- [ ] First release: a `v0.1.0-rc.1` dry run, then `v0.1.0` with `/bump-version`; confirm both GHCR packages are public and linked to the repository.
 
 ## 3. Going public
 
@@ -44,8 +48,8 @@ Open:
 
 Before flipping the visibility:
 
-- [ ] Written permission from the employer (§1).
-- [ ] `LICENSE` chosen and added (§1).
-- [ ] A README for self-hosters (what it does, screenshots, the quick start), plus `CONTRIBUTING.md`, `SECURITY.md` (how to report a vulnerability) and `.github/FUNDING.yml`.
+- [x] `LICENSE` chosen and added (§1).
+- [x] A README for self-hosters (what it does, screenshots, the quick start) and `SECURITY.md` (how to report a vulnerability).
+- [ ] `CONTRIBUTING.md` and `.github/FUNDING.yml`.
 - [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
 - [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.

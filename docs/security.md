@@ -44,6 +44,22 @@ Checked by hand and found sound: session cookies are `HttpOnly`, `SameSite=Lax` 
 | `cookie-missing-secure` | `backend/internal/adapter/http/auth.go` (3 cookies) | `Secure` is set from the configuration: on whenever `PUBLIC_URL` is https, off only for local http development. |
 | `no-fprintf-to-responsewriter` | `backend/internal/adapter/sse/hub.go` (2) | The live event stream is `text/event-stream` carrying JSON; a browser never renders it as HTML. |
 | `math-random-used` | `backend/internal/infrastructure/resilience/backoff.go` | Retry jitter only; nothing secret or guessable depends on it. |
+| `GHSA-fc5q-39xc-vjpf` (OSV, picomatch ≤ 4.0.7 ReDoS) | [`osv-scanner.toml`](../osv-scanner.toml), until 2026-12-17 | No fixed release yet. Build-time only (Angular CLI, Vite, Vitest, Sass); not in the panel image, and it matches only globs from the build configuration, never user input. The ignore expires so the scan fails again to re-check for a fix. |
+
+## Release supply chain
+
+Every release image (`.github/workflows/release.yml`) carries:
+
+- an **SBOM** (SPDX, by BuildKit): every package in the image and its version, to answer "does this image contain X?" when an advisory lands;
+- **build provenance** (SLSA, BuildKit `mode=max`): the commit, workflow run and build inputs that produced it;
+- a **GitHub artifact attestation** on the multi-arch digest: a Sigstore signature tied to this repository's release workflow, so a copy that did not come from it fails verification.
+
+```bash
+gh attestation verify oci://ghcr.io/muriio/pr-follower-api:X.Y.Z --owner muriIo
+docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:X.Y.Z --format '{{json .SBOM}}'
+```
+
+The workflow publishes only from a commit on `main` whose CI passed, uses no caches (a poisoned cache could reach a published image), grants each job only the permissions it needs, and keeps the tag and SHA out of shell templates. Only the admin can create `v*` tags, and none can be moved or deleted (ruleset `release tags`).
 
 ## Before launch
 

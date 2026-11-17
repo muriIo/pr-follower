@@ -1,6 +1,6 @@
 # Production Setup
 
-Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-11 (`main` after #31). The sign-in model is [ADR-0010](adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
+Step-by-step runbook for putting PR Follower on a public domain: from nothing to a verified deploy, then how to run it. Last checked against the code on 2026-11-17 (`main` with the release workflow). The sign-in model is [ADR-0010](adr/0010-github-only-identity-and-installation-scoped-access.md). Update this file in the PR that changes an env var, a route or the deploy shape.
 
 Installing it for the first time? [`INSTALL.md`](../INSTALL.md) is the short, cloud-agnostic path with ready files (Docker Compose, Kubernetes); this runbook is the detail behind each of its steps.
 
@@ -9,8 +9,8 @@ Work through the sections in order: each one uses what the previous ones produce
 | Placeholder | Meaning |
 |---|---|
 | `app.example.com` | Your production domain. |
-| `REGISTRY` | Your container registry, e.g. `ghcr.io/acme`. |
-| `TAG` | The image tag you deploy: a commit SHA (§7). |
+| `REGISTRY` | `ghcr.io/muriio` for the published images (§7), or your own registry if you build them yourself. |
+| `TAG` | The release version you deploy, e.g. `0.1.0` (§7). |
 | `/opt/pr-follower` | The deploy directory of the single-host example (§9). |
 
 ## 0. Before you start
@@ -23,7 +23,7 @@ Work through the sections in order: each one uses what the previous ones produce
 - PostgreSQL 17 with automated backups, preferably managed.
 - A secret manager (1Password, Vault, a cloud secret manager…) for the secrets created in §2 and §5.
 - On GitHub: an organization where you are an **owner** (recommended) or your personal account, to own the app; and a throwaway test repository for §11.
-- On the build machine: Docker and this repository, with `make check` passing.
+- Only if you build the images yourself (§7.2): Docker and this repository, with `make check` passing.
 
 ### Readiness
 
@@ -34,7 +34,7 @@ Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks 
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
 - **Failed Dependabot analyses** show in the Radar as "Análise falhou" with the reason and a retry; the reason is also logged.
-- **CI** runs `make check` on every PR and on `main`; still run it before a build from a local checkout (§7).
+- **CI** runs `make check` on every PR and on `main`, and a release is published only for a commit whose CI passed (§7). Run it yourself before a build from a local checkout (§7.2).
 
 Sign-in, sessions, token encryption and webhook verification are production-ready.
 
@@ -268,14 +268,38 @@ awk 'NF {sub(/\r/, ""); printf "%s\\n", $0}' <slug>.<date>.private-key.pem
 
 The panel image accepts request bodies up to 5 MB on `/api/` (GitHub deliveries); the API reads up to 5 MiB of a delivery.
 
-## 7. Build and publish the images
+## 7. Get the images
 
-From a clean checkout of the commit you want to ship:
+### 7.1 Published images
+
+Every release publishes both images to GitHub Container Registry, public, for `linux/amd64` and `linux/arm64`:
+
+```text
+ghcr.io/muriio/pr-follower-api:X.Y.Z
+ghcr.io/muriio/pr-follower-panel:X.Y.Z
+```
+
+Releases are listed at <https://github.com/muriIo/pr-follower/releases>, with what changed in each. A release is published only from a commit on `main` whose CI (`make check`) passed. Each image also carries the tags `X.Y` (the newest patch of that minor) and `sha-<commit>`; there is no `latest`.
+
+- Deploy by the **exact version** (`TAG=0.1.0`), and give both images the **same** one.
+- Each image carries an SBOM (its packages and versions) and build provenance (the commit and workflow run that produced it), and is signed with a GitHub artifact attestation. Check that an image was built by this repository's release workflow before deploying it:
+
+  ```bash
+  gh attestation verify oci://ghcr.io/muriio/pr-follower-api:TAG   --owner muriIo
+  gh attestation verify oci://ghcr.io/muriio/pr-follower-panel:TAG --owner muriIo
+  docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:TAG --format '{{json .SBOM}}'   # the SBOM
+  ```
+
+- The API image is a static Go binary on Alpine 3.22 with CA certificates and the migrations embedded. The panel image is `nginx-unprivileged` 1.27 with the built SPA. Both run as non-root users.
+- Mirroring them into your own registry (ECR, Artifact Registry, …) keeps deploys independent of GHCR: copy by digest, e.g. `docker buildx imagetools create -t REGISTRY/pr-follower-api:TAG ghcr.io/muriio/pr-follower-api:TAG`.
+
+### 7.2 Building your own images
+
+For a fork or a patched build. From a clean checkout of the commit you want to ship:
 
 ```bash
-git switch main && git pull --ff-only
 git status --short          # must print nothing: the tag has to name exactly this code
-make check                  # the only gate: no CI runs it yet
+make check
 TAG=$(git rev-parse --short=12 HEAD)
 docker build --platform linux/amd64 -t REGISTRY/pr-follower-api:$TAG   backend
 docker build --platform linux/amd64 -t REGISTRY/pr-follower-panel:$TAG frontend
@@ -284,8 +308,7 @@ docker push REGISTRY/pr-follower-panel:$TAG
 ```
 
 - Match `--platform` to the server (`linux/arm64` on Graviton or Ampere). `make docker-build` builds the same two images for your machine's platform, tagged `latest`, which is fine for local tries but not for deploys.
-- Give both images the **same tag** and deploy by that immutable tag, never `latest`.
-- The API image is a static Go binary on Alpine 3.22 with CA certificates and the migrations embedded. The panel image is `nginx-unprivileged` 1.27 with the built SPA. Both run as non-root users.
+- Give both images the same tag and deploy by that immutable tag, never `latest`.
 
 ## 8. Set up the TLS proxy
 
@@ -491,11 +514,13 @@ Acting on PRs (approve, merge, `@dependabot` comments), the Dependabot analysis 
 1. See whether the release carries a migration:
 
    ```bash
-   git diff --stat DEPLOYED_SHA HEAD -- backend/internal/infrastructure/database/migrations/
+   git diff --stat vDEPLOYED vNEW -- backend/internal/infrastructure/database/migrations/
    ```
 
+   Without a checkout, the release notes list every PR in the release.
+
 2. If it does, take a database snapshot first (or note the time for point-in-time recovery).
-3. Build and push both images with the new tag (§7).
+3. Verify the new images (§7.1), or build and push your own (§7.2).
 4. Set the new `TAG` on **both** services in `compose.yml`, then `docker compose pull && docker compose up -d`. Compose recreates the API (which migrates before it listens), then the panel.
 5. Follow `docker compose logs -f api` until `server listening`, then rerun §10.
 6. Redeliver the deliveries that failed during the restart (§13.1).

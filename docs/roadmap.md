@@ -156,12 +156,12 @@ No P1 item is open. In order of value:
 Decisions and open questions: [`business-and-distribution.md`](business-and-distribution.md).
 
 - [x] Business model: open source + services (2026-11-13).
-- [x] Services and goal (2026-11-16): a self-hosted, open-source portfolio project with optional income. No hosted offer and no operations by the maintainer; paid end-to-end support and setup per engagement, sponsorship and stars. The first user is the maintainer's company, on its own infrastructure.
-- [ ] **P1** Written permission from the employer to publish the code under an open-source license (it was built while employed and is validated on the company's infrastructure).
-- [ ] **P2** Add the `LICENSE`: Apache-2.0 recommended, to confirm.
+- [x] Services and goal (2026-11-16): a self-hosted, open-source portfolio project with optional income. No hosted offer and no operations by the maintainer; paid end-to-end support and setup per engagement, sponsorship and stars. The first user is a company the maintainer works with as a contractor, on its own infrastructure.
+- [x] `LICENSE`: Apache-2.0, copyright in `NOTICE` (2026-11-17).
 - [x] Distribution model: CI on every PR, semver tags publish images to GHCR with a GitHub Release (2026-11-13). Revised 2026-11-16: each team deploys tagged images itself; this repository runs no staging or production.
 - [x] CI workflow running `make check` on PRs and `main` (`.github/workflows/ci.yml`; Postgres-backed tests included).
 - [ ] **P2** Required CI checks on `main`: rulesets configured but not enforced while the repository is private on GitHub Free; enforced once it goes public ([going public](business-and-distribution.md#3-going-public)).
-- [ ] **P2** Go public at launch: employer permission, `LICENSE`, secrets check of the git history, README for self-hosters, `CONTRIBUTING.md`, `SECURITY.md`, `.github/FUNDING.yml`, then verify the rulesets are enforced.
-- [ ] **P2** Release workflow: `vX.Y.Z` tag builds and publishes both images to GHCR and creates the GitHub Release.
-- [ ] **P2** First deployment at the company: its own GitHub App, database and pipeline, deploying tagged images from GHCR.
+- [ ] **P2** Go public at launch: secrets check of the git history, `CONTRIBUTING.md`, `.github/FUNDING.yml` (README and `SECURITY.md` done), then verify the rulesets are enforced.
+- [x] Release workflow (`.github/workflows/release.yml`, 2026-11-17): a `vX.Y.Z` tag on a `main` commit with green CI publishes both images to GHCR for amd64 and arm64, with an SBOM, build provenance and a GitHub artifact attestation, and creates the GitHub Release from the tag's notes ([distribution §2](business-and-distribution.md#2-distribution)).
+- [ ] **P2** First release: `v0.1.0-rc.1` dry run, then `v0.1.0`.
+- [ ] **P2** First deployment at the first company: its own GitHub App, database and pipeline, deploying tagged images from GHCR.
