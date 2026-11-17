@@ -9,14 +9,11 @@ How the project makes money and how it reaches users. Decisions are dated; open 
 **Decided (2026-11-16): a self-hosted, open-source portfolio project with optional income.**
 
 - **Goal.** A strong open-source portfolio piece first; income is optional.
-- **First user.** The company the maintainer works for validates it on its own infrastructure, with pt-BR as the default UI language. Every team, the first one included, runs its own deployment.
+- **First user.** A company the maintainer works with as a contractor validates it on its own infrastructure, under an agreement between the two, with pt-BR as the default UI language. Every team, the first one included, runs its own deployment.
 - **No hosted offer.** The maintainer takes no operations responsibility: no SaaS, no on-call, no customer code passing through infrastructure the maintainer runs.
 - **Services.** End-to-end support and setup for teams that self-host, agreed per engagement (no fixed tiers or prices until someone asks). Plus sponsorship (GitHub Sponsors / Buy Me a Coffee through `.github/FUNDING.yml`) and stars.
 
-Open:
-
-- [ ] **Written permission from the employer** to publish the code under an open-source license in the maintainer's name. It was built while employed and is validated on the company's infrastructure, so ownership must be settled before the repository goes public.
-- [ ] **License: Apache-2.0 (recommended, to confirm).** With no hosted offer to protect, a copyleft license (AGPL) would only deter companies from adopting it. Apache-2.0 is permissive and adds an explicit patent grant, which companies' legal reviews prefer.
+**Decided (2026-11-17): Apache-2.0** ([`LICENSE`](../LICENSE), copyright in [`NOTICE`](../NOTICE)). The maintainer built it as a contractor with their own resources and holds the copyright; the first company's validation is an agreement between the two, not a claim on the code. With no hosted offer to protect, a copyleft license (AGPL) would only deter companies from adopting it, and source-available licenses (BSL, FSL) would weaken the open-source claim. Apache-2.0 is permissive like MIT and adds an explicit patent grant, contribution terms and a trademark clause, which companies' legal reviews prefer. Every dependency is MIT, BSD or Apache-2.0, so none constrains it.
 
 ## 2. Distribution
 
@@ -34,7 +31,7 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
 
 Open:
 
-- [ ] The first deployment, at the company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
+- [ ] The first deployment, at the first company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
 - [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
 - [ ] Implement `release.yml` in `.github/workflows/` (no `deploy.yml`: see 3. above), then update [`production-setup.md`](production-setup.md) to deploy tagged images (§7 deploys commit SHAs today).
 
@@ -44,8 +41,8 @@ Open:
 
 Before flipping the visibility:
 
-- [ ] Written permission from the employer (§1).
-- [ ] `LICENSE` chosen and added (§1).
-- [ ] A README for self-hosters (what it does, screenshots, the quick start), plus `CONTRIBUTING.md`, `SECURITY.md` (how to report a vulnerability) and `.github/FUNDING.yml`.
+- [x] `LICENSE` chosen and added (§1).
+- [x] A README for self-hosters (what it does, screenshots, the quick start) and `SECURITY.md` (how to report a vulnerability).
+- [ ] `CONTRIBUTING.md` and `.github/FUNDING.yml`.
 - [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
 - [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.
