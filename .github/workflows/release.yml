@@ -1,0 +1,255 @@
+# A `vX.Y.Z` tag on main publishes both images to GHCR and creates the GitHub Release
+# (docs/business-and-distribution.md §2). `vX.Y.Z-rc.N` does the same as a pre-release, for dry runs.
+#
+# verify   the tag names a commit on main whose CI run passed (make check is not run twice)
+# build    each image for linux/amd64 and linux/arm64 on native runners, pushed by digest,
+#          with an SBOM and max-mode provenance attached by BuildKit
+# merge    one multi-arch index per image, tagged X.Y.Z, X.Y and sha-<commit>; signed with a
+#          GitHub artifact attestation (gh attestation verify)
+# release  the GitHub Release, its notes taken from the annotated tag written by /bump-version
+#
+# Publishing workflow: no dependency or build caches, actions pinned to commit SHAs, no
+# credentials left in checkouts, and tag/SHA values reach scripts only through env.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io/muriio # GHCR names are lowercase; the owner is muriIo
+
+jobs:
+  verify:
+    name: verify (tag on main, CI green)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Tag format
+        id: tag
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::$TAG is not vX.Y.Z or vX.Y.Z-rc.N"
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [[ "$TAG" == *-* ]]; then prerelease=true; else prerelease=false; fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Commit is on main
+        run: |
+          status=$(gh api "repos/$REPO/compare/main...$SHA" --jq .status)
+          if [[ "$status" != "behind" && "$status" != "identical" ]]; then
+            echo "::error::$TAG points at $SHA, which is not on main (compare: $status)"
+            exit 1
+          fi
+
+      - name: CI passed on that commit
+        run: |
+          # The tag can be pushed moments after the merge, before CI's run on main exists.
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --repo "$REPO" --workflow ci.yml --branch main --event push \
+              --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+            [[ -n "$run_id" ]] && break
+            sleep 20
+          done
+          if [[ -z "${run_id:-}" ]]; then
+            echo "::error::no CI run on main for $SHA"
+            exit 1
+          fi
+          gh run watch "$run_id" --repo "$REPO" --exit-status --interval 30
+
+  build:
+    name: build (${{ matrix.image }}, ${{ matrix.platform }})
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [api, panel]
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - image: api
+            context: backend
+          - image: panel
+            context: frontend
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/pr-follower-${{ matrix.image }}
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/pr-follower-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+
+      - name: Keep the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.image }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: merge and attest (${{ matrix.image }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [api, panel]
+    env:
+      IMAGE: ghcr.io/muriio/pr-follower-${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false # deploy by version, never latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=long
+
+      - name: Create the multi-arch index
+        id: index
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          args=()
+          while IFS= read -r tag; do args+=(-t "$tag"); done \
+            < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          for d in *; do args+=("$IMAGE@sha256:$d"); done # one file per platform digest
+          docker buildx imagetools create "${args[@]}"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$DOCKER_METADATA_OUTPUT_VERSION" \
+            --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Attest provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    name: github release
+    needs: [verify, merge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Notes from the tag annotation
+        run: |
+          # The checkout of a tag push may not keep the annotation; fetch the tag object itself.
+          git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          {
+            git for-each-ref "refs/tags/$TAG" --format='%(contents:body)'
+            echo
+            echo "## Images"
+            echo
+            echo "Multi-arch (linux/amd64, linux/arm64), with an SBOM and build provenance attached."
+            echo
+            echo '```'
+            echo "ghcr.io/muriio/pr-follower-api:$VERSION"
+            echo "ghcr.io/muriio/pr-follower-panel:$VERSION"
+            echo '```'
+            echo
+            echo "Verify that an image was built by this repository's release workflow:"
+            echo
+            echo '```'
+            echo "gh attestation verify oci://ghcr.io/muriio/pr-follower-api:$VERSION --owner muriIo"
+            echo '```'
+          } > "$RUNNER_TEMP/notes.md"
+
+      - name: Create the release
+        run: |
+          flags=()
+          [[ "$PRERELEASE" == "true" ]] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"

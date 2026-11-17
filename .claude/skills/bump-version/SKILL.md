@@ -4,12 +4,14 @@ description: Propose the next release version from the commits since the last ta
 disable-model-invocation: true
 ---
 
-Releases follow `docs/business-and-distribution.md` §2: a `vX.Y.Z` tag on `main` publishes the images and the GitHub Release. The git tag is the only version record; leave version fields in files (such as `frontend/package.json`) untouched.
+Releases follow `docs/business-and-distribution.md` §2: a `vX.Y.Z` tag on `main` triggers `.github/workflows/release.yml`, which publishes the images and the GitHub Release with the tag's annotation as its notes. The git tag is the only version record; leave version fields in files (such as `frontend/package.json`) untouched.
+
+This skill never proposes a release candidate. A `vX.Y.Z-rc.N` tag (a pre-release, for dry runs of the workflow) is cut by hand.
 
 ## 1. Find the range
 
 1. `git fetch origin --tags --prune`. The release target is `origin/main`, whatever branch is checked out.
-2. Last version: `git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' origin/main`.
+2. Last version: `git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' origin/main` (release candidates do not count).
    - It fails with "No names found": no tag yet, this is the first release. The range is the whole history of `origin/main` and the proposal is `v0.1.0`.
 3. Range: `<last tag>..origin/main`. If it is empty, report "nothing to release since `<last tag>`" and stop.
 
@@ -64,12 +66,15 @@ Unclassified
 
 Write each line for a reader of the release notes: what changed for the user, grouped under its PR, in English. Omit empty sections.
 
+If the range adds a migration (`git diff --name-only --diff-filter=A <range> -- backend/internal/infrastructure/database/migrations/`), start the summary with a `Database` section naming each new migration file and saying: "Migrates the database on start. Going back to an earlier version afterwards needs the backup taken before the upgrade." `INSTALL.md` tells operators to look for it before rolling back.
+
 Then ask with `AskUserQuestion`: approve `vX.Y.Z` (recommended), choose a different bump (list the alternatives with their resulting versions), or cancel.
 
 ## 5. On approval, tag
 
-1. `git tag -a vX.Y.Z <target sha> -m "vX.Y.Z"`, on the SHA shown in the summary, even if `origin/main` moved since.
-2. `git push origin vX.Y.Z`.
-3. Report the tag and the commit it points at. If `.github/workflows/release.yml` exists, link the run (`gh run list --workflow release.yml -L 1`); otherwise say the images and GitHub Release are not automated yet.
+1. Write the tag message to a file in the scratchpad: the first line is `vX.Y.Z`, then a blank line, then the approved summary's sections (Database, Breaking, Features, Fixes, Internal, Unclassified) as Markdown `## ` headings with their bullets, without the `Release …` and `Bump:` lines. Everything after the first line becomes the GitHub Release notes.
+2. `git tag -a vX.Y.Z <target sha> --cleanup=whitespace -F <that file>`, on the SHA shown in the summary, even if `origin/main` moved since. `--cleanup=whitespace` is required: the default strips every line starting with `#`, which drops the `## ` headings. Check it with `git tag -n99 vX.Y.Z`.
+3. `git push origin vX.Y.Z`. A pushed `v*` tag cannot be moved or deleted (ruleset `release tags`).
+4. Report the tag and the commit it points at, and link the release run (`gh run list --workflow release.yml -L 1`). It first waits for CI on that commit, then publishes `ghcr.io/muriio/pr-follower-{api,panel}:X.Y.Z` and the GitHub Release.
 
 On "different bump", go back to step 4 with the chosen version. On cancel, stop without tagging.

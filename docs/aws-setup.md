@@ -286,7 +286,7 @@ aws ecr put-lifecycle-policy --repository-name $APP-api --lifecycle-policy-text 
 aws ecr put-lifecycle-policy --repository-name $APP-panel --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"keep 20","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}' >/dev/null
 ```
 
-Build and push exactly as in [`production-setup.md`](production-setup.md) §7, with `$REGISTRY` and `$TAG` from §2 (clean tree, `make check` first):
+To run a published release, copy its images into ECR instead of building: `docker buildx imagetools create -t $REGISTRY/$APP-api:$TAG ghcr.io/muriio/pr-follower-api:$TAG`, and the same for the panel ([`production-setup.md`](production-setup.md) §7.1; `$TAG` is then the version, e.g. `0.1.0`). To build your own, do it exactly as in §7.2, with `$REGISTRY` and `$TAG` from §2 (clean tree, `make check` first):
 
 ```bash
 aws ecr get-login-password | docker login --username AWS --password-stdin $REGISTRY
