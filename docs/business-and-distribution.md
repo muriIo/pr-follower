@@ -39,8 +39,8 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
 Open:
 
 - [ ] The first deployment, at the first company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
-- [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
-- [ ] `develop` branch settings: the `main` ruleset names `main` and `develop` explicitly (it targeted `~DEFAULT_BRANCH`, which would move protection off `main` once `develop` is the default), then `develop` becomes the default branch.
+- [x] Required CI checks, enforced since the repository went public (2026-11-17): `protected branches` (`main` and `develop`: PR only, both CI jobs required on an up-to-date head, merge commits only, no force push or deletion) and `release tags` (`v*` created only by the admin, never moved or deleted).
+- [x] `develop` branch settings (2026-11-17): the ruleset, renamed `protected branches`, names `refs/heads/main` and `refs/heads/develop` explicitly (it targeted `~DEFAULT_BRANCH`, which moved protection off `main` once `develop` became the default), and `develop` is the default branch.
 - [x] `release.yml` in `.github/workflows/` (no `deploy.yml`: see 4. above); [`production-setup.md`](production-setup.md) §7 deploys the published images (2026-11-17).
 - [ ] First release: a `v0.1.0-rc.1` dry run, then `v0.1.0` with `/bump-version`; confirm both GHCR packages are public and linked to the repository.
 
@@ -54,4 +54,4 @@ Before flipping the visibility:
 - [x] A README for self-hosters (what it does, screenshots, the quick start) and `SECURITY.md` (how to report a vulnerability).
 - [ ] `CONTRIBUTING.md` and `.github/FUNDING.yml`.
 - [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
-- [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.
+- [x] After flipping (2026-11-17): both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/<branch>` lists deletion, non_fast_forward, pull_request and required_status_checks for `main` and `develop`), and a direct push to `main` is rejected.
