@@ -1,0 +1,9 @@
+# Accepted findings for `make security-deps` (passed with --config; docs/security.md lists each one).
+# Every entry expires: the scan fails again on that date, to re-check whether a fix has shipped.
+# OSV-Scanner v2.0.2 (Makefile OSV_IMAGE) names the expiry `ignoreUntil`; newer releases call it
+# `effectiveUntil` and reject the old key, so rename it when bumping the image.
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17
+reason = "picomatch <= 4.0.7 ReDoS, no fixed release yet. Build-time only (Angular CLI, Vite, Vitest, Sass); not in the panel image, and it matches only glob patterns from the build configuration, never user input."
