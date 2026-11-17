@@ -44,6 +44,7 @@ Checked by hand and found sound: session cookies are `HttpOnly`, `SameSite=Lax` 
 | `cookie-missing-secure` | `backend/internal/adapter/http/auth.go` (3 cookies) | `Secure` is set from the configuration: on whenever `PUBLIC_URL` is https, off only for local http development. |
 | `no-fprintf-to-responsewriter` | `backend/internal/adapter/sse/hub.go` (2) | The live event stream is `text/event-stream` carrying JSON; a browser never renders it as HTML. |
 | `math-random-used` | `backend/internal/infrastructure/resilience/backoff.go` | Retry jitter only; nothing secret or guessable depends on it. |
+| `GHSA-fc5q-39xc-vjpf` (OSV, picomatch ≤ 4.0.7 ReDoS) | [`osv-scanner.toml`](../osv-scanner.toml), until 2026-12-17 | No fixed release yet. Build-time only (Angular CLI, Vite, Vitest, Sass); not in the panel image, and it matches only globs from the build configuration, never user input. The ignore expires so the scan fails again to re-check for a fix. |
 
 ## Before launch
 

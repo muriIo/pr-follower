@@ -105,12 +105,13 @@ security-secrets:
 
 # Known vulnerabilities (OSV) in the Go modules and the frontend packages. pnpm writes its own
 # environment as a first YAML document in pnpm-lock.yaml and OSV-Scanner reads only that one, so the
-# app's document is handed to it alone.
+# app's document is handed to it alone. Accepted findings, each with an expiry, are in osv-scanner.toml.
 security-deps:
 	@tmp=$$(mktemp -d) && \
 	awk 'n >= 2; /^---$$/ { n++ }' frontend/pnpm-lock.yaml > $$tmp/pnpm-lock.yaml && \
 	if [ ! -s $$tmp/pnpm-lock.yaml ]; then cp frontend/pnpm-lock.yaml $$tmp/pnpm-lock.yaml; fi && \
 	docker run --rm -v "$(CURDIR)":/src:ro -v $$tmp:/lock:ro $(OSV_IMAGE) scan source --no-call-analysis=go \
+		--config /src/osv-scanner.toml \
 		-L /src/backend/go.mod -L /lock/pnpm-lock.yaml; \
 	status=$$?; rm -rf $$tmp; exit $$status
 
