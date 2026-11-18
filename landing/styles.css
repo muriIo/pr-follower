@@ -2,6 +2,8 @@
 @font-face{font-family:'Inter';font-style:normal;font-weight:100 900;font-display:swap;src:url(fonts/inter-latin-wght.woff2) format('woff2')}
 @font-face{font-family:'Geist Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/geist-mono-latin-400.woff2) format('woff2')}
 @font-face{font-family:'Geist Mono';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/geist-mono-latin-500.woff2) format('woff2')}
+html{scroll-padding-top:104px}
+@media (prefers-reduced-motion: no-preference){html{scroll-behavior:smooth} }
 body{margin:0;background:#0B0D11}
 a{color:#E6E8EE}a:hover{color:#E6E8EE}
 h1,h2,h3,p,figure{margin:0}
