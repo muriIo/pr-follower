@@ -42,7 +42,7 @@ Open:
 - [x] Required CI checks, enforced since the repository went public (2026-11-17): `protected branches` (`main` and `develop`: PR only, both CI jobs required on an up-to-date head, merge commits only, no force push or deletion) and `release tags` (`v*` created only by the admin, never moved or deleted).
 - [x] `develop` branch settings (2026-11-17): the ruleset, renamed `protected branches`, names `refs/heads/main` and `refs/heads/develop` explicitly (it targeted `~DEFAULT_BRANCH`, which moved protection off `main` once `develop` became the default), and `develop` is the default branch.
 - [x] `release.yml` in `.github/workflows/` (no `deploy.yml`: see 4. above); [`production-setup.md`](production-setup.md) §7 deploys the published images (2026-11-17).
-- [ ] First release: a `v0.1.0-rc.1` dry run, then `v0.1.0` with `/bump-version`; confirm both GHCR packages are public and linked to the repository.
+- [x] First release (2026-11-18): the `v0.1.0-rc.1` dry run (2026-11-17), then [`v0.1.0`](https://github.com/muriIo/pr-follower/releases/tag/v0.1.0) with `/bump-version` on the release PR #65. Both GHCR packages are public (pulled anonymously) and linked to the repository (`org.opencontainers.image.source`); images for amd64 and arm64, attestations verified with `gh attestation verify`, and the release gate found #65's green CI.
 
 ## 3. Going public
 
