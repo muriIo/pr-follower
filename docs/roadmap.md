@@ -163,5 +163,5 @@ Decisions and open questions: [`business-and-distribution.md`](business-and-dist
 - [x] Required CI checks enforced on `main` and `develop` since the repository went public (2026-11-17); a direct push is rejected ([distribution §2](business-and-distribution.md#2-distribution)).
 - [ ] **P2** Go public at launch: secrets check of the git history, `CONTRIBUTING.md`, `.github/FUNDING.yml` (README and `SECURITY.md` done), then verify the rulesets are enforced.
 - [x] Release workflow (`.github/workflows/release.yml`, 2026-11-17): a `vX.Y.Z` tag on a `main` commit with green CI publishes both images to GHCR for amd64 and arm64, with an SBOM, build provenance and a GitHub artifact attestation, and creates the GitHub Release from the tag's notes ([distribution §2](business-and-distribution.md#2-distribution)).
-- [ ] **P2** First release: `v0.1.0-rc.1` dry run, then `v0.1.0`.
+- [x] First release: [`v0.1.0`](https://github.com/muriIo/pr-follower/releases/tag/v0.1.0) (2026-11-18), after a `v0.1.0-rc.1` dry run that also ran the images end to end in the Compose bundle (sign-in, app install, webhooks through smee).
 - [ ] **P2** First deployment at the first company: its own GitHub App, database and pipeline, deploying tagged images from GHCR.
