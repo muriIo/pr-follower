@@ -1,3 +1,8 @@
+# Postgres alone, for running the apps on the host (`make db-up`). The project name keeps its
+# volume (`pr-follower-dev_postgres_data`) apart from the deploy bundle's (`deploy/compose`, project
+# `pr-follower`): without it both took the folder name and shared one database.
+name: pr-follower-dev
+
 services:
   postgres:
     image: postgres:17-alpine

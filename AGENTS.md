@@ -50,6 +50,7 @@ Run `make check` from the root (ADR gate, gofmt, vet, migration and architecture
 
 ## Git
 
-- Branch from `main` as `feat/<topic>`, `fix/<topic>`, `chore/<topic>`, `docs/<topic>`; changes land through a PR. Commit or push only when asked.
+- `develop` is the integration branch and the default; `main` holds released code and receives only release PRs (`develop` → `main`) and hotfixes. Both are protected: changes land through a PR with green CI.
+- Branch from `develop` as `feat/<topic>`, `fix/<topic>`, `chore/<topic>`, `docs/<topic>` and open the PR against `develop`. A hotfix for a release branches from `main` as `hotfix/<topic>`, merges into `main`, then `main` is merged back into `develop`. Commit or push only when asked.
 - Conventional Commits in English: `type(scope): description`, lowercase description, no trailing period, header up to 72 characters. Scope names the area touched: `backend`, `frontend`, `auth`, `docker`, `gate`, `adr`, `design`, … (see `git log`).
 - Each commit leaves `make check` green.

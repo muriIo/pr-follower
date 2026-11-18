@@ -25,21 +25,23 @@ PR ──▶ CI (make check) ──▶ merge to main ──▶ images :sha ─�
                        tag vX.Y.Z ──▶ images :X.Y.Z + GitHub Release ──▶ approval ──▶ production
 ```
 
-1. **CI on GitHub Actions.** `make check` runs on every pull request and on every push to `main`. A PR merges only when it passes (required status check on `main`). Implemented in `.github/workflows/ci.yml` as two parallel jobs, `backend` and `frontend`; the backend job runs a Postgres 17 service so the tests that need a real database run instead of skipping.
-2. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from the Conventional Commits since the previous tag (minor or patch until launch; major only from `1.0.0` on), summarizes them, and pushes an annotated tag carrying that summary only after approval. The tag runs `.github/workflows/release.yml` (2026-11-17):
-   - **verify:** the tag names a commit on `main` whose CI run passed; `make check` is not run a second time.
+1. **Branches (2026-11-17).** `develop` is the integration branch and the default: every PR targets it, Dependabot's included. `main` holds released code: it moves only through a release PR (`develop` → `main`, opened when cutting a release) or a `hotfix/<topic>` PR, after which `main` is merged back into `develop`. Tags are cut on `main` only.
+2. **CI on GitHub Actions.** `make check` runs on every pull request. A PR merges only when it passes on a head that is up to date with its base (strict required status checks on both branches), and neither branch accepts a direct push, so a run after the merge would only repeat it: CI runs on PRs alone (2026-11-17). Implemented in `.github/workflows/ci.yml` as two parallel jobs, `backend` and `frontend`; the backend job runs a Postgres 17 service so the tests that need a real database run instead of skipping.
+3. **Releases.** Semantic version tags (`vX.Y.Z`, starting at `v0.x.y` until the first public launch). Cut a release with the `/bump-version` skill (`.claude/skills/bump-version/`): it proposes the version from the Conventional Commits since the previous tag (minor or patch until launch; major only from `1.0.0` on), summarizes them, and pushes an annotated tag carrying that summary only after approval. The tag runs `.github/workflows/release.yml` (2026-11-17):
+   - **verify:** the tag names a commit on `main` that a PR merged, and that PR's required checks passed on its head; `make check` is not run a second time.
    - **build:** both images (`pr-follower-api`, `pr-follower-panel`) for `linux/amd64` and `linux/arm64` on native runners, each with an SBOM and max-mode build provenance attached by BuildKit. No caches, since the workflow publishes.
    - **merge:** one multi-arch image per name on `ghcr.io/muriio`, tagged `X.Y.Z`, `X.Y` and `sha-<commit>` (never `latest`), signed with a GitHub artifact attestation (`gh attestation verify`). Signing uses GitHub's attestations rather than cosign: same Sigstore keyless signing, nothing to install, verified with `gh`.
    - **release:** the GitHub Release, its notes taken from the tag annotation plus the image references.
 
    A `vX.Y.Z-rc.N` tag, cut by hand, runs the same workflow as a pre-release (no `X.Y` tag): the way to try a workflow change, since a pushed `v*` tag cannot be deleted.
-3. **Deployments belong to whoever runs it (revised 2026-11-16).** This repository ships images and recipes, not environments. Each team, the first one included, deploys tagged images from GHCR with its own pipeline, GitHub App, database and secrets ([`production-setup.md`](production-setup.md), [`aws-setup.md`](aws-setup.md)). The automatic staging deploy and the production approval planned on 2026-11-13 are dropped from this repository: the maintainer runs no environment.
+4. **Deployments belong to whoever runs it (revised 2026-11-16).** This repository ships images and recipes, not environments. Each team, the first one included, deploys tagged images from GHCR with its own pipeline, GitHub App, database and secrets ([`production-setup.md`](production-setup.md), [`aws-setup.md`](aws-setup.md)). The automatic staging deploy and the production approval planned on 2026-11-13 are dropped from this repository: the maintainer runs no environment.
 
 Open:
 
 - [ ] The first deployment, at the first company: its own GitHub App, database and pipeline, pulling tagged images. A staging there, if wanted, is the company's (with its own GitHub App, so test data never touches production).
-- [ ] Required CI checks on `main`: rulesets are configured (`main`: PR only, both CI jobs required, merge commits only, no force push or deletion; `release tags`: `v*` created only by the admin, never moved or deleted) but **not enforced**, because GitHub Free does not enforce rulesets on a private repository. They take effect when the repository goes public (§3).
-- [x] `release.yml` in `.github/workflows/` (no `deploy.yml`: see 3. above); [`production-setup.md`](production-setup.md) §7 deploys the published images (2026-11-17).
+- [x] Required CI checks, enforced since the repository went public (2026-11-17): `protected branches` (`main` and `develop`: PR only, both CI jobs required on an up-to-date head, merge commits only, no force push or deletion) and `release tags` (`v*` created only by the admin, never moved or deleted).
+- [x] `develop` branch settings (2026-11-17): the ruleset, renamed `protected branches`, names `refs/heads/main` and `refs/heads/develop` explicitly (it targeted `~DEFAULT_BRANCH`, which moved protection off `main` once `develop` became the default), and `develop` is the default branch.
+- [x] `release.yml` in `.github/workflows/` (no `deploy.yml`: see 4. above); [`production-setup.md`](production-setup.md) §7 deploys the published images (2026-11-17).
 - [ ] First release: a `v0.1.0-rc.1` dry run, then `v0.1.0` with `/bump-version`; confirm both GHCR packages are public and linked to the repository.
 
 ## 3. Going public
@@ -52,4 +54,4 @@ Before flipping the visibility:
 - [x] A README for self-hosters (what it does, screenshots, the quick start) and `SECURITY.md` (how to report a vulnerability).
 - [ ] `CONTRIBUTING.md` and `.github/FUNDING.yml`.
 - [ ] Git history checked for secrets (every commit, not only the current tree); rotate anything found before publishing.
-- [ ] After flipping: confirm both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/main` lists the rules) and that a direct push to `main` is rejected.
+- [x] After flipping (2026-11-17): both rulesets are enforced (`gh api repos/<owner>/pr-follower/rules/branches/<branch>` lists deletion, non_fast_forward, pull_request and required_status_checks for `main` and `develop`), and a direct push to `main` is rejected.
