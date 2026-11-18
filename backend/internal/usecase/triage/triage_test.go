@@ -2,6 +2,7 @@ package triage_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -222,6 +223,68 @@ func TestTriageUseCase_BuildWorkspaceSnapshotAndSnoozeClaim(t *testing.T) {
 	}
 	if len(pub.events) != 2 {
 		t.Errorf("expected 2 published SSE events, got %d", len(pub.events))
+	}
+}
+
+// strangerFixture holds a PR of a repository (99) the signed-in user does not follow: they follow
+// only repository 10.
+func strangerFixture() (*triage.UseCase, *fakePRRepo, *fakePublisher) {
+	users := &fakeUserRepo{user: &entity.User{ID: 1, Login: "stranger"}}
+	repos := &fakeRepoRepo{repos: []entity.Repository{{ID: 10, Owner: "acme", Name: "web", FullName: "acme/web"}}}
+	prs := &fakePRRepo{
+		prs: []entity.PullRequest{{
+			ID: 500, RepositoryID: 99, RepositoryName: "acme/secret", Number: 7,
+			State: entity.PRStateOpen, CIStatus: entity.CIStatusPending, HeadSHA: "sha-7",
+		}},
+		states:   map[uint64]entity.UserPRState{},
+		analyses: map[uint64]*entity.DependabotAnalysis{},
+	}
+	pub := &fakePublisher{}
+	return triage.NewUseCase(users, repos, prs, pub, nil, nil, nil), prs, pub
+}
+
+func TestClaimPR_RefusesAPROfARepositoryTheUserDoesNotFollow(t *testing.T) {
+	t.Parallel()
+	uc, prs, pub := strangerFixture()
+
+	err := uc.ClaimPR(context.Background(), 1, 500)
+	if !errors.Is(err, entity.ErrNotFound) {
+		t.Fatalf("a non-follower must get the answer a missing PR gets (ErrNotFound), got %v", err)
+	}
+	if prs.prs[0].ClaimedByUserID != nil || prs.prs[0].ClaimedByLogin != "" {
+		t.Errorf("a refused claim must store nothing, got claimed by %q", prs.prs[0].ClaimedByLogin)
+	}
+	if len(pub.events) != 0 {
+		t.Errorf("a refused claim must publish nothing, got %d events", len(pub.events))
+	}
+}
+
+func TestSnoozePR_RefusesAPROfARepositoryTheUserDoesNotFollow(t *testing.T) {
+	t.Parallel()
+	for _, cond := range []entity.SnoozeCondition{entity.SnoozeConditionNextCommit, entity.SnoozeConditionCIGreen} {
+		uc, prs, pub := strangerFixture()
+
+		err := uc.SnoozePR(context.Background(), 1, 500, cond)
+		if !errors.Is(err, entity.ErrNotFound) {
+			t.Fatalf("%s: a non-follower must get the answer a missing PR gets (ErrNotFound), got %v", cond, err)
+		}
+		if len(prs.states) != 0 {
+			t.Errorf("%s: a refused snooze must store nothing, got %#v", cond, prs.states)
+		}
+		if len(pub.events) != 0 {
+			t.Errorf("%s: a refused snooze must publish nothing, got %d events", cond, len(pub.events))
+		}
+	}
+}
+
+func TestClaimAndSnooze_AMissingPRIsNotFound(t *testing.T) {
+	t.Parallel()
+	uc, _, _ := strangerFixture()
+	if err := uc.ClaimPR(context.Background(), 1, 404); !errors.Is(err, entity.ErrNotFound) {
+		t.Errorf("ClaimPR on a missing PR: expected ErrNotFound, got %v", err)
+	}
+	if err := uc.SnoozePR(context.Background(), 1, 404, entity.SnoozeConditionNextCommit); !errors.Is(err, entity.ErrNotFound) {
+		t.Errorf("SnoozePR on a missing PR: expected ErrNotFound, got %v", err)
 	}
 }
 
