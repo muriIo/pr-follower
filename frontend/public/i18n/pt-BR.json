@@ -88,6 +88,8 @@
   "auth.error.state_mismatch": "A tentativa de login expirou ou não pôde ser verificada. Tente novamente.",
   "auth.error.access_denied": "Você cancelou a autorização no GitHub.",
   "auth.error.login_failed": "O GitHub não confirmou o login. Tente novamente.",
+  "auth.error.not_org_member": "Este painel é restrito aos membros da organização no GitHub, e sua conta não é membro dela. Peça acesso a um administrador da organização.",
+  "auth.error.org_membership_unverified": "Não foi possível verificar no GitHub se você é membro da organização, então o acesso não foi liberado. Tente de novo em alguns minutos; se continuar, avise quem administra o PR Follower.",
   "auth.error.session_expired": "Sua sessão expirou. Entre de novo.",
   "auth.error.github_token_expired": "Seu acesso ao GitHub expirou. Entre de novo.",
   "auth.error.unknown": "Não foi possível entrar. Tente novamente.",

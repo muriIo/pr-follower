@@ -73,7 +73,12 @@ func main() {
 	// API replicas share one timeline and one live stream.
 	sseHub := newActivityHub(ctx, cfg, db)
 	opReg := newOperationRegistry(ctx, cfg, db)
-	installations := newInstallationTokens(cfg)
+	appAuth := newAppAuth(cfg)
+	// An untyped nil interface when the app credentials are not set (a typed nil would not compare nil).
+	var installations port.InstallationTokenSource
+	if appAuth != nil {
+		installations = appAuth
+	}
 	ghGateway := github.NewGateway(github.GatewayConfig{
 		Backoff:       resilience.DefaultBackoffConfig(),
 		Installations: installations,
@@ -126,8 +131,18 @@ func main() {
 			}),
 			Users:    userRepo,
 			Sessions: sessionRepo,
+			// ADR-0015: sign-in limited to these organizations' members (config refuses an allowlist
+			// without app credentials, so appAuth is set whenever the list is).
+			AllowedOrgs: cfg.AllowedGitHubOrgs,
+			Members:     orgMembership(appAuth),
+			Access:      persistence.NewMemberAccessStore(db),
 		})
 		go authUC.PurgeExpiredSessionsEvery(ctx, time.Hour) // stops with the server
+		if len(cfg.AllowedGitHubOrgs) > 0 {
+			slog.Info("sign-in restricted to github organization members", "orgs", cfg.AllowedGitHubOrgs)
+			// Every replica sweeps: revoking is idempotent (ADR-0011, ADR-0012). Stops with the server.
+			go authUC.RecheckMembershipEvery(ctx, membershipRecheckInterval)
+		}
 		userAPI := github.NewUserClient(github.UserClientConfig{Backoff: resilience.DefaultBackoffConfig()})
 		// The turn engine: each PR's changed files, read with a user token, feed CODEOWNERS ownership.
 		changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, installations)
@@ -194,10 +209,23 @@ func main() {
 	_ = httpServer.Shutdown(shutdownCtx)
 }
 
-// newInstallationTokens authenticates as the GitHub App for reads that have no signed-in user
-// behind them. It returns nil (an untyped nil interface) when the app credentials are not set, and
+// membershipRecheckInterval is how often a user who left the allowed organizations is looked for
+// (ADR-0015): the longest a leaver keeps reading stored data. One GitHub call per user and allowed
+// organization, as the app's installation.
+const membershipRecheckInterval = 15 * time.Minute
+
+// orgMembership is nil (an untyped nil interface) without the GitHub App.
+func orgMembership(appAuth *github.AppAuth) port.OrgMembershipChecker {
+	if appAuth == nil {
+		return nil
+	}
+	return appAuth
+}
+
+// newAppAuth authenticates as the GitHub App for reads that have no signed-in user behind them and
+// for organization membership checks. It returns nil when the app credentials are not set, and
 // stops the server when they are set but invalid: a broken key must not fail silently later.
-func newInstallationTokens(cfg *config.Config) port.InstallationTokenSource {
+func newAppAuth(cfg *config.Config) *github.AppAuth {
 	if !cfg.GitHubAppConfigured() {
 		if cfg.GitHubAppID != "" || cfg.GitHubAppPrivateKey != "" {
 			slog.Warn("GitHub App credentials incomplete: set both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY (or _FILE)")

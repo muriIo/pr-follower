@@ -431,6 +431,100 @@ var unconfigured = map[string]string{"error": "x", "code": "brand_new"}
 		}
 	})
 
+	adr0015Login := func(body string) string {
+		return `package auth
+
+import "context"
+
+type UseCase struct{ users, sessions store }
+type store interface{ Upsert(context.Context) error; Create(context.Context) error }
+
+func (uc *UseCase) requireAllowedOrgMember(ctx context.Context) error { return nil }
+
+func (uc *UseCase) CompleteLogin(ctx context.Context) error {
+` + body + `
+}
+`
+	}
+	adr0015Files := func(login, callbackCodes, known, ptBR, enUS, docs string) map[string]string {
+		return map[string]string{
+			"backend/internal/usecase/auth/auth.go":                     login,
+			"backend/internal/usecase/auth/auth_test.go":                "package auth\n",
+			"backend/internal/adapter/http/auth.go":                     "package httpadapter\n\nfunc cb() {\n" + callbackCodes + "}\n",
+			"backend/internal/adapter/http/auth_test.go":                "package httpadapter\n",
+			"backend/internal/infrastructure/config/config.go":          "package config\n\nconst allowlist = \"ALLOWED_GITHUB_ORGS\"\n",
+			"backend/internal/infrastructure/config/config_test.go":     "package config\n",
+			"frontend/src/app/infrastructure/auth/http-auth.gateway.ts": "const KNOWN_AUTH_ERRORS: readonly AuthErrorCode[] = [\n" + known + "];\n",
+			"frontend/public/i18n/pt-BR.json":                           ptBR,
+			"frontend/public/i18n/en-US.json":                           enUS,
+			"docs/production-setup.md":                                  docs,
+			".env.example":                                              docs,
+		}
+	}
+
+	t.Run("ADR-0015: a sign-in that checks membership first and names every refusal passes", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, adr0015Files(
+			adr0015Login("\tif err := uc.requireAllowedOrgMember(ctx); err != nil {\n\t\treturn err\n\t}\n\t_ = uc.users.Upsert(ctx)\n\treturn uc.sessions.Create(ctx)"),
+			"\tredirectWithAuthError(w, r, \"not_org_member\")\n",
+			"  'not_org_member',\n",
+			`{"auth.error.not_org_member": "Não"}`,
+			`{"auth.error.not_org_member": "No"}`,
+			"Set ALLOWED_GITHUB_ORGS=acme\n",
+		))
+		report, err := adrcheck.ValidateRepository(root)
+		if err != nil || containsViolation(report.Violations, "ADR-0015") {
+			t.Fatalf("expected a compliant sign-in, got %v: %v", err, report.Violations)
+		}
+	})
+
+	t.Run("ADR-0015: detects a session opened before the membership check, unnamed refusals and undocumented config", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, adr0015Files(
+			adr0015Login("\t_ = uc.users.Upsert(ctx)\n\t_ = uc.sessions.Create(ctx)\n\treturn uc.requireAllowedOrgMember(ctx)"),
+			"\tredirectWithAuthError(w, r, \"not_org_member\")\n\tredirectWithAuthError(w, r, \"org_membership_unverified\")\n",
+			"  'not_org_member',\n",
+			`{"auth.error.not_org_member": "Não"}`,
+			`{}`,
+			"nothing about the allowlist\n",
+		))
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected ADR-0015 violations")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{
+			"ADR-0015: CompleteLogin in backend/internal/usecase/auth/auth.go calls users.Upsert before requireAllowedOrgMember",
+			"ADR-0015: CompleteLogin in backend/internal/usecase/auth/auth.go calls sessions.Create before requireAllowedOrgMember",
+			`ADR-0015: the sign-in callback sends auth_error "org_membership_unverified" but KNOWN_AUTH_ERRORS`,
+			`ADR-0015: auth_error "not_org_member" has no "auth.error.not_org_member" in en-US.json`,
+			"ADR-0015: docs/production-setup.md does not document ALLOWED_GITHUB_ORGS",
+			"ADR-0015: .env.example does not document ALLOWED_GITHUB_ORGS",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected violation %q, got:\n%s", want, joined)
+			}
+		}
+		if strings.Contains(joined, `"auth.error.not_org_member" in pt-BR.json`) {
+			t.Errorf("pt-BR has the key and must not be reported:\n%s", joined)
+		}
+	})
+
+	t.Run("ADR-0015: detects a sign-in that never checks membership", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, map[string]string{
+			"backend/internal/usecase/auth/auth.go":      adr0015Login("\treturn uc.sessions.Create(ctx)"),
+			"backend/internal/usecase/auth/auth_test.go": "package auth\n",
+		})
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0015: CompleteLogin in backend/internal/usecase/auth/auth.go never calls requireAllowedOrgMember") {
+			t.Fatalf("expected the missing check, got %v", report.Violations)
+		}
+	})
+
 	t.Run("ADR-0014: a compliant static landing page passes", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)

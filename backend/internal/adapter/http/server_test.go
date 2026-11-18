@@ -334,6 +334,12 @@ func setupTestRouter(t *testing.T) testServer {
 
 func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	t.Helper()
+	return setupTestRouterWithAuth(t, oauth, nil)
+}
+
+// setupTestRouterWithAuth lets a test change the sign-in use case's deps (an org allowlist).
+func setupTestRouterWithAuth(t *testing.T, oauth fakeGitHubOAuth, configure func(*auth.Deps)) testServer {
+	t.Helper()
 	db, err := database.Connect(context.Background(), database.Options{
 		DSN:          "sqlite://:memory:",
 		MaxOpenConns: 1,
@@ -359,7 +365,11 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	ended := &fakeEndedPRs{m: map[int]string{}}
 	userAPI := fakeGitHubUserAPI{files: repoFiles, ended: ended}
 
-	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
+	authDeps := auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)}
+	if configure != nil {
+		configure(&authDeps)
+	}
+	authUC := auth.NewUseCase(authDeps)
 	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
 		GitHub: ghGw, State: userAPI, Reviews: prRepo, Pub: sseHub})
 	changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, nil)

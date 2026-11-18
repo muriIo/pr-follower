@@ -51,3 +51,16 @@ type Session struct {
 func (s Session) IsExpired(now time.Time) bool {
 	return !now.Before(s.ExpiresAt)
 }
+
+// RevokedAccess counts what was removed when a user lost access to stored data (ADR-0015).
+type RevokedAccess struct {
+	Sessions int64
+	Follows  int64
+	PRStates int64
+	SyncJobs int64
+}
+
+// Any reports whether anything was removed.
+func (r RevokedAccess) Any() bool {
+	return r.Sessions+r.Follows+r.PRStates+r.SyncJobs > 0
+}

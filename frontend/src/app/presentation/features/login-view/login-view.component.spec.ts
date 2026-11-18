@@ -57,6 +57,27 @@ describe('LoginViewComponent (GitHub-only sign-in)', () => {
     expect(error?.textContent).toContain('Você cancelou a autorização no GitHub.');
   });
 
+  it('says a refused account is not a member of the allowed GitHub organizations (ADR-0015)', async () => {
+    const { authStore } = setup('not_org_member');
+    await authStore.restore();
+
+    const fixture = TestBed.createComponent(LoginViewComponent);
+    fixture.detectChanges();
+    const error = (fixture.nativeElement as HTMLElement).querySelector('.pf-login-error');
+    expect(error?.textContent).toContain('não é membro');
+  });
+
+  it('says membership could not be verified, without claiming the user is not a member', async () => {
+    const { authStore } = setup('org_membership_unverified');
+    await authStore.restore();
+
+    const fixture = TestBed.createComponent(LoginViewComponent);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).querySelector('.pf-login-error')?.textContent ?? '';
+    expect(text).toContain('Não foi possível verificar');
+    expect(text).not.toContain('não é membro');
+  });
+
   it('tells the user their session expired when the app sent them back here', async () => {
     const { authStore } = setup();
     await authStore.restore();

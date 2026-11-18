@@ -59,3 +59,15 @@ func TestSession_IsExpired(t *testing.T) {
 		t.Error("session expiring now must be expired")
 	}
 }
+
+func TestRevokedAccess_Any(t *testing.T) {
+	t.Parallel()
+	if (entity.RevokedAccess{}).Any() {
+		t.Fatal("nothing removed")
+	}
+	for _, r := range []entity.RevokedAccess{{Sessions: 1}, {Follows: 1}, {PRStates: 1}, {SyncJobs: 1}} {
+		if !r.Any() {
+			t.Fatalf("%+v removed something", r)
+		}
+	}
+}

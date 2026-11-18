@@ -14,6 +14,8 @@ const KNOWN_AUTH_ERRORS: readonly AuthErrorCode[] = [
   'state_mismatch',
   'access_denied',
   'login_failed',
+  'not_org_member',
+  'org_membership_unverified',
 ];
 
 interface MeResponseDto {
