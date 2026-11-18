@@ -969,6 +969,31 @@ func TestLiveEvents_OnlyReachUsersWhoFollowTheRepository(t *testing.T) {
 	}
 }
 
+func TestClaimAndSnooze_RefuseANonFollowerAsIfThePRDidNotExist(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, octocat) // octocat follows the repository of PR 1
+	stranger := ts.signInAs(t, "other")
+
+	missing := ts.do(t, http.MethodPost, "/api/v1/prs/999999/claim", "", stranger)
+	for _, target := range []string{"/api/v1/prs/1/claim", "/api/v1/prs/1/snooze"} {
+		rec := ts.do(t, http.MethodPost, target, `{"condition":"UNTIL_NEXT_COMMIT"}`, stranger)
+		if rec.Code != http.StatusNotFound || rec.Body.String() != missing.Body.String() {
+			t.Fatalf("%s by a non-follower: expected the missing-PR answer (%d %s), got %d %s",
+				target, missing.Code, missing.Body.String(), rec.Code, rec.Body.String())
+		}
+	}
+
+	pr, err := ts.prs.GetByID(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("read PR 1: %v", err)
+	}
+	if pr.ClaimedByUserID != nil || pr.ClaimedByLogin != "" {
+		t.Fatalf("a refused claim must store nothing, got claimed by %q", pr.ClaimedByLogin)
+	}
+}
+
 // seedWorkspaceFixture writes test repositories, PRs, analyses and turn state for the signed-in
 // user straight through persistence (test data only; production has no demo endpoint).
 func (ts testServer) seedWorkspaceFixture(t *testing.T, session *http.Cookie) {
