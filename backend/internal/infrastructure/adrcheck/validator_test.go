@@ -431,6 +431,69 @@ var unconfigured = map[string]string{"error": "x", "code": "brand_new"}
 		}
 	})
 
+	t.Run("ADR-0014: a compliant static landing page passes", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, filepath.Join(root, "landing"), map[string]string{
+			"index.html": `<!doctype html><html><head><link rel="stylesheet" href="styles.css"><link rel="icon" href="favicon.svg">` +
+				`<link rel="canonical" href="https://example.github.io/site/"><meta property="og:image" content="https://example.github.io/site/a.webp"></head>` +
+				`<body><a href="https://github.com/muriIo/pr-follower">GitHub</a><img src="images/inbox.webp" alt=""></body></html>`,
+			"styles.css": `@font-face{font-family:Inter;src:url(fonts/inter.woff2) format("woff2")}` + "\n" + `.x{background:url("images/a.webp")}`,
+		})
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err != nil || containsViolation(report.Violations, "ADR-0014") {
+			t.Fatalf("expected a compliant landing page, got %v: %v", err, report.Violations)
+		}
+	})
+
+	t.Run("ADR-0014: detects a build, scripts and third-party requests in the landing page", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, filepath.Join(root, "landing"), map[string]string{
+			"index.html": `<!doctype html><html><head>` +
+				`<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">` +
+				`<script src="app.js"></script></head>` +
+				`<body><img src="https://example.com/a.png" alt=""><a href="https://github.com">ok</a></body></html>`,
+			"styles.css":   `@import url("https://fonts.example/x.css");` + "\n" + `.x{background:url(https://example.com/b.png)}`,
+			"package.json": `{}`,
+			"app.js":       `console.log(1)`,
+		})
+
+		report, err := adrcheck.ValidateRepository(root)
+		if err == nil {
+			t.Fatal("expected ADR-0014 violations, got nil")
+		}
+		joined := strings.Join(report.Violations, "\n")
+		for _, want := range []string{
+			"ADR-0014: landing/package.json",
+			"ADR-0014: landing/app.js",
+			"ADR-0014: landing/index.html has a <script>",
+			"ADR-0014: landing/index.html loads https://fonts.googleapis.com/css2?family=Inter",
+			"ADR-0014: landing/index.html loads https://example.com/a.png",
+			"ADR-0014: landing/styles.css loads https://fonts.example/x.css",
+			"ADR-0014: landing/styles.css loads https://example.com/b.png",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("expected violation %q, got:\n%s", want, joined)
+			}
+		}
+		if strings.Contains(joined, "loads https://github.com") {
+			t.Errorf("a plain link is not a request and must not be reported:\n%s", joined)
+		}
+	})
+
+	t.Run("ADR-0014: detects a landing directory without index.html", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, filepath.Join(root, "landing"), map[string]string{"styles.css": "body{}"})
+
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0014: landing/index.html is missing") {
+			t.Fatalf("expected a missing index.html violation, got: %v", report.Violations)
+		}
+	})
+
 	t.Run("ADR-0011: detects non-idempotent writes, schema, retries and missing redelivery tests", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)
@@ -550,6 +613,20 @@ func TestIngestStarEvent_Works(t *testing.T) {
 			t.Fatalf("expected ADR-0010 password violation, got err=%v violations=%v", err, report.Violations)
 		}
 	})
+}
+
+// writeFiles writes each relative path under dir, creating the folders it needs.
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		path := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
 }
 
 func containsViolation(violations []string, prefix string) bool {

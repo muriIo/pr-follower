@@ -19,6 +19,7 @@ This directory contains the **Architecture Decision Records (ADRs)** for **PR Fo
 | [ADR-0011](./0011-idempotent-integrations.md) | Idempotent Integrations | Accepted | `adrcheck` upsert, re-runnable schema, retry-class & redelivery-test scan |
 | [ADR-0012](./0012-shared-state-across-api-replicas.md) | Shared State Across API Replicas Lives in Postgres | Accepted | `adrcheck` scan for locked in-memory state without a `replica-local:` note |
 | [ADR-0013](./0013-acknowledged-and-recoverable-github-failures.md) | Acknowledged and Recoverable GitHub Failures | Accepted | `adrcheck` scan for unclassified GitHub errors and API error codes the SPA cannot show |
+| [ADR-0014](./0014-static-landing-page-on-github-pages.md) | Static Landing Page on GitHub Pages | Accepted | `adrcheck` scan of `landing/` for build files, scripts and third-party requests |
 
 ## Required ADR Sections
 
