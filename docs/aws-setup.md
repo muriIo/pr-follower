@@ -440,6 +440,8 @@ EOF
 python3 -m json.tool taskdef.json >/dev/null && echo "taskdef.json is valid JSON"
 ```
 
+Optional: to let only members of your GitHub organization sign in, add `{"name": "ALLOWED_GITHUB_ORGS", "value": "acme"}` to the api's `environment` (comma-separated for several). The app must be installed on that organization with its *Members: read* permission accepted; leavers lose access within 15 minutes. See [`production-setup.md`](production-setup.md) §13.11, including what an existing deployment must do to adopt it.
+
 Create the cluster, register the definition and start the service:
 
 ```bash

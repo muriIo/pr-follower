@@ -37,11 +37,11 @@ On GitHub: **Organization → Settings → Developer settings → GitHub Apps �
 | Setup URL | `https://prfollower.example.com/` with **Redirect on update** on |
 | Webhook | active; URL `https://prfollower.example.com/api/v1/webhooks/github`; secret from §2 |
 
-**Repository permissions:** Pull requests *read & write*, Contents *read & write*, Checks *read-only*, Commit statuses *read-only*, Metadata *read-only*. **Organization permissions:** Members *read-only*.
+**Repository permissions:** Pull requests *read & write*, Contents *read & write*, Checks *read-only*, Commit statuses *read-only*, Metadata *read-only*. **Organization permissions:** Members *read-only* (team entries in CODEOWNERS, and the organization check of `ALLOWED_GITHUB_ORGS`).
 
 **Events:** Pull request, Pull request review, Push, Status, Check run.
 
-**Where it can be installed:** *Only on this account* for a single organization; *Any account* to let anyone sign in and install it.
+**Where it can be installed:** *Only on this account* for a single organization; *Any account* to let anyone sign in and install it. To let only your organization's members sign in at all, also set `ALLOWED_GITHUB_ORGS` (§3).
 
 Then, on the app's page, collect: the **App ID**, the **Client ID**, a new **client secret**, the app's URL name (`https://github.com/apps/<slug>`), and a **private key** (a `.pem` download). Why each setting matters: [runbook §4–5](docs/production-setup.md#4-create-the-production-github-app).
 
@@ -69,6 +69,7 @@ The API reads its configuration from environment variables:
 | `GITHUB_WEBHOOK_SECRET` | from §2. The API refuses to start on an `https` `PUBLIC_URL` without it. |
 | `TOKEN_ENCRYPTION_KEY` | from §2 |
 | `ALLOWED_ORIGIN` | `https://prfollower.example.com` |
+| `ALLOWED_GITHUB_ORGS` | optional: `acme` (or `acme,acme-labs`). Only members of these organizations can sign in, and people who leave lose access within 15 minutes. Empty: any GitHub account can sign in. The app must be installed on each organization, with its *Members* permission accepted. [Runbook §13.11](docs/production-setup.md#1311-restricting-sign-in-to-your-organization). |
 
 The panel needs only `API_UPSTREAM`, the API's internal address (default `http://api:8080`: scheme, host and port, no path). Every variable: [runbook §6](docs/production-setup.md#6-write-the-configuration).
 

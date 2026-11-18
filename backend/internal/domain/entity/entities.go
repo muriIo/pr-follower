@@ -40,6 +40,13 @@ var (
 	// ErrSyncInterrupted means a sync stopped reporting before it finished: the API replica running it
 	// went away (a deploy, a crash). Nothing it did is lost; running it again finishes the job.
 	ErrSyncInterrupted = errors.New("the sync was interrupted")
+	// ErrNotOrgMember means GitHub confirmed the account belongs to none of the organizations sign-in
+	// is restricted to (ALLOWED_GITHUB_ORGS, ADR-0015).
+	ErrNotOrgMember = errors.New("not a member of an allowed github organization")
+	// ErrOrgMembershipUnverified means the organization membership sign-in is restricted to could not
+	// be checked (GitHub unavailable or rate limited, the app not installed on the organization, or
+	// missing its Members permission). It wraps the cause and is never treated as "not a member".
+	ErrOrgMembershipUnverified = errors.New("github organization membership could not be verified")
 )
 
 type PRState string

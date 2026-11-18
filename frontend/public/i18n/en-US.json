@@ -88,6 +88,8 @@
   "auth.error.state_mismatch": "The sign-in attempt expired or could not be verified. Please try again.",
   "auth.error.access_denied": "You cancelled the authorization on GitHub.",
   "auth.error.login_failed": "GitHub did not confirm the sign-in. Please try again.",
+  "auth.error.not_org_member": "This panel is restricted to members of the organization on GitHub, and your account is not a member. Ask an organization owner for access.",
+  "auth.error.org_membership_unverified": "We could not verify with GitHub that you are a member of the organization, so access was not granted. Try again in a few minutes; if it keeps happening, tell whoever runs PR Follower.",
   "auth.error.session_expired": "Your session expired. Please sign in again.",
   "auth.error.github_token_expired": "Your GitHub access expired. Please sign in again.",
   "auth.error.unknown": "Could not sign in. Please try again.",

@@ -22,6 +22,24 @@ type SessionRepository interface {
 	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
 }
 
+// OrgMembershipChecker tells, as the GitHub App installed on the organization, whether a GitHub account
+// belongs to it, publicly or privately (ADR-0015). login is checked; githubID guards against a stale
+// login after the account was renamed. (false, nil) only when GitHub confirmed the account is not a
+// member; any error means it could not be told (unavailable, rate limited, app not installed there,
+// or missing the organization Members permission).
+type OrgMembershipChecker interface {
+	IsOrgMember(ctx context.Context, org, login string, githubID int64) (bool, error)
+}
+
+// MemberAccessStore finds who can read stored data and takes that access away (ADR-0015).
+type MemberAccessStore interface {
+	// ListUsersWithAccess returns every user with a session or a followed repository (tokens excluded).
+	ListUsersWithAccess(ctx context.Context) ([]entity.User, error)
+	// RevokeUserAccess deletes the user's sessions, follows, per-user PR state and sync job in one
+	// transaction, and reports what it removed (nothing when it already ran).
+	RevokeUserAccess(ctx context.Context, userID uint64) (entity.RevokedAccess, error)
+}
+
 // TokenCipher encrypts GitHub tokens at rest (ADR-0010).
 type TokenCipher interface {
 	Encrypt(plaintext string) (string, error)

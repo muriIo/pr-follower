@@ -369,3 +369,27 @@ ON CONFLICT (pull_request_id, head_sha) DO UPDATE SET
 SELECT pull_request_id, head_sha, error_kind, message, failed_at
 FROM dependabot_analysis_failures
 WHERE pull_request_id = $1 AND head_sha = $2;
+
+-- name: ListUsersWithAccess :many
+-- ADR-0015: the users who can still read stored data (a session or a followed repository).
+SELECT u.id, u.github_id, u.login
+FROM users u
+WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id)
+   OR EXISTS (SELECT 1 FROM user_repo_follows f WHERE f.user_id = u.id)
+ORDER BY u.id ASC;
+
+-- name: DeleteUserSessions :execrows
+DELETE FROM sessions
+WHERE user_id = $1;
+
+-- name: DeleteUserFollows :execrows
+DELETE FROM user_repo_follows
+WHERE user_id = $1;
+
+-- name: DeleteUserPRStates :execrows
+DELETE FROM pr_user_states
+WHERE user_id = $1;
+
+-- name: DeleteUserSyncJob :execrows
+DELETE FROM sync_jobs
+WHERE user_id = $1;

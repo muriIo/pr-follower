@@ -63,7 +63,18 @@ For 3.2 add a slow workflow to the default branch (a fork PR runs the base branc
 
 Watch the header while the API is stopped: within a minute it must leave "Ao vivo (SSE)" for "reconectando" (a silent stream is reopened after 60s), and after the restart come back and reload the workspace.
 
-## 7. Recording the result
+## 7. Organization allowlist (ADR-0015)
+
+Needs an organization you own with the app installed on it (*Members: read* accepted), and the second account **not** a member of it.
+
+1. Set `ALLOWED_GITHUB_ORGS=<your-org>` in `.env` and `docker compose -f docker-compose.local.yml up -d api`. The log shows `sign-in restricted to github organization members`.
+2. Sign in with your account (a member, even with private membership): **Pass:** the panel opens.
+3. Sign in with the second account: **Pass:** the login screen says it is not a member; `SELECT login FROM users` has no row for it.
+4. Invite the second account to the organization, accept, sign in: **Pass:** it gets in. Follow the test repository with it.
+5. Remove it from the organization. Within 15 minutes (or restart the API to sweep at once): **Pass:** its next request signs it out, the log has `revoked access of a user who left the allowed github organizations`, and `SELECT count(*) FROM user_repo_follows WHERE user_id = <its id>` is 0.
+6. Set `ALLOWED_GITHUB_ORGS=<an org without the app>`, restart, sign in: **Pass:** "could not verify", no session, and the log names *not installed on the … organization*. Unset it afterwards.
+
+## 8. Recording the result
 
 Last run: 2026-11-16, everything above except 4.4, 6.3 and a real Vercel/Jenkins status; results in the roadmap.
 

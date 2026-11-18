@@ -160,7 +160,7 @@ The server does not need to exist yet. GitHub sends a `ping` when the app is cre
 | Commit statuses | Read-only | Legacy statuses (Jenkins, Vercel). |
 | Metadata | Read-only | Mandatory; set automatically. |
 
-**Organization permissions:** Members *Read-only*, to read the user's teams for team entries in CODEOWNERS. **Account permissions:** none.
+**Organization permissions:** Members *Read-only*, to read the user's teams for team entries in CODEOWNERS and, when `ALLOWED_GITHUB_ORGS` is set, to check that a user belongs to your organization (§13.11). **Account permissions:** none.
 
 Approve, merge and comment use the signed-in user's own token, so they are limited by these permissions *and* by what that user may do on the repository.
 
@@ -180,8 +180,8 @@ Subscribe to exactly these (each one appears only once its permission above is s
 
 ### 4.7 Where it can be installed
 
-- **Any account**: anyone can install the app on their user or organization. This is the ADR-0010 model: sign-in is open to every GitHub account, and what each user sees is limited by where the app is installed.
-- **Only on this account**: only the owning account can install it. Choose this for a private, single-organization instance. Anyone can still sign in, but other users find nothing to import.
+- **Any account**: anyone can install the app on their user or organization. This is the ADR-0010 model: sign-in is open to every GitHub account (unless `ALLOWED_GITHUB_ORGS` is set, §13.11), and what each user sees is limited by where the app is installed.
+- **Only on this account**: only the owning account can install it. Choose this for a private, single-organization instance. Anyone can still sign in, but other users find nothing to import. To keep everyone outside your organization from signing in at all, also set `ALLOWED_GITHUB_ORGS` (§13.11).
 
 You can change this later on the app's **Advanced** page.
 
@@ -223,6 +223,7 @@ On the app's **General** page:
 | `ALLOWED_ORIGIN` | no | `https://app.example.com` | CORS. The app is same-origin, so this only narrows the default `*`. |
 | `PORT` | no | `8080` | Default. |
 | `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` | no | `25` / `10` | Defaults. Values that are not positive numbers fall back to them. |
+| `ALLOWED_GITHUB_ORGS` | no | `acme` or `acme,acme-labs` | Comma-separated organization logins, case-insensitive. Set: only members (public or private) of at least one of them can sign in, and users who leave lose their access within 15 minutes (§13.11). Unset or empty: sign-in is open to every GitHub account. Needs `GITHUB_APP_ID` and the key: without them the API refuses to start. |
 
 \* Without `GITHUB_APP_ID` and a key the API still runs: it logs a warning, falls back to followers' tokens, and turns the Dependabot analysis off ("Sem análise" everywhere). Treat both as required in production.
 
@@ -239,6 +240,8 @@ GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github-app.pem
 GITHUB_WEBHOOK_SECRET=...
 TOKEN_ENCRYPTION_KEY=...
 ALLOWED_ORIGIN=https://app.example.com
+# Optional: only members of these GitHub organizations can sign in (§13.11)
+ALLOWED_GITHUB_ORGS=acme
 ```
 
 One variable per line, unquoted, with no spaces around `=`.
@@ -586,6 +589,34 @@ Every request may land on any replica: no sticky sessions are needed. Activity, 
 - On upgrades, let one replica start (and migrate) before the others: migrations take no lock across processes.
 - Budget `DB_MAX_OPEN_CONNS` + 2 connections per replica.
 
+### 13.11 Restricting sign-in to your organization
+
+By default anyone with a GitHub account can sign in (ADR-0010); what they see is limited by where the app is installed. Set `ALLOWED_GITHUB_ORGS` to let only members of your organization in at all, and to take access away from people who leave it (ADR-0015).
+
+**Enable it on a new deployment:**
+
+1. Install the app on each organization you list (§4.7). The check runs as the app's installation on that organization.
+2. Make sure the app has **Organization permissions → Members: Read-only** (§4.5). It sees private (concealed) members too, and does not depend on the user's own token.
+3. Set `ALLOWED_GITHUB_ORGS=acme` (several: `acme,acme-labs`; a member of any one is admitted) next to `GITHUB_APP_ID` and the key, and start the API. It logs `sign-in restricted to github organization members`.
+
+**Adopt it on an existing deployment:**
+
+1. On the app's **Permissions & events** page, check that **Organization permissions → Members** is *Read-only*. Apps created from §4.5 already have it. If you add it now, each organization owner must **accept the new permission** (GitHub emails them; they review the request on the installation's settings page, §13.8). Until then every sign-in fails closed with "could not verify".
+2. Set `ALLOWED_GITHUB_ORGS` in the API environment (§6.1, your secret manager or task definition).
+3. Restart (or redeploy) every API replica.
+4. Within 15 minutes the first sweep removes the access of users who are not members (below). Watch the logs for `revoked access of a user who left the allowed github organizations`.
+
+**What a refused user sees.** The login screen, in their language:
+
+- *not a member* (`auth_error=not_org_member`): GitHub confirmed the account belongs to none of the listed organizations. No user row and no session are created.
+- *could not verify* (`auth_error=org_membership_unverified`): GitHub could not be asked (unavailable, rate limited, the app not installed on the organization, or the Members permission not granted). Sign-in fails closed: nobody is let in on a guess, and nobody is told they are not a member. The API logs the cause (`sign-in refused: github organization membership could not be verified`).
+
+**How fast a leaver loses access.** Every API replica rechecks, every 15 minutes (and at start), each user who has a session or follows a repository. A user GitHub confirms is no longer a member of any listed organization loses all sessions (signed out on their next request, "Sua sessão expirou"), all follows (no live events, nothing to list) and their per-user triage state (snoozes, turn state) and sync job. Their user row stays, so claims and the activity history still show their name. Signing in again is then refused. When membership cannot be verified for a user, nothing is changed for them and the API logs `could not verify github organization membership; access left unchanged`; the next sweep tries again. Removing someone from the organization on GitHub also removes their GitHub access at once, so actions on GitHub already fail before the sweep runs.
+
+**Cost.** One GitHub call per allowed organization at each sign-in (plus one to find the installation), and the same per user with access at each sweep, on the organization installation's rate limit. A renamed account is looked up by its GitHub id, so a rename never revokes anyone.
+
+To turn it off, unset `ALLOWED_GITHUB_ORGS` and restart: sign-in is open again and the sweep stops. Revoked follows are not restored; users import their repositories again.
+
 ## Troubleshooting
 
 ### The API does not start
@@ -595,6 +626,7 @@ The API logs one `ERROR` line and exits:
 | Log line | Cause | Fix |
 |---|---|---|
 | `failed to load configuration` … `GITHUB_WEBHOOK_SECRET must be set` | `PUBLIC_URL` is https and `GITHUB_WEBHOOK_SECRET` is unset (or the public development value). | Set the app's webhook secret (§2, §6.1). |
+| `failed to load configuration` … `ALLOWED_GITHUB_ORGS needs the GitHub App credentials` | `ALLOWED_GITHUB_ORGS` is set but `GITHUB_APP_ID` or the key is not: membership could never be checked. | Set the app credentials (§5, §6.1), or unset `ALLOWED_GITHUB_ORGS`. |
 | `failed to load configuration` … `read GITHUB_APP_PRIVATE_KEY_FILE` | The key file is missing at that path or not readable by UID 10001. | Mount it as in §6.2. |
 | `failed to connect to database` | `DATABASE_URL` is wrong, Postgres is unreachable or refuses TLS, or a migration failed. It gives up after 4 quick attempts; the restart policy retries. | Check the URL, network and `sslmode`, and that the role owns the database (§3). |
 | `invalid TOKEN_ENCRYPTION_KEY` | Not standard base64 of exactly 32 bytes. | Fix the copy first (§2 has the check). Generating a new key signs everyone out (§13.5). |
@@ -620,6 +652,8 @@ The sign-in screen shows why a login failed (`?auth_error=`):
 | `state_mismatch` | The login cookie was missing or did not match. | `PUBLIC_URL` must be the domain users open; "Request user authorization (OAuth) during installation" must be off; the proxy must not strip cookies; the attempt must finish within 10 minutes. |
 | `access_denied` | The user cancelled on GitHub. | Nothing to fix. |
 | `login_failed` | GitHub rejected the code exchange or the profile read. | Check the client secret, and that the Callback URL is exactly `PUBLIC_URL` + `/api/v1/auth/github/callback`. API logs show the cause. |
+| `not_org_member` | `ALLOWED_GITHUB_ORGS` is set and GitHub confirmed the user is a member of none of those organizations. | Add them to the organization on GitHub, or the organization to `ALLOWED_GITHUB_ORGS` (§13.11). |
+| `org_membership_unverified` | Membership could not be checked; sign-in fails closed. The API log line `sign-in refused: github organization membership could not be verified` names the cause: *not installed on the … organization* (install the app there), *lacks the organization Members (read) permission* (an owner must accept it, §13.11), a rate limit or GitHub being unavailable (try again later). | As the cause says. |
 
 After a sign-out the app explains it: "Sua sessão expirou" when the session expired or was deleted (§13.6), "Seu acesso ao GitHub expirou" when the user's GitHub token expired, was revoked, or became unreadable (a changed or unset `TOKEN_ENCRYPTION_KEY`).
 

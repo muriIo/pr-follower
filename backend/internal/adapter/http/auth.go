@@ -3,6 +3,8 @@ package httpadapter
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -66,7 +68,16 @@ func (h *Handler) AuthGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := h.deps.AuthUC.CompleteLogin(r.Context(), query.Get("code"), verifier)
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, entity.ErrNotOrgMember): // ADR-0015: GitHub confirmed it
+		redirectWithAuthError(w, r, "not_org_member")
+		return
+	case errors.Is(err, entity.ErrOrgMembershipUnverified): // ADR-0015: fail closed, say why
+		slog.Warn("sign-in refused: github organization membership could not be verified", "error", err)
+		redirectWithAuthError(w, r, "org_membership_unverified")
+		return
+	default:
 		redirectWithAuthError(w, r, "login_failed")
 		return
 	}

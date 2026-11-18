@@ -79,6 +79,14 @@ describe('HttpAuthGateway (GitHub-only sign-in, ADR-0010)', () => {
     expect(clean.history.replaceState).not.toHaveBeenCalled();
   });
 
+  it('recognises the org allowlist refusals the callback sends (ADR-0015)', () => {
+    expect(setup(fakeWindow('?auth_error=not_org_member')).consumeAuthError()).toBe('not_org_member');
+    TestBed.resetTestingModule();
+    expect(setup(fakeWindow('?auth_error=org_membership_unverified')).consumeAuthError()).toBe(
+      'org_membership_unverified',
+    );
+  });
+
   it('logs out with POST /api/v1/auth/logout and tolerates network failures', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"ok":true}', { status: 200 }));
     const gateway = setup();
