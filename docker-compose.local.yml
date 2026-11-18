@@ -48,6 +48,8 @@ services:
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # Local-only key; production must set its own secret value.
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-yfYm0n3yY3owYS1usyLqydvMge5O6ts0bF9AGsGXar8=}
+      # Optional (ADR-0015): only members of these GitHub organizations sign in; needs the app credentials.
+      ALLOWED_GITHUB_ORGS: ${ALLOWED_GITHUB_ORGS:-}
     volumes:
       - ./backend:/app
       - go-mod-cache:/go/pkg/mod

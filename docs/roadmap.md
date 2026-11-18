@@ -22,6 +22,7 @@ No P1 item is open. In order of value:
 - [x] Expired session in the SPA: any API call refused as unauthenticated (401) makes the app ask `/auth/me`; if the server no longer knows the session it returns to the sign-in screen saying so, stopping the live stream and closing the drawer. A 401 that is not the session (GitHub refusing the app's own credentials) or a server that cannot be reached never signs anyone out.
 - [x] When the signed-in user's own GitHub access is gone (token expired and not refreshable, or revoked) the server answers `github_token_expired` and the app signs out at once, clearing the server session, instead of leaving a valid session that can do nothing (#25).
 - [x] Expired sessions are purged every hour (and at start) by every replica; they used to be deleted only when their cookie came back, which never happens once someone stops using the app.
+- [x] Optional org allowlist (2026-11-18, ADR-0015): with `ALLOWED_GITHUB_ORGS` set, only members (public or private) of a listed GitHub organization can sign in, checked as the app's installation before any user row or session exists; "could not verify" fails closed with its own message. Every replica rechecks users with a session or a follow every 15 minutes and removes the sessions, follows, triage state and sync job of confirmed leavers (never on an unverified answer). Not verified against real GitHub yet ([`real-github-verification.md`](real-github-verification.md) §7).
 
 ## 2. Repositories & GitHub App installation
 

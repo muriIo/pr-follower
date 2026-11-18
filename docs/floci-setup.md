@@ -278,7 +278,7 @@ On GitHub: **Settings → Developer settings → GitHub Apps → New GitHub App*
 | Commit statuses | Read-only | Legacy statuses (Jenkins, Vercel). |
 | Metadata | Read-only | Mandatory; set automatically. |
 
-**Organization permissions:** Members *Read-only*, to read your teams for team entries in CODEOWNERS. **Account permissions:** none.
+**Organization permissions:** Members *Read-only*, to read your teams for team entries in CODEOWNERS and, with `ALLOWED_GITHUB_ORGS`, to check organization membership at sign-in. **Account permissions:** none.
 
 ### 6.5 Events
 
@@ -653,6 +653,8 @@ sed "s/@TAG@/$TAG/g" "$WORK/taskdef.template.json" > "$WORK/taskdef.json"
 python3 -m json.tool "$WORK/taskdef.json" >/dev/null && echo "taskdef.json is valid JSON"
 grep -c 'arn:aws:secretsmanager' "$WORK/taskdef.json"     # 5: every secret resolved to an ARN
 ```
+
+Optional: to rehearse the organization allowlist, add `{"name": "ALLOWED_GITHUB_ORGS", "value": "<your-org>"}` to the api's `environment` in the template above (then run the block again), with the app installed on that organization (a personal account cannot be listed: it has no members). A second account outside the organization then gets "não é membro" at sign-in ([`production-setup.md`](production-setup.md) §13.11).
 
 Create the cluster, register the definition and start the service, with the AWS settings:
 

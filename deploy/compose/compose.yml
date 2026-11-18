@@ -45,6 +45,7 @@ services:
       GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:?set GITHUB_WEBHOOK_SECRET in .env}
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?set TOKEN_ENCRYPTION_KEY in .env}
+      ALLOWED_GITHUB_ORGS: ${ALLOWED_GITHUB_ORGS:-} # optional: only these organizations' members sign in
     volumes:
       - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro # readable by UID 10001
     depends_on:
