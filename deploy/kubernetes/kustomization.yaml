@@ -24,6 +24,6 @@ resources:
 #     digest: "sha256:..."
 images:
   - name: ghcr.io/muriio/pr-follower-api
-    newTag: "0.1.0"
+    newTag: "0.2.0"
   - name: ghcr.io/muriio/pr-follower-panel
-    newTag: "0.1.0"
+    newTag: "0.2.0"
