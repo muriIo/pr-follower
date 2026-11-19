@@ -16,7 +16,7 @@ This skill never proposes a release candidate. A `vX.Y.Z-rc.N` tag (a pre-releas
 2. Last version: `git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-*' origin/main` (release candidates do not count).
    - It fails with "No names found": no tag yet, this is the first release. The range is the whole history and the proposal is `v0.1.0`.
 3. **Resume check.** If `origin/main` has a `docs/upgrades/vX.Y.Z.md` for a version above the last tag, and `PR_FOLLOWER_VERSION` in `deploy/compose/.env.example` is that version, the release was prepared and merged: go to step 6 with that version and the head of `origin/main`.
-4. Target: `origin/develop`, where changes land; `main` receives them through the release PR. If `git log --oneline origin/develop..origin/main` lists commits other than merges of `develop` (a hotfix not merged back), tell the human and stop until `main` is merged into `develop`.
+4. Target: `origin/develop`, where changes land; `main` receives them through the release PR. `git log --oneline origin/develop..origin/main` must print nothing. Any commit there, even the merge commit a previous release PR left on `main`, puts the release PR behind `main`, and the required up-to-date check blocks it. Hand the human the **sync PR** (`gh pr create --base develop --head main --title "chore: sync main into develop"`) and stop until it is merged.
 5. Range: `<last tag>..origin/develop`. If it is empty, report "nothing to release since `<last tag>`" and stop.
 
 Done when the last version (or "none"), the range and the target SHA are known.
@@ -93,3 +93,6 @@ Done when the commit exists and the human has the commands. Stop here; the next 
 3. `git tag -a vX.Y.Z <origin/main sha> --cleanup=whitespace -F <that file>`. `--cleanup=whitespace` is required: the default strips every line starting with `#`, which drops the `## ` headings. Check it with `git tag -n99 vX.Y.Z`.
 4. `git push origin vX.Y.Z`. A pushed `v*` tag cannot be moved or deleted (ruleset `release tags`).
 5. Report the tag and the commit it points at, and link the release run (`gh run list --workflow release.yml -L 1`). It checks the commit was merged by a PR whose CI passed and that the guide and pins match, then publishes `ghcr.io/muriio/pr-follower-{api,panel}:X.Y.Z` and the GitHub Release with the guide, digests filled in.
+6. **Sync `main` back into `develop`.** Merging the release PR left a merge commit on `main` that `develop` lacks; until it reaches `develop`, the next release PR is behind `main`. Hand the human the sync PR: `gh pr create --base develop --head main --title "chore: sync main into develop after vX.Y.Z"`. It changes no files.
+
+Done when the tag is pushed and the human has the sync PR command.
