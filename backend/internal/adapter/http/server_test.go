@@ -334,6 +334,12 @@ func setupTestRouter(t *testing.T) testServer {
 
 func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	t.Helper()
+	return setupTestRouterWithAuth(t, oauth, nil)
+}
+
+// setupTestRouterWithAuth lets a test change the sign-in use case's deps (an org allowlist).
+func setupTestRouterWithAuth(t *testing.T, oauth fakeGitHubOAuth, configure func(*auth.Deps)) testServer {
+	t.Helper()
 	db, err := database.Connect(context.Background(), database.Options{
 		DSN:          "sqlite://:memory:",
 		MaxOpenConns: 1,
@@ -359,7 +365,11 @@ func setupTestRouterWithOAuth(t *testing.T, oauth fakeGitHubOAuth) testServer {
 	ended := &fakeEndedPRs{m: map[int]string{}}
 	userAPI := fakeGitHubUserAPI{files: repoFiles, ended: ended}
 
-	authUC := auth.NewUseCase(auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)})
+	authDeps := auth.Deps{OAuth: oauth, Users: userRepo, Sessions: persistence.NewSessionRepository(db)}
+	if configure != nil {
+		configure(&authDeps)
+	}
+	authUC := auth.NewUseCase(authDeps)
 	actionUC := action.NewUseCase(action.Deps{PRs: prRepo, Repos: repoRepo, Users: userRepo, Tokens: authUC,
 		GitHub: ghGw, State: userAPI, Reviews: prRepo, Pub: sseHub})
 	changedFilesUC := changedfiles.NewUseCase(authUC, userAPI, prRepo, repoRepo, nil)
@@ -956,6 +966,31 @@ func TestLiveEvents_OnlyReachUsersWhoFollowTheRepository(t *testing.T) {
 	// The acme/web PR was opened first: had it leaked, it would be hubot's first PR event.
 	if got := nextEventOfType(t, hubotEvents, "pr.opened"); !strings.Contains(got, "acme/api") {
 		t.Fatalf("hubot follows only acme/api; acme/web activity leaked:\n%s", got)
+	}
+}
+
+func TestClaimAndSnooze_RefuseANonFollowerAsIfThePRDidNotExist(t *testing.T) {
+	t.Parallel()
+	ts := setupTestRouter(t)
+	octocat := ts.signIn(t)
+	ts.seedWorkspaceFixture(t, octocat) // octocat follows the repository of PR 1
+	stranger := ts.signInAs(t, "other")
+
+	missing := ts.do(t, http.MethodPost, "/api/v1/prs/999999/claim", "", stranger)
+	for _, target := range []string{"/api/v1/prs/1/claim", "/api/v1/prs/1/snooze"} {
+		rec := ts.do(t, http.MethodPost, target, `{"condition":"UNTIL_NEXT_COMMIT"}`, stranger)
+		if rec.Code != http.StatusNotFound || rec.Body.String() != missing.Body.String() {
+			t.Fatalf("%s by a non-follower: expected the missing-PR answer (%d %s), got %d %s",
+				target, missing.Code, missing.Body.String(), rec.Code, rec.Body.String())
+		}
+	}
+
+	pr, err := ts.prs.GetByID(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("read PR 1: %v", err)
+	}
+	if pr.ClaimedByUserID != nil || pr.ClaimedByLogin != "" {
+		t.Fatalf("a refused claim must store nothing, got claimed by %q", pr.ClaimedByLogin)
 	}
 }
 

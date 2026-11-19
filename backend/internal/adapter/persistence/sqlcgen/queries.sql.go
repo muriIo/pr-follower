@@ -147,6 +147,58 @@ func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
+const deleteUserFollows = `-- name: DeleteUserFollows :execrows
+DELETE FROM user_repo_follows
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserFollows(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserFollows, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteUserPRStates = `-- name: DeleteUserPRStates :execrows
+DELETE FROM pr_user_states
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserPRStates(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserPRStates, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteUserSessions = `-- name: DeleteUserSessions :execrows
+DELETE FROM sessions
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserSessions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteUserSyncJob = `-- name: DeleteUserSyncJob :execrows
+DELETE FROM sync_jobs
+WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserSyncJob(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserSyncJob, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const finishSyncJob = `-- name: FinishSyncJob :exec
 UPDATE sync_jobs
 SET state = $1,
@@ -1056,6 +1108,44 @@ func (q *Queries) ListRepositoryFollowerIDs(ctx context.Context, repositoryID in
 			return nil, err
 		}
 		items = append(items, user_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersWithAccess = `-- name: ListUsersWithAccess :many
+SELECT u.id, u.github_id, u.login
+FROM users u
+WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.user_id = u.id)
+   OR EXISTS (SELECT 1 FROM user_repo_follows f WHERE f.user_id = u.id)
+ORDER BY u.id ASC
+`
+
+type ListUsersWithAccessRow struct {
+	ID       int64  `json:"id"`
+	GithubID int64  `json:"github_id"`
+	Login    string `json:"login"`
+}
+
+// ADR-0015: the users who can still read stored data (a session or a followed repository).
+func (q *Queries) ListUsersWithAccess(ctx context.Context) ([]ListUsersWithAccessRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsersWithAccess)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersWithAccessRow{}
+	for rows.Next() {
+		var i ListUsersWithAccessRow
+		if err := rows.Scan(&i.ID, &i.GithubID, &i.Login); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

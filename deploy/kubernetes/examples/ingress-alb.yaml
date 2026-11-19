@@ -1,0 +1,44 @@
+# The public entry on AWS, with the AWS Load Balancer Controller (an ALB). Use it instead of
+# ../ingress.yaml: in kustomization.yaml, replace `ingress.yaml` with `examples/ingress-alb.yaml`.
+#
+# Everything goes to the panel, which forwards /api/* (GitHub webhooks included) to the API. The
+# ALB streams responses (the live event stream needs nothing more) and has no body limit to raise
+# (the panel's nginx accepts up to 5 MB).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pr-follower
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip # pods are the targets (the VPC CNI gives them VPC IPs)
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # The panel's own check: nginx answers it without the API, so a slow GitHub or database never
+    # takes the panel out of the target group.
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    # Approve, merge and batch merge wait on GitHub with no bytes moving: the ALB's default 60 s idle
+    # timeout would cut them with a 504. 300 s matches the panel's proxy timeout.
+    #
+    # On a SHARED ALB (alb.ingress.kubernetes.io/group.name), this attribute belongs to the load
+    # balancer, not to this Ingress: it changes the idle timeout of every app in the group, and a
+    # different value for it on another Ingress of the group is a conflict that stops the controller
+    # from updating the whole group. Agree the value with whoever owns the shared ALB.
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+    # The certificate: name its ACM ARN here, or leave this out and the controller finds an ACM
+    # certificate matching the host below.
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/ID
+    # Shared ALB: join its group, and place these rules among the group's.
+    # alb.ingress.kubernetes.io/group.name: shared-public
+    # alb.ingress.kubernetes.io/group.order: "20"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: prfollower.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pr-follower-panel
+                port: { name: http }

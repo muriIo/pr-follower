@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/murilo/pr-follower/backend/internal/infrastructure/config"
@@ -146,6 +147,36 @@ func TestLoadFromEnv_APublicDeploymentNeedsItsOwnWebhookSecret(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "a-real-random-secret")
 	if _, err := config.LoadFromEnv(); err != nil {
 		t.Fatalf("a real secret: %v", err)
+	}
+}
+
+// ADR-0015: an optional allowlist of GitHub organizations; unset keeps sign-in open.
+func TestLoadFromEnv_AllowedGitHubOrgs(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "12345")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "key")
+	t.Setenv("ALLOWED_GITHUB_ORGS", " Acme, acme-labs ,,ACME ")
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv: %v", err)
+	}
+	if got := strings.Join(cfg.AllowedGitHubOrgs, ","); got != "acme,acme-labs" {
+		t.Fatalf("AllowedGitHubOrgs = %q, want trimmed, lowercase, deduped", got)
+	}
+
+	t.Setenv("ALLOWED_GITHUB_ORGS", "  ")
+	if cfg, err := config.LoadFromEnv(); err != nil || len(cfg.AllowedGitHubOrgs) != 0 {
+		t.Fatalf("blank means open sign-in: %v %v", cfg.AllowedGitHubOrgs, err)
+	}
+}
+
+// The membership check runs as the GitHub App: an allowlist without app credentials could never
+// admit anyone, so the server refuses to start instead of failing every sign-in.
+func TestLoadFromEnv_AllowedGitHubOrgsNeedTheGitHubApp(t *testing.T) {
+	t.Setenv("GITHUB_APP_ID", "")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	t.Setenv("ALLOWED_GITHUB_ORGS", "acme")
+	if _, err := config.LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "ALLOWED_GITHUB_ORGS") {
+		t.Fatalf("expected an error naming ALLOWED_GITHUB_ORGS, got %v", err)
 	}
 }
 

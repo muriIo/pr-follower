@@ -222,6 +222,8 @@ export type AuthErrorCode =
   | 'state_mismatch'
   | 'access_denied'
   | 'login_failed'
+  | 'not_org_member'
+  | 'org_membership_unverified'
   | 'session_expired'
   | 'github_token_expired'
   | 'unknown';

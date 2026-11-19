@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/murilo/pr-follower/backend/internal/domain/entity"
@@ -29,14 +30,24 @@ type Deps struct {
 	Sessions   port.SessionRepository
 	Now        func() time.Time
 	SessionTTL time.Duration
+	// AllowedOrgs restricts sign-in to members of these GitHub organizations (ALLOWED_GITHUB_ORGS,
+	// ADR-0015). Empty means sign-in is open to every GitHub account.
+	AllowedOrgs []string
+	// Members checks organization membership; required when AllowedOrgs is set.
+	Members port.OrgMembershipChecker
+	// Access finds and revokes who can read stored data; required for RecheckMembership.
+	Access port.MemberAccessStore
 }
 
 type UseCase struct {
-	oauth      port.GitHubOAuth
-	users      port.UserRepository
-	sessions   port.SessionRepository
-	now        func() time.Time
-	sessionTTL time.Duration
+	oauth       port.GitHubOAuth
+	users       port.UserRepository
+	sessions    port.SessionRepository
+	now         func() time.Time
+	sessionTTL  time.Duration
+	allowedOrgs []string
+	members     port.OrgMembershipChecker
+	access      port.MemberAccessStore
 }
 
 // LoginChallenge carries what the HTTP layer keeps (State, CodeVerifier) and where to send the user.
@@ -63,12 +74,30 @@ func NewUseCase(deps Deps) *UseCase {
 		ttl = DefaultSessionTTL
 	}
 	return &UseCase{
-		oauth:      deps.OAuth,
-		users:      deps.Users,
-		sessions:   deps.Sessions,
-		now:        now,
-		sessionTTL: ttl,
+		oauth:       deps.OAuth,
+		users:       deps.Users,
+		sessions:    deps.Sessions,
+		now:         now,
+		sessionTTL:  ttl,
+		allowedOrgs: normalizeOrgs(deps.AllowedOrgs),
+		members:     deps.Members,
+		access:      deps.Access,
 	}
+}
+
+// normalizeOrgs trims, lowercases (GitHub org logins are case-insensitive) and dedupes the allowlist.
+func normalizeOrgs(orgs []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, org := range orgs {
+		org = strings.ToLower(strings.TrimSpace(org))
+		if org == "" || seen[org] {
+			continue
+		}
+		seen[org] = true
+		out = append(out, org)
+	}
+	return out
 }
 
 // BeginLogin creates the anti-forgery state and PKCE verifier for the GitHub redirect.
@@ -116,6 +145,10 @@ func (uc *UseCase) CompleteLogin(ctx context.Context, code, codeVerifier string)
 	}
 	if profile.ID == 0 || profile.Login == "" {
 		return nil, fmt.Errorf("%w: github returned an empty profile", entity.ErrUnauthorized)
+	}
+	// ADR-0015: a refused or unverifiable account leaves no user row and no session behind.
+	if err := uc.requireAllowedOrgMember(ctx, profile.Login, profile.ID); err != nil {
+		return nil, err
 	}
 
 	user := &entity.User{

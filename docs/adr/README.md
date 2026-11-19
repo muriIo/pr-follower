@@ -15,10 +15,13 @@ This directory contains the **Architecture Decision Records (ADRs)** for **PR Fo
 | [ADR-0007](./0007-cooperative-end-to-end-action-cancellation.md) | End-to-End Cooperative Action Cancellation (`AbortSignal` to `context.WithCancelCause`) | Accepted | `adrcheck` use-case `context.Context` signature inspection |
 | [ADR-0008](./0008-english-codebase-and-pt-br-i18n-architecture.md) | English-Only Code/Commits and Multi-Locale `pt-BR` Default i18n | Accepted | `adrcheck` i18n dictionary & template checks |
 | [ADR-0009](./0009-angular-v22-signals-and-mcp-architecture.md) | Angular v22 Standalone, Signals, and Angular CLI MCP Architecture | Accepted | `adrcheck` frontend layer & MCP check |
-| [ADR-0010](./0010-github-only-identity-and-installation-scoped-access.md) | GitHub-Only Identity and Installation-Scoped Repository Access | Accepted | `adrcheck` session-identity & no-password scan |
+| [ADR-0010](./0010-github-only-identity-and-installation-scoped-access.md) | GitHub-Only Identity and Installation-Scoped Repository Access | Accepted (Decision 1 amended by ADR-0015) | `adrcheck` session-identity & no-password scan |
 | [ADR-0011](./0011-idempotent-integrations.md) | Idempotent Integrations | Accepted | `adrcheck` upsert, re-runnable schema, retry-class & redelivery-test scan |
 | [ADR-0012](./0012-shared-state-across-api-replicas.md) | Shared State Across API Replicas Lives in Postgres | Accepted | `adrcheck` scan for locked in-memory state without a `replica-local:` note |
 | [ADR-0013](./0013-acknowledged-and-recoverable-github-failures.md) | Acknowledged and Recoverable GitHub Failures | Accepted | `adrcheck` scan for unclassified GitHub errors and API error codes the SPA cannot show |
+| [ADR-0014](./0014-static-landing-page-on-github-pages.md) | Static Landing Page on GitHub Pages | Accepted | `adrcheck` scan of `landing/` for build files, scripts and third-party requests |
+| [ADR-0015](./0015-org-allowlisted-sign-in.md) | Org-Allowlisted Sign-In and Membership Recheck | Accepted | `adrcheck` membership check before the session, named `auth_error` codes in both locales, documented `ALLOWED_GITHUB_ORGS` |
+| [ADR-0016](./0016-migrations-take-an-advisory-lock.md) | Migrations Take a Postgres Advisory Lock | Accepted | `adrcheck` scan for goose's lock-free package-level API and providers without `WithSessionLocker` |
 
 ## Required ADR Sections
 

@@ -319,11 +319,32 @@ func (uc *UseCase) collectChecks(ctx context.Context, snapshot *WorkspaceSnapsho
 	return nil
 }
 
+// followedPR loads a PR the user may act on: one of a repository they follow. Any other PR is
+// ErrNotFound, the answer a missing id gets, so PR ids of other repositories are not revealed
+// (the same answer AnalyzePRForUser gives).
+func (uc *UseCase) followedPR(ctx context.Context, userID, prID uint64) (*entity.PullRequest, error) {
+	pr, err := uc.prRepo.GetByID(ctx, prID)
+	if err != nil {
+		return nil, err
+	}
+	followed, err := uc.repoRepo.ListFollowedByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	for _, repo := range followed {
+		if repo.ID == pr.RepositoryID {
+			return pr, nil
+		}
+	}
+	return nil, entity.ErrNotFound
+}
+
+// SnoozePR silences a PR of a followed repository for the user until the condition holds.
 func (uc *UseCase) SnoozePR(ctx context.Context, userID, prID uint64, condition entity.SnoozeCondition) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
-	pr, err := uc.prRepo.GetByID(ctx, prID)
+	pr, err := uc.followedPR(ctx, userID, prID)
 	if err != nil {
 		return err
 	}
@@ -363,15 +384,16 @@ func (uc *UseCase) SnoozePR(ctx context.Context, userID, prID uint64, condition 
 	})
 }
 
+// ClaimPR marks a PR of a followed repository as claimed by the user, for the whole team to see.
 func (uc *UseCase) ClaimPR(ctx context.Context, userID, prID uint64) error {
 	if err := ctx.Err(); err != nil {
 		return context.Cause(ctx)
 	}
-	user, err := uc.userRepo.GetByID(ctx, userID)
+	pr, err := uc.followedPR(ctx, userID, prID)
 	if err != nil {
 		return err
 	}
-	pr, err := uc.prRepo.GetByID(ctx, prID)
+	user, err := uc.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return err
 	}

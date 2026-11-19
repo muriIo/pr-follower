@@ -23,6 +23,9 @@ type Config struct {
 	TokenEncryptionKey  string
 	DBMaxOpenConns      int
 	DBMaxIdleConns      int
+	// AllowedGitHubOrgs restricts sign-in to members of these GitHub organizations (ALLOWED_GITHUB_ORGS,
+	// comma-separated, case-insensitive; ADR-0015). Empty keeps sign-in open to every GitHub account.
+	AllowedGitHubOrgs []string
 }
 
 func LoadFromEnv() (*Config, error) {
@@ -48,6 +51,11 @@ func LoadFromEnv() (*Config, error) {
 		TokenEncryptionKey:  getEnvOrDefault("TOKEN_ENCRYPTION_KEY", ""),
 		DBMaxOpenConns:      getEnvIntOrDefault("DB_MAX_OPEN_CONNS", 25),
 		DBMaxIdleConns:      getEnvIntOrDefault("DB_MAX_IDLE_CONNS", 10),
+		AllowedGitHubOrgs:   parseOrgList(getEnvOrDefault("ALLOWED_GITHUB_ORGS", "")),
+	}
+	// Membership is checked as the GitHub App: without its credentials no one could ever sign in.
+	if len(cfg.AllowedGitHubOrgs) > 0 && !cfg.GitHubAppConfigured() {
+		return nil, fmt.Errorf("ALLOWED_GITHUB_ORGS needs the GitHub App credentials (GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY) to check organization membership")
 	}
 	// The development secret is public: on a public deployment it would let anyone sign a webhook.
 	if cfg.SecureCookies() && cfg.GitHubWebhookSecret == devWebhookSecret {
@@ -89,6 +97,21 @@ func (c *Config) GitHubAppInstallURL() string {
 // SecureCookies reports whether session cookies must carry the Secure attribute.
 func (c *Config) SecureCookies() bool {
 	return strings.HasPrefix(c.PublicURL, "https://")
+}
+
+// parseOrgList splits a comma-separated list of organization logins: trimmed, lowercase, deduped.
+func parseOrgList(raw string) []string {
+	var orgs []string
+	seen := map[string]bool{}
+	for _, org := range strings.Split(raw, ",") {
+		org = strings.ToLower(strings.TrimSpace(org))
+		if org == "" || seen[org] {
+			continue
+		}
+		seen[org] = true
+		orgs = append(orgs, org)
+	}
+	return orgs
 }
 
 func getEnvOrDefault(key, fallback string) string {

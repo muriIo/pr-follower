@@ -45,6 +45,9 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0011IdempotentIntegrations(repoRoot, report)
 	validateADR0012ReplicaSharedState(repoRoot, report)
 	validateADR0013AcknowledgedGitHubFailures(repoRoot, report)
+	validateADR0014StaticLandingPage(repoRoot, report)
+	validateADR0015OrgAllowlistedSignIn(repoRoot, report)
+	validateADR0016LockedMigrations(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",
@@ -1019,4 +1022,91 @@ func validateADR0013FrontendGateways(repoRoot string, report *ValidationReport) 
 				"ADR-0013: %s throws a plain Error; throw an ActionError with the server's code", relPath(repoRoot, path)))
 		}
 	}
+}
+
+var (
+	landingAttrURL   = regexp.MustCompile(`(?i)\b(?:src|srcset|poster|data)\s*=\s*["']([^"']+)["']`)
+	landingLinkTag   = regexp.MustCompile(`(?i)<link\b[^>]*>`)
+	landingHref      = regexp.MustCompile(`(?i)\bhref\s*=\s*["']([^"']+)["']`)
+	landingLinkRel   = regexp.MustCompile(`(?i)\brel\s*=\s*["'](canonical|alternate|me|author|license)["']`)
+	landingCSSURL    = regexp.MustCompile(`(?i)url\(\s*["']?([^"')\s]+)`)
+	landingCSSImport = regexp.MustCompile(`(?i)@import\s+["']([^"']+)["']`)
+	landingScriptTag = regexp.MustCompile(`(?i)<script\b`)
+)
+
+// landingBuildFiles are files that would turn the landing page into something built or scripted.
+var landingBuildFiles = map[string]bool{
+	"package.json": true, "package-lock.json": true, "pnpm-lock.yaml": true, "yarn.lock": true,
+	"node_modules": true,
+}
+
+// validateADR0014StaticLandingPage checks that landing/, when present, is a static page GitHub Pages
+// serves as is: an index.html, no build or package manifest, no JavaScript, and nothing fetched from
+// another origin (fonts and images live in the directory). Plain <a href> links are not requests.
+func validateADR0014StaticLandingPage(repoRoot string, report *ValidationReport) {
+	landingDir := filepath.Join(repoRoot, "landing")
+	if info, err := os.Stat(landingDir); err != nil || !info.IsDir() {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(landingDir, "index.html")); err != nil {
+		report.Violations = append(report.Violations, "ADR-0014: landing/index.html is missing; GitHub Pages serves it as the site root")
+	}
+
+	_ = filepath.WalkDir(landingDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel := relPath(repoRoot, path)
+		name := d.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if landingBuildFiles[name] || ext == ".js" || ext == ".mjs" || ext == ".ts" {
+			report.Violations = append(report.Violations, fmt.Sprintf(
+				"ADR-0014: %s is a build or script file; the landing page ships only HTML, CSS, fonts and images", rel))
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || (ext != ".html" && ext != ".css") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		text := string(content)
+
+		var refs []string
+		for _, m := range landingCSSURL.FindAllStringSubmatch(text, -1) {
+			refs = append(refs, m[1])
+		}
+		for _, m := range landingCSSImport.FindAllStringSubmatch(text, -1) {
+			refs = append(refs, m[1])
+		}
+		if ext == ".html" {
+			if landingScriptTag.MatchString(text) {
+				report.Violations = append(report.Violations, fmt.Sprintf(
+					"ADR-0014: %s has a <script>; the landing page's motion is CSS only", rel))
+			}
+			for _, m := range landingAttrURL.FindAllStringSubmatch(text, -1) {
+				refs = append(refs, strings.Fields(m[1])...)
+			}
+			for _, tag := range landingLinkTag.FindAllString(text, -1) {
+				if landingLinkRel.MatchString(tag) {
+					continue // metadata the browser does not fetch, like the canonical address
+				}
+				if m := landingHref.FindStringSubmatch(tag); m != nil {
+					refs = append(refs, m[1])
+				}
+			}
+		}
+		for _, ref := range refs {
+			lower := strings.ToLower(ref)
+			if strings.HasPrefix(lower, "http:") || strings.HasPrefix(lower, "https:") || strings.HasPrefix(lower, "//") {
+				report.Violations = append(report.Violations, fmt.Sprintf(
+					"ADR-0014: %s loads %s; serve it from landing/ so no visitor request leaves the site", rel, ref))
+			}
+		}
+		return nil
+	})
 }

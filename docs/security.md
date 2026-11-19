@@ -55,9 +55,14 @@ Every release image (`.github/workflows/release.yml`) carries:
 - a **GitHub artifact attestation** on the multi-arch digest: a Sigstore signature tied to this repository's release workflow, so a copy that did not come from it fails verification.
 
 ```bash
-gh attestation verify oci://ghcr.io/muriio/pr-follower-api:X.Y.Z --owner muriIo
+# The digest is in the release notes; verify it, then deploy exactly that digest
+gh attestation verify oci://ghcr.io/muriio/pr-follower-api@sha256:DIGEST \
+  --repo muriIo/pr-follower --signer-workflow muriIo/pr-follower/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
 docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:X.Y.Z --format '{{json .SBOM}}'
 ```
+
+`--owner muriIo` alone would accept an attestation from any workflow of any repository on that account; `--repo` and `--signer-workflow` accept only this repository's release workflow, and `--source-ref` only that release. Verifying and deploying the same digest leaves no gap for a moved tag ([`production-setup.md`](production-setup.md) §7.1).
 
 The workflow publishes only from a commit on `main` merged by a PR whose CI passed, uses no caches (a poisoned cache could reach a published image), grants each job only the permissions it needs, and keeps the tag and SHA out of shell templates. Only the admin can create `v*` tags, and none can be moved or deleted (ruleset `release tags`).
 

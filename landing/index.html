@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Follower: your GitHub reviews, sorted by whose turn it is</title>
+<meta name="description" content="Open-source, self-hosted workspace that turns CODEOWNERS review requests and Dependabot pull requests into one live queue your team shares.">
+<meta name="theme-color" content="#0B0D11">
+<meta property="og:type" content="website">
+<meta property="og:title" content="PR Follower">
+<meta property="og:description" content="Your GitHub reviews, sorted by whose turn it is. Open source and self-hosted.">
+<meta property="og:url" content="https://muriio.github.io/pr-follower/">
+<meta property="og:image" content="https://muriio.github.io/pr-follower/images/inbox-1440.webp">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/inter-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#story">Skip to content</a>
+<div class="fx" style="font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; font-feature-settings: 'calt', 'kern', 'liga', 'ss03'; color: #E6E8EE; background: #0B0D11; font-size: 16px; line-height: 1.6; overflow-x: clip">
+
+<!-- FLOATING NAV -->
+<div style="position: sticky; top: 16px; z-index: 20; padding: 0 16px">
+<header class="glass" style="max-width: 1204px; margin: 16px auto 0; border-radius: 16px; padding: 12px 16px 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; box-sizing: border-box">
+<a href="#top" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #E6E8EE">
+<svg width="24" height="24" viewBox="0 0 26 26" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="3" stroke="#ffffff" stroke-width="1.6"></circle><circle cx="6" cy="20" r="3" stroke="#ffffff" stroke-width="1.6"></circle><circle cx="20" cy="20" r="3" stroke="#818CF8" stroke-width="1.6"></circle><path d="M6 9v8M9 6h5a6 6 0 0 1 6 6v5" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"></path></svg>
+<span style="font-weight: 600; font-size: 15px">PR Follower</span>
+</a>
+<nav aria-label="Sections" class="hide-sm" style="display: flex; gap: 28px; font-size: 14px; font-weight: 500">
+<a class="util" href="#story">The story</a>
+<a class="util" href="#ch4">Dependabot</a>
+<a class="util" href="#ch7">How it’s built</a>
+</nav>
+<div style="display: flex; gap: 12px; align-items: center">
+<a class="ghost hide-sm" href="https://github.com/muriIo/pr-follower/stargazers" target="_blank" rel="noopener noreferrer">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.3l-3.8 2 .7-4.3-3.1-3 4.3-.6z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>
+Star
+</a>
+<a class="key" href="https://github.com/muriIo/pr-follower" target="_blank" rel="noopener noreferrer">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+View on GitHub
+</a>
+</div>
+</header>
+</div>
+
+<!-- HERO: light sculpture -->
+<main>
+<section id="top" style="position: relative; margin-top: -80px; padding: 240px 0 160px; overflow: hidden">
+<svg aria-hidden="true" viewBox="0 0 1200 900" preserveAspectRatio="xMidYMid slice" style="position: absolute; inset: 0; width: 100%; height: 100%">
+<defs>
+<radialGradient id="pf-vignette" cx="50%" cy="55%" r="60%"><stop offset="0.5" stop-color="#ffffff"></stop><stop offset="1" stop-color="#000000"></stop></radialGradient>
+<mask id="pf-fade"><rect width="1200" height="900" fill="url(#pf-vignette)"></rect></mask>
+<radialGradient id="pf-core"><stop offset="0" stop-color="#818CF8" stop-opacity="0.7"></stop><stop offset="1" stop-color="#6366F1" stop-opacity="0"></stop></radialGradient>
+<radialGradient id="pf-hush" cx="50%" cy="42%" r="34%"><stop offset="0" stop-color="#0B0D11" stop-opacity="0.8"></stop><stop offset="1" stop-color="#0B0D11" stop-opacity="0"></stop></radialGradient>
+<linearGradient id="pf-exit" gradientUnits="userSpaceOnUse" x1="600" y1="720" x2="600" y2="900"><stop offset="0" stop-color="#C7D2FE"></stop><stop offset="1" stop-color="#C7D2FE" stop-opacity="0"></stop></linearGradient>
+<filter id="pf-glow" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter>
+<filter id="pf-grain"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"></feTurbulence><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0"></feColorMatrix></filter>
+</defs>
+<g mask="url(#pf-fade)" fill="none">
+<g class="b3">
+<path d="M-236 519C-95 589 550 485 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-213 427C155 502 551 476 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-234 387C31 464 550 480 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M-203 306C-139 386 552 417 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-257 278C-149 360 549 472 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-141 180C-7 267 556 473 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-102 152C288 240 558 429 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-65 166C107 254 560 406 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-13 61C-18 154 563 430 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M43 98C210 189 567 402 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M90 59C272 152 569 412 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M141 -36C369 62 572 443 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M216 -50C381 48 577 407 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M304 -12C210 85 582 443 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M373 -27C411 71 586 461 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M412 -50C412 49 589 428 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M483 -93C420 7 593 441 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M549 -92C551 9 597 448 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M671 -57C586 42 604 486 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M718 -37C833 61 607 409 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M797 -39C858 59 612 405 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M862 -81C756 19 616 434 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M859 -96C955 4 616 420 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M952 3C819 99 621 434 600 720" stroke="#C7D2FE" stroke-opacity="0.55" stroke-width="1.6"></path>
+<path d="M1052 38C1027 132 627 420 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1110 56C936 149 631 416 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1173 18C1181 113 634 461 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M1154 121C953 211 633 474 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1282 126C1096 215 641 405 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1323 174C1128 261 643 401 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1282 199C978 285 641 431 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1409 256C1129 339 649 406 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1356 320C1310 400 645 437 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M1438 393C996 469 650 429 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1438 445C1315 519 650 432 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1531 466C1307 539 656 469 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<g filter="url(#pf-glow)" opacity="0.9">
+<path d="M952 3C819 99 621 434 600 720" stroke="#C7D2FE" stroke-opacity="0.55" stroke-width="1.6"></path>
+<path d="M600 720 L600 900" stroke="url(#pf-exit)" stroke-width="3"></path>
+</g>
+<path class="flow f1" d="M-236 519C-95 589 550 485 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M-234 387C31 464 550 480 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M-257 278C-149 360 549 472 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f1" d="M-102 152C288 240 558 429 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M-13 61C-18 154 563 430 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M90 59C272 152 569 412 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f1" d="M216 -50C381 48 577 407 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M373 -27C411 71 586 461 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M483 -93C420 7 593 441 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f1" d="M671 -57C586 42 604 486 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M797 -39C858 59 612 405 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M859 -96C955 4 616 420 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="comet" d="M952 3C819 99 621 434 600 720" stroke="#E0E7FF" stroke-width="2.2" stroke-dasharray="70 1400" stroke-linecap="round"></path>
+<path class="flow f1" d="M1052 38C1027 132 627 420 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M1173 18C1181 113 634 461 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M1282 126C1096 215 641 405 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f1" d="M1282 199C978 285 641 431 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f3" d="M1356 320C1310 400 645 437 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="flow f2" d="M1438 445C1315 519 650 432 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+
+<path d="M600 720 L600 900" stroke="url(#pf-exit)" stroke-width="1.6"></path>
+<circle class="pulse" cx="600" cy="720" r="90" fill="url(#pf-core)"></circle>
+<circle class="ripple" cx="600" cy="720" r="16" stroke="#818CF8" stroke-opacity="0.6"></circle>
+<circle cx="600" cy="720" r="3.5" fill="#E0E7FF"></circle>
+</g>
+</g>
+<rect width="1200" height="900" fill="url(#pf-hush)"></rect>
+<rect width="1200" height="900" filter="url(#pf-grain)" opacity="0.05"></rect>
+</svg>
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 220px; background: linear-gradient(rgba(11,13,17,0), #0B0D11)"></div>
+<div class="measure" style="position: relative">
+<p class="rise r1" style="display: inline-block; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; line-height: 16px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">Open source · self-hosted</p>
+<h1 class="rise r2" style="margin-top: 20px; font-size: clamp(40px, 6vw, 64px); line-height: 1.1; font-weight: 600; font-feature-settings: 'liga' 0, 'ss02', 'ss08'">Your reviews, sorted by whose turn it is.</h1>
+<p class="rise r3" style="margin: 28px auto 0; max-width: 520px; font-size: 18px; line-height: 1.6; color: #A3ACBD">CODEOWNERS requests and Dependabot pull requests in one live workspace your team shares, showing only what is waiting on you.</p>
+<div class="rise r4" style="margin-top: 140px">
+<div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap">
+<a class="key" href="https://github.com/muriIo/pr-follower" target="_blank" rel="noopener noreferrer">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+View on GitHub
+</a>
+<a class="ghost" href="#story">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+Follow one PR
+</a>
+</div>
+<p style="margin-top: 16px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.017em; color: #8791A5">v0.1.0 · Apache-2.0 · images for amd64 and arm64</p>
+<p style="margin-top: 8px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.017em"><a class="util" href="https://github.com/muriIo/pr-follower/releases/tag/v0.1.0" target="_blank" rel="noopener noreferrer">Release notes ↗</a>   <a class="util" href="https://github.com/muriIo/pr-follower/blob/develop/docs/production-setup.md" target="_blank" rel="noopener noreferrer">Self-hosting guide ↗</a></p>
+</div>
+</div>
+</section>
+
+<!-- IMMERSIVE DEMO: full-width inbox -->
+<section style="padding: 0 0 160px">
+<div class="wide">
+<figure class="frame tilt">
+<img src="images/inbox-1440.webp" srcset="images/inbox-1440.webp 1440w, images/inbox-2880.webp 2880w" sizes="(min-width: 1440px) 1392px, calc(100vw - 48px)" width="2880" height="1800" fetchpriority="high" alt="The Minha Vez inbox: two PRs waiting on review, three dimmed, and #142 open in the drawer showing only the owned file's diff while an approval is in flight with a Cancel button">
+<div class="fade"></div>
+</figure>
+</div>
+</section>
+
+<!-- STORY INDEX: selectable capability paragraph -->
+<section id="story" style="padding: 0 0 200px">
+<div class="stage-w grid2" style="align-items: end">
+<div>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">One pull request, start to finish</p>
+<p class="cap reveal" style="margin-top: 24px; max-width: 520px; font-size: 24px; line-height: 1.6; font-weight: 500; letter-spacing: 0.0083em">
+<a href="#ch1" style="color: #E6E8EE">An email, lost in the noise.</a> <a href="#ch2">One file that is yours.</a> <a href="#ch3">Your turn, not theirs.</a> <a href="#ch4">Meanwhile, a bot’s bump.</a> <a href="#ch5">Approved, as you.</a> <a href="#ch6">Merged, and everyone saw it.</a> <a href="#ch7">Running on your servers.</a>
+</p>
+</div>
+<div class="glass reveal" style="border-radius: 12px; padding: 24px">
+<div style="display: flex; justify-content: space-between; gap: 12px; align-items: baseline">
+<p style="font-weight: 500">acme/web <span style="color: #818CF8">#142</span></p>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">14 files · 3 reviewers</p>
+</div>
+<p style="margin-top: 6px; font-size: 14px; color: #A3ACBD">feat(seats): add real-time CI status pulse to repo tiles</p>
+<div style="margin-top: 20px; height: 4px; border-radius: 4px; background: #222734; overflow: hidden"><div class="bar" style="height: 100%; width: 78%; border-radius: 4px; background: #818CF8"></div></div>
+<p style="margin-top: 12px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">Follow it down the page. Every chapter answers the question the last one raised.</p>
+</div>
+</div>
+</section>
+
+<!-- CH1 — NOISE -->
+<section id="ch1" style="padding: 0 0 200px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">01 · The noise</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">A review request is an email.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">A team’s worth of them is a wall.</p>
+</div>
+<div class="shell reveal" style="margin-top: 64px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr))">
+<div style="padding: 48px; display: flex; flex-direction: column; justify-content: center; gap: 16px; font-size: 15px; color: #A3ACBD">
+<p>CODEOWNERS adds you to every pull request that touches a path you, or your team, own. GitHub tells you by email: one thread per PR, another message for every push and comment.</p>
+<p>Nothing there says which threads need you, which a teammate already approved, or which are drafts with red CI. Everything looks equally urgent. Dependabot’s bumps sit for weeks.</p>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">#142 is in there. Three times.</p>
+</div>
+<div role="img" aria-label="A scrolling inbox of near-identical GitHub notification emails, with three threads for PR 142 buried among them" style="position: relative; height: 420px; overflow: hidden; border-left: 1px solid rgba(255,255,255,0.06); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent)">
+<div class="marquee" style="font-size: 13px; font-family: 'Geist Mono', ui-monospace, monospace">
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] fix(pix): idempotency key on retries (#412)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/design-system] bump storybook from 8.3.2 to 8.3.5 (#88)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">[acme/web] feat(seats): add real-time CI status pulse (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/admin] chore(ci): cache pnpm store across jobs (#136)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] bump axios from 1.7.7 to 2.0.0 (#89)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">Re: [acme/web] feat(seats): add real-time CI status… (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/mobile] fix(sse): debounce reconnect on network change (#138)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] bump fastify from 4.28.1 to 4.29.0 (#233)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">Re: [acme/admin] chore(ci): cache pnpm store… (#136)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">Re: [acme/web] feat(seats): add real-time CI status… (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/web] bump vitest from 2.1.1 to 2.1.4 (#145)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/web] bump nanoid from 3.3.6 to 3.3.8 (#146)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] fix(pix): idempotency key on retries (#412)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/design-system] bump storybook from 8.3.2 to 8.3.5 (#88)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">[acme/web] feat(seats): add real-time CI status pulse (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/admin] chore(ci): cache pnpm store across jobs (#136)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] bump axios from 1.7.7 to 2.0.0 (#89)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">Re: [acme/web] feat(seats): add real-time CI status… (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/mobile] fix(sse): debounce reconnect on network change (#138)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/api] bump fastify from 4.28.1 to 4.29.0 (#233)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">Re: [acme/admin] chore(ci): cache pnpm store… (#136)</span></div>
+<div class="mail" style="color: #E6E8EE"><span class="mail-dot" style="background: #818CF8"></span><span class="mail-text">Re: [acme/web] feat(seats): add real-time CI status… (#142)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/web] bump vitest from 2.1.1 to 2.1.4 (#145)</span></div>
+<div class="mail" style="color: #8791A5"><span class="mail-dot" style="background: #2C3242"></span><span class="mail-text">[acme/web] bump nanoid from 3.3.6 to 3.3.8 (#146)</span></div>
+</div>
+</div>
+</div>
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">So the first question is not “what’s new?”</span> It is “which of these is mine?”</p>
+</div>
+</section>
+
+<!-- CH2 — OWNERSHIP -->
+<section id="ch2" style="padding: 0 0 200px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">02 · Ownership</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">It reads your CODEOWNERS.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">So the answer is exact, not a guess.</p>
+</div>
+<div class="shell reveal" style="margin-top: 64px; padding: 40px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 32px; align-items: center">
+<div style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; line-height: 2.1">
+<p style="color: #8791A5"># .github/CODEOWNERS</p>
+<p style="color: #8791A5">*.md          @acme/docs</p>
+<p style="position: relative; margin: 0 -12px; padding: 0 12px; border-radius: 6px; color: #E6E8EE"><span class="pulse" style="position: absolute; inset: 0; border-radius: 6px; background: rgba(99,102,241,0.12)"></span><span style="position: relative">/src/app/     <span style="color: #818CF8">@murilo @acme/frontend</span></span></p>
+<p style="color: #8791A5">/src/api/     @acme/backend</p>
+<p style="color: #8791A5">/infra/       @acme/platform</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12.5px">
+<p style="font-size: 12px; color: #8791A5; letter-spacing: 0.075em; text-transform: uppercase; margin-bottom: 8px">#142 · 14 files changed</p>
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; color: #4A5265"><span>src/api/seats.handler.go</span><span>backend</span></div>
+<div style="position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 8px; border: 1px solid #818CF8; color: #E6E8EE"><span class="ping" style="position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: #818CF8"></span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">src/app/…/seat-card.component.ts</span><span style="color: #818CF8">you</span></div>
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; color: #4A5265"><span>infra/ci/pulse.yml</span><span>platform</span></div>
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; color: #4A5265"><span>docs/seats.md</span><span>docs</span></div>
+<div style="padding: 7px 0; color: #4A5265">+ 10 more, none of them yours</div>
+</div>
+</div>
+<div class="grid2" style="margin-top: 40px">
+<div class="shell reveal" style="padding: 32px"><p style="font-weight: 500">One file’s diff, not fourteen.</p><p style="margin-top: 8px; font-size: 14px; color: #A3ACBD; letter-spacing: 0.014em">Matching follows GitHub’s pattern rules. The drawer shows only the files the rule gave you. PRs you own nothing in stay out of your queue.</p></div>
+<div class="shell reveal" style="padding: 32px"><p style="font-weight: 500">Honest when it can’t tell.</p><p style="margin-top: 8px; font-size: 14px; color: #A3ACBD; letter-spacing: 0.014em">CODEOWNERS is re-read when a push changes it. No file means “no CODEOWNERS”, said out loud. Unknown files are “not evaluated”, never your turn.</p></div>
+</div>
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">Owning a file says the PR is yours.</span> It doesn’t say whether the next move is.</p>
+</div>
+</section>
+
+<!-- CH3 — TURN -->
+<section id="ch3" style="padding: 0 0 200px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">03 · Whose turn</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">Waiting on you, or on them.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">Never both at once.</p>
+</div>
+<div class="shell reveal" style="margin-top: 64px; padding: 48px">
+<div role="img" aria-label="Turn cycle: Your turn moves to Waiting on author when you comment or request changes, and comes back on a new commit, reply or re-request" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: center">
+<div style="border: 1px solid #818CF8; border-radius: 12px; padding: 20px; background: rgba(99,102,241,0.06)">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; color: #818CF8">MINHA VEZ</p>
+<p style="margin-top: 6px; font-size: 18px; font-weight: 500">Your turn</p>
+</div>
+<div>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #A3ACBD; text-align: center">you comment or request changes →</p>
+<div style="position: relative; margin: 12px 0; height: 12px"><div style="position: absolute; top: 5px; left: 0; right: 0; height: 1px; background: #2C3242"></div><span class="runner" style="position: absolute; top: 0; left: 0; width: 12px; height: 12px; border-radius: 50%; background: #818CF8; box-shadow: 0 0 16px #818CF8"></span></div>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #A3ACBD; text-align: center">← author pushes, replies or re-requests</p>
+</div>
+<div style="border: 1px solid #2C3242; border-radius: 12px; padding: 20px">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.12em; color: #8791A5">AGUARDANDO AUTOR</p>
+<p style="margin-top: 6px; font-size: 18px; font-weight: 500">Waiting on author</p>
+</div>
+</div>
+<div style="margin-top: 40px; padding-top: 32px; border-top: 1px solid #222734; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 24px; align-items: start">
+<p style="font-size: 14px; color: #A3ACBD; letter-spacing: 0.014em">Derived from GitHub’s reviews on the current head commit. Each reviewer’s latest decision stands, a new push makes older reviews stale, and the PR comes back to you.</p>
+<div>
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5; letter-spacing: 0.075em; text-transform: uppercase">Dimmed, never lost</p>
+<div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px">
+<span style="border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,0.05); color: #A3ACBD">Teammate approved</span>
+<span style="border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,0.05); color: #A3ACBD">Draft</span>
+<span style="border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,0.05); color: #A3ACBD">CI pending</span>
+<span style="border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,0.05); color: #A3ACBD">Conflicts</span>
+<span style="border-radius: 999px; padding: 5px 12px; background: rgba(255,255,255,0.05); color: #A3ACBD">Snoozed</span>
+</div>
+</div>
+</div>
+</div>
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">That covers the PRs people open.</span> The ones nobody opens belong to the bots.</p>
+</div>
+</section>
+
+<!-- CH4 — DEPENDABOT -->
+<section id="ch4" style="padding: 0 0 160px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">04 · Meanwhile, Dependabot</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">The PRs nobody wants to read.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">Read for you, before you open them.</p>
+</div>
+<div class="grid3" style="margin-top: 64px">
+<div class="shell reveal" style="padding: 32px">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">How deep is it?</p>
+<div style="margin-top: 20px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12.5px">
+<span style="border: 1px solid #2C3242; border-radius: 999px; padding: 5px 12px">api (root)</span>
+<span style="color: #4A5265; padding-left: 18px">│</span>
+<span style="border: 1px solid #2C3242; border-radius: 999px; padding: 5px 12px; color: #A3ACBD">@nestjs/axios</span>
+<span style="color: #4A5265; padding-left: 18px">│</span>
+<span style="border: 1px solid #FB7185; border-radius: 999px; padding: 5px 12px; color: #FB7185">axios 1.7.7 → 2.0.0</span>
+</div>
+</div>
+<div class="shell reveal" style="padding: 32px">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">Does it ship to production?</p>
+<div style="margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px">
+<span style="background: rgba(251,113,133,0.12); color: #FB7185; border-radius: 999px; padding: 5px 12px">dependencies</span>
+<span style="background: rgba(255,255,255,0.05); color: #8791A5; border-radius: 999px; padding: 5px 12px">devDependencies</span>
+</div>
+<p style="margin-top: 20px; font-size: 14px; color: #A3ACBD">Runtime code is a different risk from a test runner.</p>
+</div>
+<div class="shell reveal" style="padding: 32px">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">Where is it used?</p>
+<div style="margin-top: 20px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12.5px; display: flex; flex-direction: column; gap: 6px">
+<span style="color: #E6E8EE">src/infra/payment-gateway.client.ts:4</span>
+<span style="color: #8791A5">import axios from 'axios'</span>
+</div>
+<p style="margin-top: 20px; font-size: 14px; color: #A3ACBD">Every import, with the lines. Scanned in memory, never cloned.</p>
+</div>
+</div>
+<div class="reveal" style="margin-top: 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; font-size: 14px">
+<div style="border-radius: 12px; padding: 16px 20px; background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.25)"><span style="color: #34D399; font-weight: 500">Low risk</span><span style="color: #A3ACBD"> · batch-mergeable once CI is green</span></div>
+<div style="border-radius: 12px; padding: 16px 20px; background: rgba(251,191,36,0.06); border: 1px solid rgba(251,191,36,0.25)"><span style="color: #FBBF24; font-weight: 500">Medium risk</span><span style="color: #A3ACBD"> · review the blast radius first</span></div>
+<div style="border-radius: 12px; padding: 16px 20px; background: rgba(251,113,133,0.06); border: 1px solid rgba(251,113,133,0.25)"><span style="color: #FB7185; font-weight: 500">High risk</span><span style="color: #A3ACBD"> · major bump in production code</span></div>
+</div>
+</div>
+<div class="wide" style="margin-top: 96px">
+<figure class="frame tilt">
+<img src="images/blast-radius-1440.webp" srcset="images/blast-radius-1440.webp 1440w, images/blast-radius-2880.webp 2880w" sizes="(min-width: 1440px) 1392px, calc(100vw - 48px)" width="2880" height="1800" loading="lazy" alt="Radar Dependabot grouped by risk, with the drawer open on a fastify bump: medium risk verdict, dependency path, and the blast radius listing affected files and the exact lines">
+<div class="fade"></div>
+</figure>
+<p style="margin-top: 20px; text-align: center; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">Radar Dependabot · blast radius of a fastify bump, 7 files, 3 using the API that changes</p>
+</div>
+<div class="stage-w">
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">Knowing is half of it.</span> The other half is acting without twelve open tabs. Back to #142.</p>
+</div>
+</section>
+
+<!-- CH5 — ACT -->
+<section id="ch5" style="padding: 40px 0 160px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">05 · Act</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">Approve, merge, rebase.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">As you, without leaving.</p>
+</div>
+<div class="grid2" style="margin-top: 64px; align-items: stretch">
+<div class="shell reveal" style="padding: 32px">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">acme/web #142</p>
+<p style="margin-top: 4px; font-weight: 500">feat(seats): add real-time CI status pulse to repo tiles</p>
+<div style="margin-top: 24px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+<button type="button" class="key" style="border: 0; font-family: inherit; cursor: default">
+<svg class="spin" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="#2C3242" stroke-opacity="0.25" stroke-width="2"></circle><path d="M8 2a6 6 0 0 1 6 6" stroke="#2C3242" stroke-width="2" stroke-linecap="round"></path></svg>
+Approving…
+</button>
+<button type="button" class="ghost" style="border: 0; font-family: inherit; color: #FB7185">Cancel</button>
+</div>
+<div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" class="ghost" style="border: 0; font-family: inherit; color: #A3ACBD">Squash and merge</button>
+<button type="button" class="ghost" style="border: 0; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; color: #A3ACBD">@dependabot rebase</button>
+<button type="button" class="ghost" style="border: 0; font-family: inherit; color: #A3ACBD">Hand off</button>
+</div>
+</div>
+<div class="reveal" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 24px 32px; align-content: center">
+<div><p style="font-weight: 500">Written as you.</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">Your own token, your name. Never the app’s.</p></div>
+<div><p style="font-weight: 500">Cancel means stop.</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">The server stops too, mid-batch included.</p></div>
+<div><p style="font-weight: 500">Running checks block it.</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">Approve and merge wait for the head commit.</p></div>
+<div><p style="font-weight: 500">No guessed outcomes.</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">A timeout is checked against GitHub first.</p></div>
+</div>
+</div>
+</div>
+<div class="wide" style="margin-top: 96px">
+<figure class="frame tilt">
+<img src="images/dependabot-radar-1440.webp" srcset="images/dependabot-radar-1440.webp 1440w, images/dependabot-radar-2880.webp 2880w" sizes="(min-width: 1440px) 1392px, calc(100vw - 48px)" width="2880" height="1800" loading="lazy" alt="Radar Dependabot merging a batch of four low-risk PRs, two of four done, with a Cancel batch button, and the drawer on a high-risk axios major bump">
+<div class="fade"></div>
+</figure>
+<p style="margin-top: 20px; text-align: center; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">Merging a safe batch, 2 of 4, with Cancel one click away</p>
+</div>
+<div class="stage-w">
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">And the moment you act,</span> everyone following the repository sees it.</p>
+</div>
+</section>
+
+<!-- CH6 — LIVE -->
+<section id="ch6" style="padding: 40px 0 200px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">06 · Together, live</p>
+<h2 style="margin-top: 16px; font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">One workspace for the team.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">Updating as GitHub does.</p>
+</div>
+<div class="grid2" style="margin-top: 64px; align-items: stretch">
+<div class="shell reveal" role="img" aria-label="Live timeline of PR 142: review requested, commit pushed, CI passed, approved, merged">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid #222734">
+<span style="font-size: 14px; font-weight: 500">Timeline</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #34D399"><span style="position: relative; width: 8px; height: 8px"><span class="ping" style="position: absolute; inset: 0; border-radius: 50%; background: #34D399"></span><span style="position: absolute; inset: 0; border-radius: 50%; background: #34D399"></span></span>live</span>
+</div>
+<div style="font-size: 14px">
+<div style="display: grid; grid-template-columns: 48px 8px 1fr; gap: 14px; align-items: center; padding: 13px 24px; border-bottom: 1px solid #171B24; background: rgba(52,211,153,0.05)"><span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">18:14</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #34D399"></span><span>#142 merged by @murilo</span></div>
+<div style="display: grid; grid-template-columns: 48px 8px 1fr; gap: 14px; align-items: center; padding: 13px 24px; border-bottom: 1px solid #171B24"><span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">18:13</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #34D399"></span><span>@murilo approved #142</span></div>
+<div style="display: grid; grid-template-columns: 48px 8px 1fr; gap: 14px; align-items: center; padding: 13px 24px; border-bottom: 1px solid #171B24"><span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">18:09</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #34D399"></span><span style="color: #A3ACBD">CI passed on #142</span></div>
+<div style="display: grid; grid-template-columns: 48px 8px 1fr; gap: 14px; align-items: center; padding: 13px 24px; border-bottom: 1px solid #171B24"><span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">18:08</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #8791A5"></span><span style="color: #A3ACBD">@bianca pushed a commit to #142</span></div>
+<div style="display: grid; grid-template-columns: 48px 8px 1fr; gap: 14px; align-items: center; padding: 13px 24px"><span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; color: #8791A5">18:07</span><span style="width: 7px; height: 7px; border-radius: 50%; background: #818CF8"></span><span style="color: #A3ACBD">CODEOWNERS requested your review on #142</span></div>
+</div>
+</div>
+<div class="reveal" style="display: flex; flex-direction: column; justify-content: center; gap: 28px">
+<div><p style="font-weight: 500">Seats</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">One live tile per repository: open PRs, CI pulse, Dependabot health.</p></div>
+<div><p style="font-weight: 500">Claim and hand off</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">Take a PR, or pass it on, so two people never review the same thing.</p></div>
+<div><p style="font-weight: 500">Sync</p><p style="margin-top: 4px; font-size: 14px; color: #A3ACBD">Missed a webhook while the server was down? One click asks GitHub what changed.</p></div>
+</div>
+</div>
+</div>
+<div class="wide" style="margin-top: 96px">
+<figure class="frame tilt">
+<img src="images/timeline-1440.webp" srcset="images/timeline-1440.webp 1440w, images/timeline-2880.webp 2880w" sizes="(min-width: 1440px) 1392px, calc(100vw - 48px)" width="2880" height="1800" loading="lazy" alt="Linha do Tempo: a live feed of approvals, commits, CI results and review requests across followed repositories">
+<div class="fade"></div>
+</figure>
+</div>
+<div class="stage-w">
+<p class="reveal" style="margin: 96px auto 0; max-width: 620px; text-align: center; font-size: 24px; line-height: 1.5; font-weight: 500"><span style="color: #8791A5">#142 is done.</span> Here is what kept it honest.</p>
+</div>
+</section>
+
+<!-- CH7 — TECHNICAL PLATE -->
+<section id="ch7" style="padding: 0 0 200px">
+<div class="stage-w">
+<div class="measure reveal">
+<p style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #818CF8">07 · How it’s built</p>
+<h2 style="margin-top: 16px; font-size: clamp(32px, 4.4vw, 56px); line-height: 1.17; font-weight: 400; letter-spacing: 0.0036em">Your GitHub App. Your database. Your code stays put.</h2>
+</div>
+<div class="reveal" style="margin-top: 64px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1px; background: #222734">
+<div class="plate" style="position: relative; padding: 48px 40px; background-color: #0B0D11">
+<span style="position: absolute; top: 12px; left: 14px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #4A5265">FIG. 01</span>
+<div role="img" aria-label="GitHub webhooks flow into the API, which stores state in Postgres and streams events to every open panel" style="display: flex; flex-direction: column; align-items: center; gap: 8px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px">
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">GitHub webhooks</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #60A5FA; border-radius: 6px; padding: 8px 14px; color: #60A5FA; background: rgba(59,130,246,0.1)">Go API · idempotent ingest</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">Postgres · NOTIFY</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">SSE → every panel</span>
+</div>
+<p style="margin-top: 32px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.6; letter-spacing: 0.021em; color: #A3ACBD">Redelivered webhooks change nothing. Any replica serves any request.</p>
+</div>
+<div class="plate" style="position: relative; padding: 48px 40px; background-color: #0B0D11">
+<span style="position: absolute; top: 12px; left: 14px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #4A5265">FIG. 02</span>
+<div role="img" aria-label="The repository tarball is read in memory, the lockfile and imports analysed, and nothing written to disk" style="display: flex; flex-direction: column; align-items: center; gap: 8px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px">
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">tarball @ head SHA</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #60A5FA; border-radius: 6px; padding: 8px 14px; color: #60A5FA; background: rgba(59,130,246,0.1)">in-memory scan</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">lockfile path + imports</span>
+<span style="color: #4A5265">│</span>
+<span style="border: 1px solid #2C3242; border-radius: 6px; padding: 8px 14px; color: #A3ACBD; background: #0B0D11">risk verdict</span>
+</div>
+<p style="margin-top: 32px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.6; letter-spacing: 0.021em; color: #A3ACBD">Zero clone. No git, no disk, no shell inside the server.</p>
+</div>
+<div class="plate" style="position: relative; padding: 48px 40px; background-color: #0B0D11">
+<span style="position: absolute; top: 12px; left: 14px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; color: #4A5265">FIG. 03</span>
+<pre style="margin: 0; overflow-x: auto; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 11px; line-height: 1.9; color: #E6E8EE"><span style="color: #8791A5"># signed, multi-arch images</span>
+docker pull \
+  ghcr.io/muriio/pr-follower-api:0.1.0
+docker pull \
+  ghcr.io/muriio/pr-follower-panel:0.1.0
+
+<span style="color: #8791A5"># verify where they came from</span>
+gh attestation verify \
+  oci://ghcr.io/muriio/pr-follower-api:0.1.0 \
+  --repo muriIo/pr-follower</pre>
+<p style="margin-top: 24px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 14px; line-height: 1.6; letter-spacing: 0.021em; color: #A3ACBD">No hosted version. Each team runs its own.</p>
+</div>
+</div>
+</div>
+</section>
+
+<!-- CLOSING: masked field of PR tiles -->
+<section style="position: relative; padding: 0 0 200px; overflow: hidden">
+<div aria-hidden="true" style="position: relative; height: 380px; -webkit-mask-image: radial-gradient(ellipse 50% 70% at 50% 75%, #000 20%, transparent 75%); mask-image: radial-gradient(ellipse 50% 70% at 50% 75%, #000 20%, transparent 75%)">
+<div style="position: absolute; left: 50%; top: 0; width: 1640px; margin-left: -820px; display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 12px">
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l1"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l2"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l3"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l4"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l5"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div><div class="tile-lit lit l6"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+<div class="tile"><div class="tile-a"></div><div class="tile-b"></div></div>
+</div>
+</div>
+<div class="measure reveal" style="position: relative; margin-top: 24px">
+<h2 style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em">Follow what’s actually yours.</h2>
+<p style="font-size: clamp(26px, 3vw, 32px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; color: #8791A5">Let the rest wait its turn.</p>
+<div style="margin-top: 80px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap">
+<a class="key" href="https://github.com/muriIo/pr-follower" target="_blank" rel="noopener noreferrer">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+View on GitHub
+</a>
+<a class="ghost" href="https://github.com/muriIo/pr-follower/stargazers" target="_blank" rel="noopener noreferrer">
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1.5l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.3l-3.8 2 .7-4.3-3.1-3 4.3-.6z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path></svg>
+Star the repo
+</a>
+</div>
+<p style="margin-top: 16px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.017em; color: #8791A5">Free to run · Apache-2.0 · Go + Angular + Postgres</p>
+<p style="margin-top: 8px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; letter-spacing: 0.017em"><a class="util" href="https://github.com/muriIo/pr-follower/issues" target="_blank" rel="noopener noreferrer">Open an issue ↗</a>   <a class="util" href="https://github.com/muriIo/pr-follower/releases" target="_blank" rel="noopener noreferrer">All releases ↗</a></p>
+</div>
+</section>
+
+</main>
+<!-- FOOTER: art threshold -->
+<footer style="position: relative; overflow: hidden">
+<svg aria-hidden="true" viewBox="0 0 1200 300" preserveAspectRatio="xMidYMax slice" style="position: absolute; left: 0; right: 0; top: 0; width: 100%; height: 300px">
+<defs>
+<linearGradient id="pf-up" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000"></stop><stop offset="1" stop-color="#ffffff"></stop></linearGradient>
+<mask id="pf-up-mask"><rect width="1200" height="300" fill="url(#pf-up)"></rect></mask>
+</defs>
+<g mask="url(#pf-up-mask)" fill="none" opacity="0.8">
+<g transform="translate(600 300) scale(0.55) translate(-600 -720)">
+<path d="M-236 519C-95 589 550 485 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-234 387C31 464 550 480 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M-257 278C-149 360 549 472 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-102 152C288 240 558 429 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M-13 61C-18 154 563 430 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M90 59C272 152 569 412 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M216 -50C381 48 577 407 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M373 -27C411 71 586 461 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M483 -93C420 7 593 441 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M671 -57C586 42 604 486 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M797 -39C858 59 612 405 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M859 -96C955 4 616 420 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1052 38C1027 132 627 420 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1173 18C1181 113 634 461 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M1282 126C1096 215 641 405 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1282 199C978 285 641 431 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path d="M1356 320C1310 400 645 437 600 720" stroke="#6366F1" stroke-opacity="0.45" stroke-width="1.1"></path>
+<path d="M1438 445C1315 519 650 432 600 720" stroke="#4A5265" stroke-opacity="0.32" stroke-width="1"></path>
+<path class="rev flow f1" d="M-236 519C-95 589 550 485 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f2" d="M-257 278C-149 360 549 472 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f3" d="M-13 61C-18 154 563 430 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f1" d="M216 -50C381 48 577 407 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f2" d="M483 -93C420 7 593 441 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f3" d="M797 -39C858 59 612 405 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f3" d="M1173 18C1181 113 634 461 600 720" stroke="#818CF8" stroke-width="1.6" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f1" d="M1282 199C978 285 641 431 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path class="rev flow f2" d="M1438 445C1315 519 650 432 600 720" stroke="#8791A5" stroke-opacity="0.6" stroke-width="1.2" stroke-dasharray="1 23" stroke-linecap="round"></path>
+<path d="M952 3C819 99 621 434 600 720" stroke="#C7D2FE" stroke-opacity="0.55" stroke-width="1.6"></path>
+</g>
+<circle class="pulse" cx="600" cy="300" r="60" fill="url(#pf-core)"></circle>
+<circle cx="600" cy="300" r="3" fill="#E0E7FF"></circle>
+</g>
+</svg>
+<div style="position: relative; margin-top: 220px; border-top: 1px solid #222734; background: linear-gradient(rgba(11,13,17,0.8) 0%, #0B0D11 32%), radial-gradient(49% 65% at 49% 0, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px)">
+<div style="max-width: 1064px; margin: 0 auto; padding: 96px 24px 64px; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 32px; font-size: 14px; letter-spacing: 0.014em">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<a href="#top" style="display: flex; align-items: center; gap: 8px; text-decoration: none; color: #E6E8EE; font-weight: 600"><svg width="20" height="20" viewBox="0 0 26 26" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="3" stroke="#ffffff" stroke-width="1.6"></circle><circle cx="6" cy="20" r="3" stroke="#ffffff" stroke-width="1.6"></circle><circle cx="20" cy="20" r="3" stroke="#818CF8" stroke-width="1.6"></circle><path d="M6 9v8M9 6h5a6 6 0 0 1 6 6v5" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round"></path></svg>PR Follower</a>
+<p style="color: #8791A5; font-size: 13px">Not affiliated with GitHub.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px"><p style="font-weight: 500">Project</p><a class="util" href="https://github.com/muriIo/pr-follower" target="_blank" rel="noopener noreferrer">Repository ↗</a><a class="util" href="https://github.com/muriIo/pr-follower/releases" target="_blank" rel="noopener noreferrer">Releases ↗</a><a class="util" href="https://github.com/muriIo/pr-follower/issues" target="_blank" rel="noopener noreferrer">Issues ↗</a></div>
+<div style="display: flex; flex-direction: column; gap: 14px"><p style="font-weight: 500">Docs</p><a class="util" href="https://github.com/muriIo/pr-follower#readme" target="_blank" rel="noopener noreferrer">README ↗</a><a class="util" href="https://github.com/muriIo/pr-follower/blob/develop/docs/production-setup.md" target="_blank" rel="noopener noreferrer">Self-hosting ↗</a><a class="util" href="https://github.com/muriIo/pr-follower/tree/develop/docs/adr" target="_blank" rel="noopener noreferrer">Architecture decisions ↗</a></div>
+<div style="display: flex; flex-direction: column; gap: 14px"><p style="font-weight: 500">Trust</p><a class="util" href="https://github.com/muriIo/pr-follower/blob/develop/SECURITY.md" target="_blank" rel="noopener noreferrer">Security ↗</a><a class="util" href="https://github.com/muriIo/pr-follower/blob/develop/LICENSE" target="_blank" rel="noopener noreferrer">Apache-2.0 ↗</a></div>
+</div>
+</div>
+</footer>
+
+</div>
+</body>
+</html>

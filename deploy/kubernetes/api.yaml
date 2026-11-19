@@ -1,5 +1,6 @@
 # The API: the only component that talks to Postgres and GitHub. Any number of replicas can run
-# (ADR-0012); it needs outbound HTTPS to github.com, api.github.com and codeload.github.com.
+# (ADR-0012) and start together: migrations take a Postgres advisory lock (ADR-0016). It needs
+# outbound HTTPS to github.com, api.github.com and codeload.github.com.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,27 +24,44 @@ spec:
           ports:
             - { name: http, containerPort: 8080 }
           envFrom:
-            - secretRef: { name: pr-follower } # every variable from INSTALL.md §3
+            # INSTALL.md §3: the secret variables in a Secret; the plain ones may go in a ConfigMap
+            # (optional) or in the same Secret. The API reads them at start: restart it after a change.
+            - secretRef: { name: pr-follower }
+            - configMapRef: { name: pr-follower-config, optional: true }
           env:
             - { name: GITHUB_APP_PRIVATE_KEY_FILE, value: /run/secrets/github-app/github-app.pem }
           volumeMounts:
             - { name: github-app, mountPath: /run/secrets/github-app, readOnly: true }
-          readinessProbe:
+            - { name: tmp, mountPath: /tmp }
+          # It listens only after migrating; a replica waiting for another's migration lock may
+          # take up to 5 min, so the startup probe allows 6 before the platform restarts it.
+          startupProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
+            failureThreshold: 36
+          # Ready = reaches Postgres. If the database is down for every pod, all leave the Service
+          # and the panel answers 502 until it is back.
+          readinessProbe:
+            httpGet: { path: /api/v1/healthz, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3 # the database ping gives up after 2 s
+            failureThreshold: 3
+          # Alive = the process answers; never the database, or an outage would restart every pod.
           livenessProbe:
             httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 30 # migrations run before it listens
             periodSeconds: 10
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { memory: 512Mi } # the Dependabot analysis reads repository tarballs in memory
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true # it writes nothing on disk; /tmp stays writable below
             capabilities: { drop: [ALL] }
       volumes:
         - name: github-app
           secret: { secretName: pr-follower-github-app, defaultMode: 0440 }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
 ---
 apiVersion: v1
 kind: Service
