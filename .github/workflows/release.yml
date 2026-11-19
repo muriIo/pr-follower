@@ -56,6 +56,35 @@ jobs:
           if [[ "$TAG" == *-* ]]; then prerelease=true; else prerelease=false; fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Upgrade guide and version pins
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
+        run: |
+          # /bump-version prepares both before the tag; a release candidate is a dry run and needs neither.
+          [[ "$PRERELEASE" == "true" ]] && { echo "pre-release: guide and pins not required"; exit 0; }
+          fail=0
+          if [[ ! -s "docs/upgrades/$TAG.md" ]]; then
+            echo "::error::docs/upgrades/$TAG.md is missing: every release ships its upgrade guide (docs/upgrades/README.md)"
+            fail=1
+          fi
+          pinned=$(sed -n 's/^PR_FOLLOWER_VERSION=//p' deploy/compose/.env.example)
+          if [[ "$pinned" != "$VERSION" ]]; then
+            echo "::error::deploy/compose/.env.example pins PR_FOLLOWER_VERSION=$pinned, not $VERSION"
+            fail=1
+          fi
+          while read -r tag; do
+            if [[ "$tag" != "$VERSION" ]]; then
+              echo "::error::deploy/kubernetes/kustomization.yaml pins newTag $tag, not $VERSION"
+              fail=1
+            fi
+          done < <(sed -n 's/^ *newTag: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' deploy/kubernetes/kustomization.yaml)
+          exit "$fail"
+
       - name: Commit is on main
         run: |
           status=$(gh api "repos/$REPO/compare/main...$SHA" --jq .status)
@@ -240,22 +269,42 @@ jobs:
         run: |
           # The checkout of a tag push may not keep the annotation; fetch the tag object itself.
           git fetch --no-tags --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          # The images are public: read each multi-arch index digest back from the registry, so the
+          # notes name exactly what was attested and operators can pin and verify by digest.
+          digest() {
+            docker buildx imagetools inspect "ghcr.io/muriio/pr-follower-$1:$VERSION" \
+              --format '{{json .Manifest}}' | jq -r .digest
+          }
+          api=$(digest api)
+          panel=$(digest panel)
+          [[ "$api" == sha256:* && "$panel" == sha256:* ]] || { echo "::error::could not read the image digests"; exit 1; }
           {
             git for-each-ref "refs/tags/$TAG" --format='%(contents:body)'
             echo
+            # The upgrade guide, with the digests it leaves for this step (a release candidate has none).
+            if [[ -f "docs/upgrades/$TAG.md" ]]; then
+              sed -e "s/sha256:API_DIGEST/$api/g" -e "s/sha256:PANEL_DIGEST/$panel/g" \
+                -e 's/^# Upgrading to /## Upgrading to /' "docs/upgrades/$TAG.md"
+              echo
+            fi
             echo "## Images"
             echo
             echo "Multi-arch (linux/amd64, linux/arm64), with an SBOM and build provenance attached."
+            echo "The image tag is the release name without the \`v\`. Deploy both at the same version, pinned by digest:"
             echo
             echo '```'
-            echo "ghcr.io/muriio/pr-follower-api:$VERSION"
-            echo "ghcr.io/muriio/pr-follower-panel:$VERSION"
+            echo "ghcr.io/muriio/pr-follower-api:$VERSION@$api"
+            echo "ghcr.io/muriio/pr-follower-panel:$VERSION@$panel"
             echo '```'
             echo
-            echo "Verify that an image was built by this repository's release workflow:"
+            echo "Verify that each digest was built by this repository's release workflow from \`$TAG\` (\`gh\` must be signed in):"
             echo
             echo '```'
-            echo "gh attestation verify oci://ghcr.io/muriio/pr-follower-api:$VERSION --owner muriIo"
+            for pair in "api@$api" "panel@$panel"; do
+              echo "gh attestation verify oci://ghcr.io/muriio/pr-follower-${pair%%@*}@${pair#*@} \\"
+              echo "  --repo muriIo/pr-follower --signer-workflow muriIo/pr-follower/.github/workflows/release.yml \\"
+              echo "  --source-ref refs/tags/$TAG --deny-self-hosted-runners"
+            done
             echo '```'
           } > "$RUNNER_TEMP/notes.md"
 
