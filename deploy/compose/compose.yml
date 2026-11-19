@@ -48,15 +48,19 @@ services:
       ALLOWED_GITHUB_ORGS: ${ALLOWED_GITHUB_ORGS:-} # optional: only these organizations' members sign in
     volumes:
       - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro # readable by UID 10001
+      # - ./secrets/db-ca.pem:/run/secrets/db-ca.pem:ro          # managed Postgres with sslmode=verify-full
+    read_only: true # it writes nothing on disk
+    tmpfs: [/tmp]
     depends_on:
       postgres: { condition: service_healthy, required: false }
     stop_grace_period: 20s
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      # The API and its database (GET /healthz would only say the process is up).
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/healthz"]
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 30s
+      start_period: 6m # it listens after migrating; another replica's migration lock may hold it up to 5 min
     logging:
       options: { max-size: 10m, max-file: "5" }
 
@@ -65,6 +69,12 @@ services:
     restart: unless-stopped
     environment:
       API_UPSTREAM: http://api:8080 # scheme, host and port only
+    # nginx keeps its pid and temp files in /tmp (large webhook bodies are buffered there), and the
+    # entrypoint renders conf.d/default.conf from the template at every start, as user 101.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /etc/nginx/conf.d:uid=101,gid=101
     depends_on:
       api: { condition: service_healthy } # nginx resolves `api` once, when it starts
     healthcheck:

@@ -2,9 +2,13 @@
 # managed database or an operator such as CloudNativePG, and put its URL in the secret below.
 #
 #   kubectl create namespace pr-follower
-#   kubectl -n pr-follower create secret generic pr-follower --from-env-file=api.env
+#   kubectl -n pr-follower create secret generic pr-follower --from-env-file=secret.env
+#   kubectl -n pr-follower create configmap pr-follower-config --from-env-file=config.env   # optional
 #   kubectl -n pr-follower create secret generic pr-follower-github-app --from-file=github-app.pem=<key>.pem
 #   kubectl apply -k .
+#
+# GitOps (Argo CD, Flux): examples/external-secrets.yaml syncs both Secrets from a secret manager.
+# On AWS: examples/ingress-alb.yaml replaces ingress.yaml.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: pr-follower
@@ -14,7 +18,11 @@ resources:
   - api.yaml
   - panel.yaml
   - ingress.yaml
-images: # the release to run: a tag from https://github.com/muriIo/pr-follower/releases
+# The release to run, the same on both images. The tag is the release name without the "v"
+# (release v0.1.0 -> "0.1.0"). Pin each image by the digest its release notes list, after checking it
+# with the gh attestation verify command printed there; the tag alone can be moved, a digest cannot:
+#     digest: "sha256:..."
+images:
   - name: ghcr.io/muriio/pr-follower-api
     newTag: "0.1.0"
   - name: ghcr.io/muriio/pr-follower-panel

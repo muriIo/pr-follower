@@ -20,7 +20,7 @@ Work through the sections in order: each one uses what the previous ones produce
 - A domain or subdomain you control, and access to its DNS.
 - A host or container platform that runs Linux images and reaches the internet over HTTPS.
 - A TLS-terminating reverse proxy or load balancer (Caddy, nginx, Traefik, a cloud load balancer…) with a publicly trusted certificate: GitHub refuses to deliver webhooks to an untrusted one.
-- PostgreSQL 17 with automated backups, preferably managed.
+- PostgreSQL 17 or newer (tested on 17; works on 18) with automated backups, preferably managed.
 - A secret manager (1Password, Vault, a cloud secret manager…) for the secrets created in §2 and §5.
 - On GitHub: an organization where you are an **owner** (recommended) or your personal account, to own the app; and a throwaway test repository for §11.
 - Only if you build the images yourself (§7.2): Docker and this repository, with `make check` passing.
@@ -30,7 +30,7 @@ Work through the sections in order: each one uses what the previous ones produce
 Open items in [`roadmap.md`](roadmap.md) that matter in production. None blocks a deploy, but know them before users arrive:
 
 - [x] **Verified against real GitHub** (2026-11-16, [`real-github-verification.md`](real-github-verification.md)); what is still unverified is listed in the roadmap.
-- **Several API replicas** are supported (§13.10, ADR-0012) and were run as two processes behind one proxy; a cancel landing on the other replica is covered by tests only.
+- **Several API replicas** are supported (§13.10, ADR-0012) and were run as two processes behind one proxy; a cancel landing on the other replica is covered by tests only. They may start together: migrations take a database lock (ADR-0016).
 - **No periodic resync.** Webhooks lost while the API was down are not fetched on their own: redeliver them (§13.1) or users click **Sincronizar**.
 - **Expired sessions are never purged** automatically: §13.6 has the SQL.
 - **Failed Dependabot analyses** show in the Radar as "Análise falhou" with the reason and a retry; the reason is also logged.
@@ -42,7 +42,7 @@ Sign-in, sessions, token encryption and webhook verification are production-read
 
 ```
 browser ───┐
-           ├─ https ─▶ TLS proxy ─ http ─▶ panel (nginx :8080) ─ /api/* ─▶ api (Go :8080) ─▶ Postgres 17
+           ├─ https ─▶ TLS proxy ─ http ─▶ panel (nginx :8080) ─ /api/* ─▶ api (Go :8080) ─▶ Postgres 17+
 GitHub ────┘           (public)            serves the SPA                       │
 (webhooks)                                                                      └─ https ─▶ github.com
                                                                                            api.github.com
@@ -84,7 +84,7 @@ GitHub produces the rest in §5: the client secret and the app's private key.
 
 ## 3. Prepare Postgres
 
-1. Create a PostgreSQL **17** instance (the version the dev stack and tests use) on a private network the API can reach. Turn on automated backups with point-in-time recovery.
+1. Create a PostgreSQL **17 or newer** instance (17 is what the dev stack and CI use; 18 also runs in production) on a private network the API can reach. Turn on automated backups with point-in-time recovery.
 2. Create the role, and a database **owned by it**. Since Postgres 15 only the database owner may create tables in `public` by default, and the API creates its tables on first start:
 
    ```sql
@@ -93,22 +93,23 @@ GitHub produces the rest in §5: the client secret and the app's private key.
    ```
 
    A managed service's console does the same; what matters is that `prfollower` owns `pr_follower`.
-3. Build the connection string:
+3. Build the connection string. Recommended:
 
    ```
-   postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=require
+   postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.pem
    ```
 
-   - `sslmode=require` encrypts the connection. `sslmode=verify-full&sslrootcert=/path/ca.pem` also checks the server's certificate (mount the provider's CA file into the API container).
+   - `sslmode=verify-full` encrypts the connection **and** checks that the server's certificate chains to your provider's CA and names `DB_HOST`. Mount the provider's CA file into the API container at the `sslrootcert` path, readable by UID 10001 (it is public, not a secret: a ConfigMap on Kubernetes). On AWS RDS: [`global-bundle.pem`](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) for any commercial region, or the smaller per-region bundle (`https://truststore.pki.rds.amazonaws.com/<region>/<region>-bundle.pem`); see [`aws-setup.md`](aws-setup.md) §7.
+   - `sslmode=require` only encrypts: it accepts any certificate, so whoever can intercept the traffic can pose as the database. Use it only where you cannot mount the CA file.
    - Use a **direct** connection or a session-mode pooler. The API keeps one connection open for `LISTEN`, which a transaction-mode pooler (PgBouncer `pool_mode = transaction`) does not carry: live updates would then only arrive through the 5 s poll.
    - Budget connections: up to `DB_MAX_OPEN_CONNS` (default 25), plus 2 for `LISTEN`, per API replica. Lower `DB_MAX_OPEN_CONNS` on small plans.
 4. Check it from a machine on that network:
 
    ```bash
-   psql 'postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=require' -c 'select version()'
+   psql 'postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=verify-full&sslrootcert=ca.pem' -c 'select version()'
    ```
 
-Don't run migrations by hand. The API applies the forward-only migrations ([ADR-0004](adr/0004-forward-only-goose-migrations-and-sqlc.md)) at start; `SELECT max(version_id) FROM goose_db_version;` shows the applied version afterwards.
+Don't run migrations by hand. The API applies the forward-only migrations ([ADR-0004](adr/0004-forward-only-goose-migrations-and-sqlc.md)) at start, holding a Postgres advisory lock while it does ([ADR-0016](adr/0016-migrations-take-an-advisory-lock.md)), so replicas starting together migrate once; `SELECT max(version_id) FROM goose_db_version;` shows the applied version afterwards.
 
 ## 4. Create the production GitHub App
 
@@ -116,7 +117,7 @@ Use a separate app for production. Keep your dev app (callback on `localhost`) f
 
 ### 4.1 Choose the owner
 
-Create the app under the **organization** that runs PR Follower, so it does not depend on one person's account: **Organization → Settings → Developer settings → GitHub Apps → New GitHub App**. Org owners can make other members **App managers**. A personal app works the same way (**Settings → Developer settings → GitHub Apps → New GitHub App**).
+Create the app under the **organization** that runs PR Follower, so it does not depend on one person's account: open `https://github.com/organizations/<org>/settings/apps/new` (in the menus: **Organization → Settings → Developer settings → GitHub Apps → New GitHub App**). Org owners can make other members **App managers**. A personal app works the same way: `https://github.com/settings/apps/new`. The `…/settings/installations` page lists the apps *installed* on an account, not the apps it owns, and has no way to create one.
 
 ### 4.2 Basic information and sign-in
 
@@ -146,7 +147,7 @@ Create the app under the **organization** that runs PR Follower, so it does not 
 | Webhook secret | The webhook secret from §2 |
 | SSL verification | ✅ enabled |
 
-The server does not need to exist yet. GitHub sends a `ping` when the app is created; it fails now, and you redeliver it in §11.
+The server does not need to exist yet. GitHub sends a `ping` the moment the app is created; **it fails, and that is expected**: nothing answers at that URL yet. You redeliver it from **Advanced → Recent Deliveries** in §11, where it answers `202`.
 
 ### 4.5 Permissions
 
@@ -166,7 +167,7 @@ Approve, merge and comment use the signed-in user's own token, so they are limit
 
 ### 4.6 Events
 
-Subscribe to exactly these (each one appears only once its permission above is set):
+Subscribe to exactly these. Each event's checkbox appears only once its permission in §4.5 is set, so set the permissions first:
 
 | Event | What the API does with it |
 |---|---|
@@ -210,14 +211,14 @@ On the app's **General** page:
 
 | Variable | Required | Value | Notes |
 |---|---|---|---|
-| `PUBLIC_URL` | yes | `https://app.example.com` | The origin users open. Builds the GitHub callback URL; `https://` makes the cookies `Secure`. A trailing slash is dropped. Default `http://localhost:4200`. |
-| `DATABASE_URL` | yes | from §3 | Default: a local dev database. |
-| `GITHUB_CLIENT_ID` | yes | from §5 | Without it (or the secret) sign-in is disabled: the login answers `auth_error=not_configured` and every API route `401`. |
+| `PUBLIC_URL` | yes | `https://app.example.com` | Config. The origin users open. Builds the GitHub callback URL; `https://` makes the cookies `Secure`. A trailing slash is dropped. Default `http://localhost:4200`. |
+| `DATABASE_URL` | yes | from §3 | Secret (it holds the password). Default: a local dev database. |
+| `GITHUB_CLIENT_ID` | yes | from §5 | Config (public). Without it (or the secret) sign-in is disabled: the login answers `auth_error=not_configured` and every API route `401`. |
 | `GITHUB_CLIENT_SECRET` | yes | from §5 | Secret. |
-| `GITHUB_APP_ID` | yes* | from §5 | With the private key, the API reads as the app (installation token), so webhook-time reads, CODEOWNERS refreshes and the Dependabot analysis do not depend on a signed-in follower. |
+| `GITHUB_APP_ID` | yes* | from §5 | Config (public). With the private key, the API reads as the app (installation token), so webhook-time reads, CODEOWNERS refreshes and the Dependabot analysis do not depend on a signed-in follower. |
 | `GITHUB_APP_PRIVATE_KEY_FILE` | yes* | `/run/secrets/github-app.pem` | Secret. Preferred: the mounted `.pem` (§6.2). Wins over `GITHUB_APP_PRIVATE_KEY`. A file the API cannot read stops it at start. |
 | `GITHUB_APP_PRIVATE_KEY` | | the `.pem` contents | Secret. Alternative to the file for platforms that only take variables: one line, newlines written as `\n` (§6.2). A key that does not parse stops the API at start. |
-| `GITHUB_APP_SLUG` | yes | from §5 | Builds the **+ Adicionar conta do GitHub** link (`https://github.com/apps/<slug>/installations/new`). Without it the import screen has no install link. |
+| `GITHUB_APP_SLUG` | yes | from §5 | Config (public). Builds the **+ Adicionar conta do GitHub** link (`https://github.com/apps/<slug>/installations/new`). Without it the import screen has no install link. |
 | `GITHUB_WEBHOOK_SECRET` | yes | from §2 | Secret. Without it the API uses the public development value `dev-webhook-secret`, with which anyone could forge deliveries, so it refuses to start when `PUBLIC_URL` is https. |
 | `TOKEN_ENCRYPTION_KEY` | yes | from §2 | Secret. Standard base64 of 32 bytes. Unset: a random key on every start, so GitHub sign-ins do not survive a restart. Invalid: the API stops at start. |
 | `ALLOWED_ORIGIN` | no | `https://app.example.com` | CORS. The app is same-origin, so this only narrows the default `*`. |
@@ -225,13 +226,15 @@ On the app's **General** page:
 | `DB_MAX_OPEN_CONNS` / `DB_MAX_IDLE_CONNS` | no | `25` / `10` | Defaults. Values that are not positive numbers fall back to them. |
 | `ALLOWED_GITHUB_ORGS` | no | `acme` or `acme,acme-labs` | Comma-separated organization logins, case-insensitive. Set: only members (public or private) of at least one of them can sign in, and users who leave lose their access within 15 minutes (§13.11). Unset or empty: sign-in is open to every GitHub account. Needs `GITHUB_APP_ID` and the key: without them the API refuses to start. |
 
+Variables marked **Secret** go in the secret manager; the rest is plain configuration and can live beside it in a non-secret store (a ConfigMap on Kubernetes, `deploy/kubernetes/api.yaml` reads `pr-follower-config` when it exists). The API reads all of them once, at start: after changing one, restart it (§13.4).
+
 \* Without `GITHUB_APP_ID` and a key the API still runs: it logs a warning, falls back to followers' tokens, and turns the Dependabot analysis off ("Sem análise" everywhere). Treat both as required in production.
 
 For the single-host example, as `/opt/pr-follower/api.env` (mode `0600`, filled from the secret manager, never committed):
 
 ```dotenv
 PUBLIC_URL=https://app.example.com
-DATABASE_URL=postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=require
+DATABASE_URL=postgres://prfollower:PASSWORD@DB_HOST:5432/pr_follower?sslmode=verify-full&sslrootcert=/run/secrets/db-ca.pem
 GITHUB_CLIENT_ID=Iv23...
 GITHUB_CLIENT_SECRET=...
 GITHUB_APP_ID=123456
@@ -271,6 +274,18 @@ awk 'NF {sub(/\r/, ""); printf "%s\\n", $0}' <slug>.<date>.private-key.pem
 
 The panel image accepts request bodies up to 5 MB on `/api/` (GitHub deliveries); the API reads up to 5 MiB of a delivery.
 
+### 6.4 Read-only filesystem
+
+Both images run as non-root users and work with a **read-only root filesystem** (`readOnlyRootFilesystem: true` on Kubernetes, `read_only: true` in Compose, `readonlyRootFilesystem` on ECS), given these writable paths:
+
+| Container | Writable path | Why |
+|---|---|---|
+| panel | `/tmp` | nginx keeps its pid file and temp files there. A request body larger than nginx's in-memory buffer (two memory pages: 8 KB on x86-64), such as most GitHub deliveries, is written to `/tmp/client_temp` first: the log line `a client request body is buffered to a temporary file` is normal. Without it nginx does not start (`mkdir() "/tmp/proxy_temp" failed (30: Read-only file system)`). |
+| panel | `/etc/nginx/conf.d`, writable by UID 101 | The image's entrypoint renders `default.conf` there from the template and `API_UPSTREAM` at every start. Without it: `can't create /etc/nginx/conf.d/default.conf: Read-only file system`. |
+| api | `/tmp` | It writes nothing on disk today; a small `/tmp` keeps Go's temp directory usable. |
+
+`deploy/kubernetes/` (`emptyDir` volumes) and `deploy/compose/` (`tmpfs`) already do this. A Compose `tmpfs` is owned by root, hence `/etc/nginx/conf.d:uid=101,gid=101` there.
+
 ## 7. Get the images
 
 ### 7.1 Published images
@@ -282,16 +297,25 @@ ghcr.io/muriio/pr-follower-api:X.Y.Z
 ghcr.io/muriio/pr-follower-panel:X.Y.Z
 ```
 
-Releases are listed at <https://github.com/muriIo/pr-follower/releases>, with what changed in each. A release is published only from a commit on `main` whose CI (`make check`) passed. Each image also carries the tags `X.Y` (the newest patch of that minor) and `sha-<commit>`; there is no `latest`.
+Releases are listed at <https://github.com/muriIo/pr-follower/releases>, with what changed in each. A release is published only from a commit on `main` whose CI (`make check`) passed. **The image tag is the release name without the `v`**: release `v0.1.0` publishes `:0.1.0` (there is no `:v0.1.0`). Each image also carries the tags `X.Y` (the newest patch of that minor, so it moves with every patch) and `sha-<commit>`; there is no `latest`.
 
-- Deploy by the **exact version** (`TAG=0.1.0`), and give both images the **same** one.
-- Each image carries an SBOM (its packages and versions) and build provenance (the commit and workflow run that produced it), and is signed with a GitHub artifact attestation. Check that an image was built by this repository's release workflow before deploying it:
+- Give both images the **same** version, and deploy each **by digest**: `ghcr.io/muriio/pr-follower-api:0.1.0@sha256:…`. A tag is a name the registry lets its owner move; a digest is the hash of the image itself, so it always means the same bytes. Each release's notes list both digests. Kustomize: `newTag` + `digest` under `images:`; Compose and ECS: `image:TAG@sha256:…`.
+- Each image carries an SBOM (its packages and versions) and build provenance (the commit and workflow run that produced it), signed with a GitHub artifact attestation. Before deploying a digest, check that **this** repository's **release workflow** built it **from that tag**. `gh` must be signed in (`gh auth login`, or `GH_TOKEN`): it fetches the attestations from the GitHub API.
 
   ```bash
-  gh attestation verify oci://ghcr.io/muriio/pr-follower-api:TAG   --owner muriIo
-  gh attestation verify oci://ghcr.io/muriio/pr-follower-panel:TAG --owner muriIo
-  docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:TAG --format '{{json .SBOM}}'   # the SBOM
+  VERSION=0.1.0
+  DIGEST=$(docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:$VERSION --format '{{json .Manifest}}' \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')    # or copy it from the release notes
+  gh attestation verify oci://ghcr.io/muriio/pr-follower-api@$DIGEST \
+    --repo muriIo/pr-follower \
+    --signer-workflow muriIo/pr-follower/.github/workflows/release.yml \
+    --source-ref refs/tags/v$VERSION \
+    --deny-self-hosted-runners
+  # the same for pr-follower-panel; then deploy exactly these digests
+  docker buildx imagetools inspect ghcr.io/muriio/pr-follower-api:$VERSION --format '{{json .SBOM}}'   # the SBOM
   ```
+
+  Why these flags: `--owner muriIo` alone would accept an attestation from *any* workflow in *any* repository of that account. `--repo` narrows it to this repository, `--signer-workflow` to the release workflow (which runs only on `v*` tags from `main`), and `--source-ref` to this release. Verifying the digest rather than the tag means what you checked is what you deploy, even if the tag moves in between.
 
 - The API image is a static Go binary on Alpine 3.22 with CA certificates and the migrations embedded. The panel image is `nginx-unprivileged` 1.27 with the built SPA. Both run as non-root users.
 - Mirroring them into your own registry (ECR, Artifact Registry, …) keeps deploys independent of GHCR: copy by digest, e.g. `docker buildx imagetools create -t REGISTRY/pr-follower-api:TAG ghcr.io/muriio/pr-follower-api:TAG`.
@@ -386,18 +410,20 @@ name: pr-follower
 
 services:
   api:
-    image: REGISTRY/pr-follower-api:TAG
+    image: REGISTRY/pr-follower-api:TAG       # TAG@sha256:… to pin the digest (§7.1)
     env_file: api.env                         # §6.1, mode 0600
     volumes:
       - ./secrets/github-app.pem:/run/secrets/github-app.pem:ro   # §6.2, readable by UID 10001
     restart: unless-stopped                   # the API exits if Postgres is unreachable at start
     stop_grace_period: 20s                    # it drains for up to 10 s on SIGTERM
+    read_only: true                           # §6.4
+    tmpfs: [/tmp]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/healthz"]   # the API and its database
       interval: 10s
       timeout: 3s
       retries: 3
-      start_period: 30s
+      start_period: 6m                        # it may wait up to 5 min for another replica's migration
     logging:
       options: { max-size: 10m, max-file: "5" }
 
@@ -405,6 +431,10 @@ services:
     image: REGISTRY/pr-follower-panel:TAG     # same TAG as the api
     environment:
       API_UPSTREAM: http://api:8080           # §6.3
+    read_only: true                           # §6.4
+    tmpfs:
+      - /tmp
+      - /etc/nginx/conf.d:uid=101,gid=101
     ports:
       - "127.0.0.1:8080:8080"                 # only the TLS proxy on this host reaches it
     depends_on:
@@ -437,9 +467,13 @@ Expose only the TLS proxy. The API and Postgres need no public port: browsers an
    curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://app.example.com/
    #   301 https://app.example.com/
 
-   # The panel is up
+   # The panel is up (nginx answers this itself, without the API)
    curl -s https://app.example.com/healthz
    #   ok
+
+   # The API is up and reaches its database
+   curl -s https://app.example.com/api/v1/healthz
+   #   {"status":"ok"}          (503 {"status":"unavailable"}: the API cannot reach Postgres)
 
    # The API is reachable through the panel, and protected
    curl -s -o /dev/null -w '%{http_code}\n' https://app.example.com/api/v1/auth/me
@@ -508,13 +542,15 @@ Acting on PRs (approve, merge, `@dependabot` comments), the Dependabot analysis 
 
 - **Recent Deliveries** (app → **Advanced**). GitHub does not retry a failed delivery, and only deliveries from the last 3 days can be redelivered. Check after every deploy or outage and **Redeliver** the failures: ingestion is idempotent ([ADR-0011](adr/0011-idempotent-integrations.md)), so redelivering one that already arrived changes nothing. After a longer outage, users click **Sincronizar** to bring the repositories they follow back in line.
 - **API logs.** Alert on any `ERROR`, and on `dependabot analysis failed`, `dependabot analysis queue full`, `activity listener disconnected`, `reading the activity log failed` and `pruning old activity failed` ([Troubleshooting](#troubleshooting)).
-- **An uptime probe** on `https://app.example.com/api/v1/auth/me` expecting `401`: that answer needs the TLS proxy, the panel and the API all up. The panel's `/healthz` covers only the panel, and the API's own `/healthz` does not touch the database.
+- **An uptime probe** on `https://app.example.com/api/v1/healthz` expecting `200`: that answer needs the TLS proxy, the panel, the API and Postgres all up. The panel's `/healthz` covers only the panel, and the API's own `/healthz` (liveness) does not touch the database.
 - **GitHub's emails** to installation owners about permission requests (§13.8).
 - **Database size.** Activity is pruned after 7 days; expired sessions are not (§13.6).
 
 ### 13.2 Upgrades
 
-1. See whether the release carries a migration:
+Each release has an **upgrade guide** (`docs/upgrades/vX.Y.Z.md`, also at the top of its release notes) with every step from the previous release: new or changed variables, GitHub App permissions and events, deploy-file changes, migrations. It is the checklist; the steps below are the routine around it. Skipping releases, apply each guide in between, in order.
+
+1. See whether the release carries a migration (its guide says so too):
 
    ```bash
    git diff --stat vDEPLOYED vNEW -- backend/internal/infrastructure/database/migrations/
@@ -524,7 +560,7 @@ Acting on PRs (approve, merge, `@dependabot` comments), the Dependabot analysis 
 
 2. If it does, take a database snapshot first (or note the time for point-in-time recovery).
 3. Verify the new images (§7.1), or build and push your own (§7.2).
-4. Set the new `TAG` on **both** services in `compose.yml`, then `docker compose pull && docker compose up -d`. Compose recreates the API (which migrates before it listens), then the panel.
+4. Set the new `TAG` (and digest) on **both** services in `compose.yml`, then `docker compose pull && docker compose up -d`. Compose recreates the API (which migrates before it listens), then the panel. With several replicas, deploy them however your platform does: the first to start takes the migration lock, the others wait for it (§13.10).
 5. Follow `docker compose logs -f api` until `server listening`, then rerun §10.
 6. Redeliver the deliveries that failed during the restart (§13.1).
 
@@ -544,6 +580,8 @@ Deploy the previous tag only if no migration shipped since it; otherwise fix for
 | App private key | **Generate a private key** (an app can hold several); deploy it (§6.2) and restart the API; check the log has no `invalid GitHub App credentials` and that **Analisar agora** works on a Dependabot PR; delete the old key on GitHub. | None. Installation tokens already issued last at most an hour. |
 | Webhook secret | Generate one (§2); set it on the app (**General → Webhook secret**) and as `GITHUB_WEBHOOK_SECRET`, restarting the API, as close together as you can; redeliver the deliveries that failed in between (they show `401`). | None. |
 | Database password | Change it on the provider; update `DATABASE_URL`; restart the API. | A few seconds of downtime. |
+
+The API reads every variable and the key file once, at start. A secret synced into the platform by an operator (External Secrets, a CSI driver) or edited in place therefore reaches the API only on its next start: `kubectl rollout restart deploy/pr-follower-api`, a new ECS deployment, or `docker compose up -d --force-recreate api`.
 
 ### 13.5 Rotating `TOKEN_ENCRYPTION_KEY`
 
@@ -586,7 +624,7 @@ Every request may land on any replica: no sticky sessions are needed. Activity, 
 
 - Use direct Postgres connections: replicas wake each other with `LISTEN/NOTIFY` (a transaction-pooling proxy breaks it). Each replica holds two `LISTEN` connections (activity, cancels).
 - A deploy that stops a replica mid-sync reports that sync as interrupted ("Sincronize de novo"); nothing it already did is lost.
-- On upgrades, let one replica start (and migrate) before the others: migrations take no lock across processes.
+- Replicas may start together, on upgrades too: the migrator holds a Postgres advisory lock (`pg_try_advisory_lock`, [ADR-0016](adr/0016-migrations-take-an-advisory-lock.md)), so the first one migrates and the others wait for it, up to 5 minutes, then find nothing pending. Give health checks that much start-up time (`startupProbe` in `deploy/kubernetes/api.yaml`, `start_period` in Compose). The lock lives in the connection: a replica that dies mid-migration releases it. While a replica waits, `SELECT pid, granted FROM pg_locks WHERE locktype = 'advisory';` shows it.
 - Budget `DB_MAX_OPEN_CONNS` + 2 connections per replica.
 
 ### 13.11 Restricting sign-in to your organization
@@ -629,6 +667,8 @@ The API logs one `ERROR` line and exits:
 | `failed to load configuration` … `ALLOWED_GITHUB_ORGS needs the GitHub App credentials` | `ALLOWED_GITHUB_ORGS` is set but `GITHUB_APP_ID` or the key is not: membership could never be checked. | Set the app credentials (§5, §6.1), or unset `ALLOWED_GITHUB_ORGS`. |
 | `failed to load configuration` … `read GITHUB_APP_PRIVATE_KEY_FILE` | The key file is missing at that path or not readable by UID 10001. | Mount it as in §6.2. |
 | `failed to connect to database` | `DATABASE_URL` is wrong, Postgres is unreachable or refuses TLS, or a migration failed. It gives up after 4 quick attempts; the restart policy retries. | Check the URL, network and `sslmode`, and that the role owns the database (§3). |
+| `failed to connect to database` … `failed to acquire lock` | Another process held the migration lock for 5 minutes: a very long migration, or a stuck session. | Wait for the other replica to finish; otherwise find the holder with `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted;` and, once sure it is stale, `SELECT pg_terminate_backend(<pid>);` (§13.10). |
+| `failed to connect to database` … `x509: certificate signed by unknown authority` or `certificate is valid for …, not …` | `sslmode=verify-full`: the CA file at `sslrootcert` is not your provider's, or `DB_HOST` is not the name on the certificate (an IP or a CNAME instead of the endpoint). | Mount the provider's CA bundle (§3) and use the endpoint name the provider gives. |
 | `invalid TOKEN_ENCRYPTION_KEY` | Not standard base64 of exactly 32 bytes. | Fix the copy first (§2 has the check). Generating a new key signs everyone out (§13.5). |
 | `invalid GitHub App credentials` | The key is not a PEM RSA key, often because its newlines were lost. | Use the file (§6.2), or regenerate the one-line form. |
 | `failed to start the activity hub` | The activity log cannot be read. | Check the database and the migration state. |
@@ -641,6 +681,15 @@ The API starts but warns:
 | `GitHub App credentials not set: background reads use the token of a signed-in follower` | Webhook-time reads need a signed-in follower; no Dependabot analysis. |
 | `GitHub App credentials incomplete` | Only one of `GITHUB_APP_ID` and the key is set. |
 | `TOKEN_ENCRYPTION_KEY not set: using an ephemeral key` | Every restart makes stored GitHub tokens unreadable and signs users out. |
+
+### Health checks
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `/healthz` answers `ok` but the panel shows errors | The panel's `/healthz` is answered by nginx alone. | Check `/api/v1/healthz`, which reaches the API and Postgres. |
+| `/api/v1/healthz` answers `503` | The API is up but cannot reach Postgres within 2 s. | Check the database, its network path and `DATABASE_URL`. The API recovers on its own once Postgres answers. |
+| Every API call answers `502`, and Kubernetes shows the API pods `Running` but not `Ready` | Readiness uses `/api/v1/healthz`: with Postgres unreachable, every replica leaves the Service at once, and the panel has nowhere to send `/api/*`. Liveness (`/healthz`) keeps them running, so nothing restarts in a loop. | Fix the database; the pods turn ready within one probe period. |
+| A Kubernetes API pod restarts during a rollout, before it ever listened | It waited for another replica's migration longer than its `startupProbe` allows. | Raise `failureThreshold` of the `startupProbe`; the migrator itself gives up after 5 minutes. |
 
 ### Sign-in
 

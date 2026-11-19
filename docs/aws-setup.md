@@ -17,7 +17,7 @@ Constraints that come from the code, not from taste:
 | Approve/merge wait on GitHub for up to **300 s**; the stream idles between 25 s heartbeats. | The load balancer's idle timeout must be raised above its 60 s default. |
 | GitHub webhooks need a **public HTTPS endpoint** with a publicly trusted certificate, and answer within 10 s. | Public load balancer with an ACM certificate. |
 | The API calls `github.com`, `api.github.com` and `codeload.github.com` over HTTPS. | Outbound internet from wherever the API runs. |
-| Postgres 17, with `LISTEN/NOTIFY`, needs a direct (not transaction-pooled) connection. | Plain RDS for PostgreSQL, no pooler. |
+| Postgres 17 or newer, with `LISTEN/NOTIFY`, needs a direct (not transaction-pooled) connection. | Plain RDS for PostgreSQL, no pooler. |
 
 The result:
 
@@ -42,7 +42,7 @@ Browsers ─────────┴─▶ Application Load Balancer :443 (AC
 
 | Need | We choose | Why | Considered and not chosen |
 |---|---|---|---|
-| Run the containers | **ECS on Fargate** | The images already exist; Fargate removes servers to patch. A task is the right unit: it gives the `awsvpc` network (own ENI and security group) and restarts a crashed container. | **Lambda / API Gateway**: no long-lived SSE, no background workers, no `LISTEN`. **EC2**: works, but you patch and size the host. **EKS**: a control plane to run for a single replica. **App Runner**: simpler, but fewer knobs for timeouts and network egress; not evaluated here. |
+| Run the containers | **ECS on Fargate** | The images already exist; Fargate removes servers to patch. A task is the right unit: it gives the `awsvpc` network (own ENI and security group) and restarts a crashed container. | **Lambda / API Gateway**: no long-lived SSE, no background workers, no `LISTEN`. **EC2**: works, but you patch and size the host. **EKS**: a control plane to run for a single replica. If you already run EKS, use `deploy/kubernetes/` instead ([`INSTALL.md`](../INSTALL.md) path B) with `examples/ingress-alb.yaml` (AWS Load Balancer Controller) and `examples/external-secrets.yaml` (Parameter Store or Secrets Manager), and the RDS settings of §7 below. **App Runner**: simpler, but fewer knobs for timeouts and network egress; not evaluated here. |
 | How the containers are packaged | **One task, two containers** (`api` + `panel`) | Containers of a task share `localhost`, so the panel proxies to `127.0.0.1:8081`. No service discovery, no internal load balancer, and the panel can never hold a stale address of a replaced API (the nginx caveat in `production-setup.md` §13.2). Scaling out adds whole tasks (an `api` + `panel` pair each), so the pair is never scaled apart. | Two ECS services plus Cloud Map/Service Connect: more moving parts for nothing. |
 | Public entry | **Application Load Balancer** | Layer 7 HTTPS with ACM certificates, health checks and an adjustable **idle timeout** (default 60 s, range 1–4000 s). It forwards `X-Forwarded-Proto`. | **Network Load Balancer**: no TLS termination by ACM at layer 7 for this use, no HTTP health semantics. **CloudFront** in front: a second timeout to manage, nothing to cache (the app is dynamic). **API Gateway**: it is for APIs with request/response limits; wrong for streams. |
 | Database | **RDS for PostgreSQL 17**, single instance, Multi-AZ later | Managed backups with point-in-time recovery, patching, encryption. `rds.force_ssl` is **on by default from PostgreSQL 15**, so connections are encrypted with `sslmode=require`. A plain instance gives a direct connection for `LISTEN`. | **Aurora PostgreSQL**: more capability (and cost and complexity) than this app needs; reconsider at scale. **RDS Proxy**: pools connections, which would be wrong for `LISTEN`. **Postgres on EC2/Fargate**: you own backups and upgrades. |
@@ -195,7 +195,7 @@ The webhook delivers to the domain before the ALB exists, so the `ping` GitHub s
 aws rds create-db-subnet-group --db-subnet-group-name $APP \
   --db-subnet-group-description "PR Follower" --subnet-ids $(echo "$PRIVATE_SUBNETS") >/dev/null
 
-# Pick the newest PostgreSQL 17 minor offered in your region
+# Pick the newest PostgreSQL 17 minor offered in your region (18 also works: use '18.' below)
 PG_VERSION=$(aws rds describe-db-engine-versions --engine postgres \
   --query "DBEngineVersions[?starts_with(EngineVersion, '17.')].EngineVersion" --output text \
   | tr '\t' '\n' | sort -V | tail -1)
@@ -221,7 +221,12 @@ echo "$DB_HOST"
 
 What the flags buy: `--max-allocated-storage` lets storage grow by itself up to 100 GB; `--storage-encrypted` encrypts disk, snapshots and backups; `--no-publicly-accessible` plus the private subnets and `DB_SG` keep it unreachable from the internet; `--backup-retention-period 7` turns on automated backups and point-in-time recovery; `--deletion-protection` makes a mistaken delete fail. `t4g.micro` is enough for a handful of users; resize later with `modify-db-instance` (a short restart).
 
-The master user owns `pr_follower`, which is what the API needs: it creates its tables at first start ([`production-setup.md`](production-setup.md) §3). TLS is required by the instance (`rds.force_ssl` defaults to 1 for PostgreSQL 15 and later), so the URL uses `sslmode=require`.
+The master user owns `pr_follower`, which is what the API needs: it creates its tables at first start ([`production-setup.md`](production-setup.md) §3). TLS is required by the instance (`rds.force_ssl` defaults to 1 for PostgreSQL 15 and later). This guide's URL uses `sslmode=require`, which encrypts but accepts any certificate; `verify-full` below also checks that the server is your RDS instance.
+
+**Stronger TLS: `sslmode=verify-full` (recommended).** The API must find RDS's CA bundle as a file: [`global-bundle.pem`](https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) covers every commercial region; the per-region bundle (`https://truststore.pki.rds.amazonaws.com/$AWS_REGION/$AWS_REGION-bundle.pem`) trusts less. Then the URL in §8 becomes `…/pr_follower?sslmode=verify-full&sslrootcert=/rds-ca/rds-ca.pem`, with `$DB_HOST` the instance endpoint exactly as printed (the certificate names it; a CNAME of your own fails the check).
+
+- **On EKS:** put the bundle in a ConfigMap and mount it into the api container (it is public, not a secret), readable by UID 10001.
+- **On ECS (this guide):** Fargate has no ConfigMaps. Add a short-lived container to the task that downloads the bundle into a shared task volume before the API starts: in §12's task definition, `"volumes": [{"name": "rds-ca"}]`; a container `{"name": "rds-ca", "image": "public.ecr.aws/docker/library/alpine:3.22", "essential": false, "command": ["sh", "-c", "wget -qO /rds-ca/rds-ca.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem && chmod 0444 /rds-ca/rds-ca.pem"], "mountPoints": [{"sourceVolume": "rds-ca", "containerPath": "/rds-ca"}]}`; and in `api`, `"mountPoints": [{"sourceVolume": "rds-ca", "containerPath": "/rds-ca", "readOnly": true}]` plus `{"containerName": "rds-ca", "condition": "SUCCESS"}` in its `dependsOn`. This recipe was not rehearsed on Floci; the first start of the API is its test (an `x509` error in the log means the file or the host name is wrong).
 
 **Check:** `echo "$DB_HOST"` prints an endpoint like `pr-follower.xxxxxxxx.us-east-1.rds.amazonaws.com`. The database is private, so you cannot `psql` to it from your laptop; the first start of the API in §11 is the real test, and §15.5 shows how to open a `psql` session from inside the VPC.
 
@@ -286,7 +291,7 @@ aws ecr put-lifecycle-policy --repository-name $APP-api --lifecycle-policy-text 
 aws ecr put-lifecycle-policy --repository-name $APP-panel --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"keep 20","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}' >/dev/null
 ```
 
-To run a published release, copy its images into ECR instead of building: `docker buildx imagetools create -t $REGISTRY/$APP-api:$TAG ghcr.io/muriio/pr-follower-api:$TAG`, and the same for the panel ([`production-setup.md`](production-setup.md) §7.1; `$TAG` is then the version, e.g. `0.1.0`). To build your own, do it exactly as in §7.2, with `$REGISTRY` and `$TAG` from §2 (clean tree, `make check` first):
+To run a published release, copy its images into ECR instead of building. Take the digests from the release notes, verify them first ([`production-setup.md`](production-setup.md) §7.1), and copy **by digest**, so ECR receives exactly what you verified: `docker buildx imagetools create -t $REGISTRY/$APP-api:$TAG ghcr.io/muriio/pr-follower-api@$API_DIGEST`, and the same for the panel. `$TAG` is then the release name without the `v` (release `v0.1.0` → `0.1.0`); the copy keeps the digest, so the task definition can also name `$REGISTRY/$APP-api@$API_DIGEST`. To build your own, do it exactly as in §7.2, with `$REGISTRY` and `$TAG` from §2 (clean tree, `make check` first):
 
 ```bash
 aws ecr get-login-password | docker login --username AWS --password-stdin $REGISTRY
@@ -332,7 +337,7 @@ rm trust.json read-secrets.json
 
 **Why these settings:**
 
-- **Idle timeout 300 s.** The ALB closes a connection after no data moves for the idle timeout (default 60 s, valid range 1–4000 s). Approve and merge wait on GitHub for up to 300 s, so the load balancer must outwait the panel's own 300 s limit. The SSE stream sends a heartbeat every 25 s, so it never idles.
+- **Idle timeout 300 s.** The ALB closes a connection after no data moves for the idle timeout (default 60 s, valid range 1–4000 s). Approve and merge wait on GitHub for up to 300 s, so the load balancer must outwait the panel's own 300 s limit. The SSE stream sends a heartbeat every 25 s, so it never idles. The timeout is an attribute of the **whole ALB**: on an ALB shared with other apps (an EKS IngressGroup, for instance), raising it raises it for all of them, so agree it with the ALB's owner.
 - **Health check on `/healthz`** of the panel: it answers `ok` without touching the API, so a slow GitHub or database cannot take the task out of rotation.
 - **Deregistration delay 30 s** instead of the default 300 s: during a deploy the old task would otherwise linger for five minutes, mostly serving long-lived SSE connections that the browser reopens anyway.
 - **Target type `ip`**: required for Fargate's `awsvpc` networking.
@@ -367,7 +372,7 @@ The TLS policy accepts TLS 1.2 and 1.3. HTTP on port 80 only redirects.
 
 **The task definition** is the heart of it. Two containers share the task's network namespace:
 
-- `api` listens on **8081** (`PORT=8081`), because the panel image's nginx owns 8080 in the same namespace. Its container health check calls its own `/healthz`.
+- `api` listens on **8081** (`PORT=8081`), because the panel image's nginx owns 8080 in the same namespace. Its container health check calls its own `/healthz`, which says the process is up without touching Postgres: on ECS an unhealthy essential container replaces the whole task, and a database outage must not do that. Its `startPeriod` of 300 s covers a start that waits for another task's migration lock (§12 bullets below). For monitoring the database path, use `https://$DOMAIN/api/v1/healthz` (§14).
 - `panel` proxies `/api/*` to `http://127.0.0.1:8081` (`API_UPSTREAM`) and **waits for `api` to be healthy** before starting. It is the only container that receives traffic from the ALB (port 8080).
 - Secrets come from Secrets Manager (`secrets`), the rest from plain `environment`.
 - **1 vCPU / 2 GB** is a deliberate margin: the Dependabot analysis reads repository tarballs in memory (ADR-0005) with up to two analyses at once. If the task is OOM-killed (§16), raise the memory; if usage stays low you can drop to 0.5 vCPU / 1 GB.
@@ -414,7 +419,7 @@ cat > taskdef.json <<EOF
       ],
       "healthCheck": {
         "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz >/dev/null || exit 1"],
-        "interval": 10, "timeout": 3, "retries": 3, "startPeriod": 30
+        "interval": 10, "timeout": 3, "retries": 3, "startPeriod": 300
       },
       "stopTimeout": 20,
       "logConfiguration": {"logDriver": "awslogs", "options": {
@@ -453,7 +458,7 @@ aws ecs create-service --cluster $APP --service-name $APP \
   --task-definition $APP --desired-count 1 --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_CSV],securityGroups=[$APP_SG],assignPublicIp=DISABLED}" \
   --load-balancers "targetGroupArn=$TG_ARN,containerName=panel,containerPort=8080" \
-  --health-check-grace-period-seconds 60 \
+  --health-check-grace-period-seconds 360 \
   --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100,deploymentCircuitBreaker={enable=true,rollback=true}" \
   --query 'service.serviceName' --output text
 ```
@@ -461,9 +466,10 @@ aws ecs create-service --cluster $APP --service-name $APP \
 How the service is set:
 
 - `desired-count 1`: start with one task; raise it to scale out (production-setup §13.10).
-- `maximumPercent=200, minimumHealthyPercent=100`: a deploy starts the **new** task, waits for it to be healthy, then stops the old one: no downtime. For a few seconds two API processes exist; that is tolerated (migrations are forward-only and idempotent, activity is shared through Postgres, and a sync running on the old one is reported as interrupted and can be run again). If you would rather never overlap, use `maximumPercent=100, minimumHealthyPercent=0` and accept a brief outage per deploy.
+- `maximumPercent=200, minimumHealthyPercent=100`: a deploy starts the **new** task, waits for it to be healthy, then stops the old one: no downtime. For a few seconds two API processes exist; that is fine: the new one migrates under a Postgres advisory lock (ADR-0016) while the old one keeps serving, activity is shared through Postgres, and a sync running on the old one is reported as interrupted and can be run again. Several tasks starting together also wait for each other's migration instead of racing it. If you would rather never overlap, use `maximumPercent=100, minimumHealthyPercent=0` and accept a brief outage per deploy.
 - The **deployment circuit breaker with rollback** stops a deployment whose new tasks keep failing and returns to the last working task definition, which is exactly what you want after a bad migration or a mistyped secret.
-- `health-check-grace-period-seconds 60`: gives the API time to run its migrations before the ALB judges the target.
+- `health-check-grace-period-seconds 360`: the panel starts only once the API is healthy, and the API listens only after migrating, possibly after waiting up to 5 minutes for another task's migration lock. The grace period keeps the ALB from judging the target before that.
+- **Read-only root filesystem** is not set in this task definition. To add it (`"readonlyRootFilesystem": true`), the containers need the writable paths listed in [`production-setup.md`](production-setup.md) §6.4 (`/tmp` on both; `/etc/nginx/conf.d`, writable by UID 101, on the panel); this guide has not rehearsed that on Fargate.
 
 Watch it start:
 
@@ -489,7 +495,7 @@ aws route53 change-resource-record-sets --hosted-zone-id $ZONE_ID --change-batch
 
 The alias record has no TTL and no per-query charge. With another DNS provider, create a CNAME from `$DOMAIN` to `$ALB_DNS`.
 
-**Check:** `curl -s https://$DOMAIN/healthz` prints `ok` once DNS propagates.
+**Check:** `curl -s https://$DOMAIN/healthz` prints `ok` once DNS propagates (the panel), and `curl -s https://$DOMAIN/api/v1/healthz` prints `{"status":"ok"}` (the API and RDS).
 
 ## 14. Verify
 

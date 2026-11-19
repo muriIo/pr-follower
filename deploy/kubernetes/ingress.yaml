@@ -1,7 +1,9 @@
 # Public entry: TLS for your domain, everything forwarded to the panel. The annotations are for
-# ingress-nginx; with another controller (Traefik, a cloud load balancer, Gateway API) set the same
-# four things: bodies up to 5 MB (GitHub deliveries), 300 s read timeout (merges wait on GitHub),
-# no buffering (the live event stream), and a publicly trusted certificate (GitHub refuses others).
+# ingress-nginx, which upstream has retired; it still works where it is installed. With another
+# controller (Traefik, Gateway API, a cloud load balancer) set the same four things: bodies up to
+# 5 MB (GitHub deliveries), 300 s read timeout (merges wait on GitHub), no buffering (the live event
+# stream), and a publicly trusted certificate (GitHub refuses others). On AWS with the AWS Load
+# Balancer Controller, use examples/ingress-alb.yaml instead of this file.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

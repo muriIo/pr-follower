@@ -53,7 +53,18 @@ type HandlerDeps struct {
 	Follows port.FollowChecker
 	// FilesUC serves the drawer's changed-files preview.
 	FilesUC *prfiles.UseCase
+	// Database answers the API health check (GET /api/v1/healthz). Nil reports unavailable.
+	Database DatabasePinger
 }
+
+// DatabasePinger is what the API health check needs from the database (*sql.DB satisfies it).
+type DatabasePinger interface {
+	PingContext(ctx context.Context) error
+}
+
+// apiHealthTimeout bounds the database ping, so a hung database answers 503 rather than leaving
+// a load balancer or uptime check waiting.
+const apiHealthTimeout = 2 * time.Second
 
 type Handler struct {
 	deps HandlerDeps
@@ -66,7 +77,25 @@ func NewHandler(deps HandlerDeps) *Handler {
 	return &Handler{deps: deps}
 }
 
+// Healthz is the liveness check: the process is up. It never touches the database, so a database
+// outage does not get every replica restarted.
 func (h *Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// APIHealthz is the readiness and external check: the API answers and reaches its database. It is
+// public and says nothing about why it is unavailable.
+func (h *Handler) APIHealthz(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Database == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), apiHealthTimeout)
+	defer cancel()
+	if err := h.deps.Database.PingContext(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

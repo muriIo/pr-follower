@@ -237,7 +237,7 @@ Things to know about smee:
 
 Create a **separate app for this setup**: an app has a single webhook URL and a single Setup URL, so sharing one with `make dev` would make the two setups fight over them.
 
-On GitHub: **Settings → Developer settings → GitHub Apps → New GitHub App**. For an organization: **Organization → Settings → Developer settings → GitHub Apps**.
+On GitHub: `https://github.com/settings/apps/new` for your account, or `https://github.com/organizations/<org>/settings/apps/new` for an organization (in the menus: **Settings → Developer settings → GitHub Apps → New GitHub App**). Each event's checkbox in §6 appears only once its permission is set.
 
 ### 6.1 Basic information and sign-in
 
@@ -626,7 +626,7 @@ cat > "$WORK/taskdef.template.json" <<EOF
       ],
       "healthCheck": {
         "command": ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/healthz >/dev/null || exit 1"],
-        "interval": 10, "timeout": 3, "retries": 3, "startPeriod": 30
+        "interval": 10, "timeout": 3, "retries": 3, "startPeriod": 300
       },
       "stopTimeout": 20,
       "logConfiguration": {"logDriver": "awslogs", "options": {
@@ -667,17 +667,17 @@ aws ecs create-service --cluster $APP --service-name $APP \
   --task-definition $APP --desired-count 1 --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$PRIVATE_CSV],securityGroups=[$APP_SG],assignPublicIp=DISABLED}" \
   --load-balancers "targetGroupArn=$TG_ARN,containerName=panel,containerPort=8080" \
-  --health-check-grace-period-seconds 60 \
+  --health-check-grace-period-seconds 360 \
   --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100,deploymentCircuitBreaker={enable=true,rollback=true}" \
   --query 'service.serviceName' --output text
 ```
 
 How the service is set:
 
-- `desired-count 1`: one API replica only, because sync jobs and the cancel registry live in memory.
+- `desired-count 1`: one task is enough here. More tasks work as on AWS: sync jobs and cancels are shared through Postgres (ADR-0012), and tasks starting together wait for each other's migration lock (ADR-0016).
 - `maximumPercent=200, minimumHealthyPercent=100`: a deploy starts the new task before stopping the old one, so there is no downtime. On Floci too, a forced redeploy answered every request.
 - The **deployment circuit breaker with rollback** returns to the last working revision when new tasks keep failing (§20.2 tries it).
-- `health-check-grace-period-seconds 60`: on AWS it gives the API time to run its migrations. Floci stores it but does not enforce it.
+- `health-check-grace-period-seconds 360`: on AWS it gives the API time to run its migrations, including up to 5 minutes waiting for another task's migration lock (the api's `startPeriod` of 300 s does the same for its container health check). Floci stores it but does not enforce it.
 
 Watch it start. On AWS you would run `aws ecs wait services-stable`. On Floci that waiter returns too early: during a deploy, the old task still counts as running. `wait_deployed` (from `env.sh`) instead waits until every running task belongs to the current deployment and the ALB target is healthy. This guide uses it after every deploy.
 
@@ -688,7 +688,7 @@ aws logs tail /ecs/$APP --since 10m
 
 A good start prints `INFO PR Follower Go v1.27 server listening port=8081` and **no** `WARN` or `ERROR`. In particular, `GitHub App credentials not set` means `GITHUB_APP_ID` or the key is missing, and `TOKEN_ENCRYPTION_KEY not set` means the secret did not arrive.
 
-**Check:** `lcurl -s $PUBLIC_URL/healthz` prints `ok`.
+**Check:** `lcurl -s $PUBLIC_URL/healthz` prints `ok`, and `lcurl -s $PUBLIC_URL/api/v1/healthz` prints `{"status":"ok"}` (the API reaches its database).
 
 ## 16. Start the smee client
 
@@ -721,6 +721,10 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://localhost:8000/
 # The panel is up, behind the ALB
 lcurl -s $PUBLIC_URL/healthz; echo
 #   ok
+
+# The API is up and reaches its database
+lcurl -s $PUBLIC_URL/api/v1/healthz; echo
+#   {"status":"ok"}
 
 # The API is reachable through the panel, and protected
 lcurl -s -o /dev/null -w '%{http_code}\n' $PUBLIC_URL/api/v1/auth/me

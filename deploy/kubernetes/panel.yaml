@@ -1,5 +1,6 @@
 # The panel: nginx serving the SPA and proxying /api/* to the API, so browsers and GitHub talk to
-# one origin (the session cookie depends on it).
+# one origin (the session cookie depends on it). Its /healthz is answered by nginx itself; the API's
+# health is /api/v1/healthz.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,7 +22,15 @@ spec:
           ports:
             - { name: http, containerPort: 8080 }
           env:
-            - { name: API_UPSTREAM, value: "http://pr-follower-api:8080" } # scheme, host and port only
+            # Scheme, host and port only. A Kustomize namePrefix/nameSuffix renames the Service but
+            # not this string: change it too.
+            - { name: API_UPSTREAM, value: "http://pr-follower-api:8080" }
+          volumeMounts:
+            # The root filesystem is read-only. nginx keeps its pid and temp files in /tmp (large
+            # webhook bodies are buffered there), and the entrypoint renders conf.d/default.conf
+            # from the template at every start.
+            - { name: tmp, mountPath: /tmp }
+            - { name: conf, mountPath: /etc/nginx/conf.d }
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
@@ -33,7 +42,13 @@ spec:
             limits: { memory: 128Mi }
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: conf
+          emptyDir: { sizeLimit: 1Mi }
 ---
 apiVersion: v1
 kind: Service

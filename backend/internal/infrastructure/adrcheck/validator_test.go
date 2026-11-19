@@ -525,6 +525,70 @@ func (uc *UseCase) CompleteLogin(ctx context.Context) error {
 		}
 	})
 
+	adr0016Migrator := func(body string) map[string]string {
+		return map[string]string{
+			"backend/internal/infrastructure/database/postgres.go": `package database
+
+import (
+	"context"
+	"database/sql"
+	"io/fs"
+
+	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
+)
+
+func migrate(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+` + body + `
+}
+`,
+			"backend/internal/infrastructure/database/postgres_test.go": "package database\n",
+		}
+	}
+
+	t.Run("ADR-0016: migrations through a provider holding the session lock pass", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, adr0016Migrator(`	locker, _ := lock.NewPostgresSessionLocker()
+	provider, err := goose.NewProvider(goose.DialectPostgres, db, fsys, goose.WithSessionLocker(locker))
+	if err != nil {
+		return err
+	}
+	_, err = provider.Up(ctx)
+	return err`))
+		report, err := adrcheck.ValidateRepository(root)
+		if err != nil || containsViolation(report.Violations, "ADR-0016") {
+			t.Fatalf("expected locked migrations to pass, got %v: %v", err, report.Violations)
+		}
+	})
+
+	t.Run("ADR-0016: detects the global lock-free goose API", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, adr0016Migrator(`	goose.SetBaseFS(fsys)
+	return goose.UpContext(ctx, db, "migrations")`))
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0016: backend/internal/infrastructure/database/postgres.go calls goose.UpContext") {
+			t.Fatalf("expected the global goose API to be reported, got %v", report.Violations)
+		}
+	})
+
+	t.Run("ADR-0016: detects a provider without the session lock", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, adr0016Migrator(`	provider, err := goose.NewProvider(goose.DialectPostgres, db, fsys)
+	if err != nil {
+		return err
+	}
+	_, err = provider.Up(ctx)
+	_ = lock.NewPostgresSessionLocker
+	return err`))
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0016: backend/internal/infrastructure/database/postgres.go creates a goose provider without goose.WithSessionLocker") {
+			t.Fatalf("expected the missing lock to be reported, got %v", report.Violations)
+		}
+	})
+
 	t.Run("ADR-0014: a compliant static landing page passes", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)
