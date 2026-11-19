@@ -186,6 +186,7 @@ func main() {
 		InstallationUC: installationUC,
 		Follows:        repoRepo,
 		FilesUC:        filesUC,
+		Database:       db,
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)

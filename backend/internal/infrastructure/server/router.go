@@ -19,7 +19,9 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 	r.Get("/healthz", h.Healthz)
 
 	r.Route("/api/v1", func(api chi.Router) {
-		// Public: GitHub sign-in flow, logout, and HMAC-verified GitHub webhooks (ADR-0010).
+		// Public: the API health check (the panel forwards /api/*, so it is reachable from outside),
+		// the GitHub sign-in flow, logout, and HMAC-verified GitHub webhooks (ADR-0010).
+		api.Get("/healthz", h.APIHealthz)
 		api.Get("/auth/github/login", h.AuthGitHubLogin)
 		api.Get("/auth/github/callback", h.AuthGitHubCallback)
 		api.Post("/auth/logout", h.AuthLogout)
