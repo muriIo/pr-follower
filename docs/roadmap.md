@@ -142,6 +142,7 @@ No P1 item is open. In order of value:
 - [x] The panel's nginx accepts webhook deliveries up to 5 MB, like the API: its 1 MB default refused a large `push` delivery with 413 before it reached the API. The production runbook was rechecked against the code and rewritten step by step.
 - [ ] **P2** Bound concurrent GitHub requests per token: nothing caps them today (rate-limit headers are honoured since #29, see [PR state](#3-pr-state-from-github)).
 - [x] Several API replicas (ADR-0012): each user's sync is a `sync_jobs` row (an atomic claim keeps one per user, the running replica heartbeats every second and picks up a cancel asked anywhere, a silent one reads as `sync_interrupted` and can run again, a run that lost its claim overwrites nothing), and an operation cancel that lands on another replica reaches the one serving it through `NOTIFY`; a user can only cancel their own operations. The `adrcheck` gate asks every locked in-memory struct for a `replica-local:` note.
+- [x] Feedback from the first company deployment (2026-11-19): migrations hold a Postgres advisory lock so replicas can start together ([ADR-0016](adr/0016-migrations-take-an-advisory-lock.md), proved with three API containers on an empty database); `GET /api/v1/healthz` reaches the API and its database through the panel (readiness, uptime checks), `/healthz` stays the liveness check; both images run with a read-only root filesystem (tested on the published panel image with a 2 MB webhook body); release notes list the image digests and the strict `gh attestation verify` (`--repo`, `--signer-workflow`, `--source-ref`); docs for the `v`-less image tag, Postgres 17 or newer, `sslmode=verify-full` (RDS bundle), the ALB Ingress and External Secrets examples (`deploy/kubernetes/examples/`), config vs secret variables, restart after a secret rotation, and the GitHub App creation link and expected first `ping` failure.
 - [x] Continuous integration: `.github/workflows/ci.yml` runs `make check` on PRs and `main` (#40; see [Business & distribution](#12-business--distribution)).
 - [ ] **P2** Gates from the plan not in the Makefile: `golangci-lint run`, frontend coverage.
 - [x] Cloud-agnostic install guide ([`INSTALL.md`](../INSTALL.md)): the GitHub App checklist, the configuration, and three paths with ready files: one machine with Docker Compose and Caddy (`deploy/compose/`, run end to end locally on 2026-11-16: healthy services, HTTPS, migrations, 401 for a forged webhook), plain Kubernetes manifests (`deploy/kubernetes/`, validated against the schemas, not applied to a live cluster yet), and the requirements for any managed container platform. The build image is pinned to Go 1.27.4, and the SPA's title is "PR Follower" (it was "Frontend").
@@ -150,7 +151,7 @@ No P1 item is open. In order of value:
 
 ## 11. Engineering guidelines
 
-- [x] ADR-0001 to ADR-0013, each with an executable gate (`make adr-check`).
+- [x] ADR-0001 to ADR-0016, each with an executable gate (`make adr-check`).
 - [x] `AGENTS.md` / `CLAUDE.md` for agents; implementation plan; production runbook; this roadmap.
 
 ## 12. Business & distribution
@@ -167,4 +168,4 @@ Decisions and open questions: [`business-and-distribution.md`](business-and-dist
 - [x] Release workflow (`.github/workflows/release.yml`, 2026-11-17): a `vX.Y.Z` tag on a `main` commit with green CI publishes both images to GHCR for amd64 and arm64, with an SBOM, build provenance and a GitHub artifact attestation, and creates the GitHub Release from the tag's notes ([distribution §2](business-and-distribution.md#2-distribution)).
 - [x] First release: [`v0.1.0`](https://github.com/muriIo/pr-follower/releases/tag/v0.1.0) (2026-11-18), after a `v0.1.0-rc.1` dry run that also ran the images end to end in the Compose bundle (sign-in, app install, webhooks through smee).
 - [x] Landing page (2026-11-18): a static page in `landing/` (no build, no JavaScript, fonts and WebP screenshots self-hosted), published to GitHub Pages by `.github/workflows/pages.yml` when a change to it reaches `main` ([ADR-0014](adr/0014-static-landing-page-on-github-pages.md)). Needs Settings → Pages → Source: GitHub Actions once.
-- [ ] **P2** First deployment at the first company: its own GitHub App, database and pipeline, deploying tagged images from GHCR.
+- [x] First deployment at the first company (2026-11-18): its own GitHub App, database and pipeline, deploying v0.1.0 from GHCR. Its feedback is addressed under [Backend platform & operations](#10-backend-platform--operations) (2026-11-19).
