@@ -22,6 +22,7 @@ This directory contains the **Architecture Decision Records (ADRs)** for **PR Fo
 | [ADR-0014](./0014-static-landing-page-on-github-pages.md) | Static Landing Page on GitHub Pages | Accepted | `adrcheck` scan of `landing/` for build files, scripts and third-party requests |
 | [ADR-0015](./0015-org-allowlisted-sign-in.md) | Org-Allowlisted Sign-In and Membership Recheck | Accepted | `adrcheck` membership check before the session, named `auth_error` codes in both locales, documented `ALLOWED_GITHUB_ORGS` |
 | [ADR-0016](./0016-migrations-take-an-advisory-lock.md) | Migrations Take a Postgres Advisory Lock | Accepted | `adrcheck` scan for goose's lock-free package-level API and providers without `WithSessionLocker` |
+| [ADR-0017](./0017-notifications-are-created-by-the-api.md) | Notifications Are Created by the API; Delivery Channels Are Adapters | Accepted | `adrcheck` scan for notifications created outside the notifier and channel adapters without a `*Redeliver*` test |
 
 ## Required ADR Sections
 

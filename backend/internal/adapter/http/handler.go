@@ -20,6 +20,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/action"
 	"github.com/murilo/pr-follower/backend/internal/usecase/auth"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/notify"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
@@ -55,6 +56,8 @@ type HandlerDeps struct {
 	FilesUC *prfiles.UseCase
 	// Database answers the API health check (GET /api/v1/healthz). Nil reports unavailable.
 	Database DatabasePinger
+	// Notifications serves the notification center (ADR-0017). Nil answers 503.
+	Notifications *notify.Center
 }
 
 // DatabasePinger is what the API health check needs from the database (*sql.DB satisfies it).
@@ -99,11 +102,12 @@ func (h *Handler) APIHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ServeSSE streams live activity, scoped to the repositories the signed-in user follows:
+// ServeSSE streams live activity, scoped to the repositories the signed-in user follows, and that
+// user's own notifications (ADR-0017):
 // with open GitHub sign-in, no user may see another account's repository or PR activity.
 func (h *Handler) ServeSSE(w http.ResponseWriter, r *http.Request) {
 	userID := currentUserID(r)
-	h.deps.SSEHub.Stream(w, r, func(ctx context.Context, ev entity.ActivityEvent) bool {
+	h.deps.SSEHub.StreamFor(w, r, userID, func(ctx context.Context, ev entity.ActivityEvent) bool {
 		if h.deps.Follows == nil || ev.RepositoryID == 0 {
 			return false
 		}

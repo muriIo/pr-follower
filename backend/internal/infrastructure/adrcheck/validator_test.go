@@ -589,6 +589,47 @@ func migrate(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 	})
 
+	t.Run("ADR-0017: notifications created by the notifier, channels with a redelivery test pass", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, map[string]string{
+			"backend/internal/usecase/notify/notify.go":                  "package notify\n\nfunc run(s store) { _, _ = s.CreateNotifications(nil) }\n",
+			"backend/internal/usecase/notify/notify_test.go":             "package notify\n",
+			"backend/internal/adapter/notifychannel/panel/panel.go":      "package panel\n",
+			"backend/internal/adapter/notifychannel/panel/panel_test.go": "package panel\n\nimport \"testing\"\n\nfunc TestDeliver_RedeliverShowsItOnce(t *testing.T) {}\n",
+		})
+		report, err := adrcheck.ValidateRepository(root)
+		if err != nil || containsViolation(report.Violations, "ADR-0017") {
+			t.Fatalf("expected a compliant notifier to pass, got %v: %v", err, report.Violations)
+		}
+	})
+
+	t.Run("ADR-0017: detects a notification created outside the notifier", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, map[string]string{
+			"backend/internal/usecase/webhook/review.go":      "package webhook\n\nfunc ingest(s store) { _, _ = s.CreateNotifications(nil) }\n",
+			"backend/internal/usecase/webhook/review_test.go": "package webhook\n",
+		})
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0017: backend/internal/usecase/webhook/review.go creates notifications") {
+			t.Fatalf("expected the stray notification to be reported, got %v", report.Violations)
+		}
+	})
+
+	t.Run("ADR-0017: detects a delivery channel without a redelivery test", func(t *testing.T) {
+		t.Parallel()
+		root := createValidSyntheticRepo(t)
+		writeFiles(t, root, map[string]string{
+			"backend/internal/adapter/notifychannel/webpush/webpush.go":      "package webpush\n",
+			"backend/internal/adapter/notifychannel/webpush/webpush_test.go": "package webpush\n\nimport \"testing\"\n\nfunc TestDeliver(t *testing.T) {}\n",
+		})
+		report, _ := adrcheck.ValidateRepository(root)
+		if !containsViolation(report.Violations, "ADR-0017: delivery channel backend/internal/adapter/notifychannel/webpush has no *Redeliver* test") {
+			t.Fatalf("expected the missing redelivery test to be reported, got %v", report.Violations)
+		}
+	})
+
 	t.Run("ADR-0014: a compliant static landing page passes", func(t *testing.T) {
 		t.Parallel()
 		root := createValidSyntheticRepo(t)

@@ -77,6 +77,17 @@ func (q *Queries) ClaimSyncJob(ctx context.Context, arg ClaimSyncJobParams) (str
 	return run_id, err
 }
 
+const countUnreadNotifications = `-- name: CountUnreadNotifications :one
+SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL
+`
+
+func (q *Queries) CountUnreadNotifications(ctx context.Context, userID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countUnreadNotifications, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUserRepositoryFollow = `-- name: CountUserRepositoryFollow :one
 SELECT COUNT(*) FROM user_repo_follows
 WHERE user_id = $1 AND repository_id = $2
@@ -137,6 +148,18 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt int64) (i
 	return result.RowsAffected()
 }
 
+const deleteNotificationsBefore = `-- name: DeleteNotificationsBefore :execrows
+DELETE FROM notifications WHERE created_at < $1
+`
+
+func (q *Queries) DeleteNotificationsBefore(ctx context.Context, createdAt time.Time) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteNotificationsBefore, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteSession = `-- name: DeleteSession :exec
 DELETE FROM sessions
 WHERE token_hash = $1
@@ -145,6 +168,39 @@ WHERE token_hash = $1
 func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
 	_, err := q.db.ExecContext(ctx, deleteSession, tokenHash)
 	return err
+}
+
+const deleteUnfollowedNotificationBaselines = `-- name: DeleteUnfollowedNotificationBaselines :execrows
+DELETE FROM notification_baselines
+WHERE NOT EXISTS (
+    SELECT 1 FROM user_repo_follows f
+    WHERE f.user_id = notification_baselines.user_id AND f.repository_id = notification_baselines.repository_id
+)
+`
+
+func (q *Queries) DeleteUnfollowedNotificationBaselines(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUnfollowedNotificationBaselines)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteUnfollowedNotificationWatches = `-- name: DeleteUnfollowedNotificationWatches :execrows
+DELETE FROM notification_watches
+WHERE NOT EXISTS (
+    SELECT 1 FROM user_repo_follows f
+    WHERE f.user_id = notification_watches.user_id AND f.repository_id = notification_watches.repository_id
+)
+`
+
+// An unfollow forgets what the notifier saw, so following again starts silently from scratch.
+func (q *Queries) DeleteUnfollowedNotificationWatches(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUnfollowedNotificationWatches)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteUserFollows = `-- name: DeleteUserFollows :execrows
@@ -392,6 +448,70 @@ func (q *Queries) GetLatestActivitySeq(ctx context.Context) (int64, error) {
 	var seq int64
 	err := row.Scan(&seq)
 	return seq, err
+}
+
+const getLatestNotificationID = `-- name: GetLatestNotificationID :one
+SELECT CAST(COALESCE(MAX(id), 0) AS BIGINT) AS id FROM notifications
+`
+
+func (q *Queries) GetLatestNotificationID(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLatestNotificationID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getLogPosition = `-- name: GetLogPosition :one
+SELECT seq FROM log_positions WHERE name = $1
+`
+
+func (q *Queries) GetLogPosition(ctx context.Context, name string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getLogPosition, name)
+	var seq int64
+	err := row.Scan(&seq)
+	return seq, err
+}
+
+const getNotificationSettings = `-- name: GetNotificationSettings :one
+SELECT user_id, paused, popups_off, updated_at FROM notification_settings WHERE user_id = $1
+`
+
+func (q *Queries) GetNotificationSettings(ctx context.Context, userID int64) (NotificationSetting, error) {
+	row := q.db.QueryRowContext(ctx, getNotificationSettings, userID)
+	var i NotificationSetting
+	err := row.Scan(
+		&i.UserID,
+		&i.Paused,
+		&i.PopupsOff,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNotificationWatch = `-- name: GetNotificationWatch :one
+SELECT user_id, pull_request_id, repository_id, turn, head_sha, approved_sha, risk
+FROM notification_watches
+WHERE user_id = $1 AND pull_request_id = $2
+`
+
+type GetNotificationWatchParams struct {
+	UserID        int64 `json:"user_id"`
+	PullRequestID int64 `json:"pull_request_id"`
+}
+
+func (q *Queries) GetNotificationWatch(ctx context.Context, arg GetNotificationWatchParams) (NotificationWatch, error) {
+	row := q.db.QueryRowContext(ctx, getNotificationWatch, arg.UserID, arg.PullRequestID)
+	var i NotificationWatch
+	err := row.Scan(
+		&i.UserID,
+		&i.PullRequestID,
+		&i.RepositoryID,
+		&i.Turn,
+		&i.HeadSha,
+		&i.ApprovedSha,
+		&i.Risk,
+	)
+	return i, err
 }
 
 const getPullRequestByID = `-- name: GetPullRequestByID :one
@@ -675,6 +795,22 @@ func (q *Queries) GetUserPRState(ctx context.Context, arg GetUserPRStateParams) 
 	return i, err
 }
 
+const hasNotificationBaseline = `-- name: HasNotificationBaseline :one
+SELECT COUNT(*) FROM notification_baselines WHERE user_id = $1 AND repository_id = $2
+`
+
+type HasNotificationBaselineParams struct {
+	UserID       int64 `json:"user_id"`
+	RepositoryID int64 `json:"repository_id"`
+}
+
+func (q *Queries) HasNotificationBaseline(ctx context.Context, arg HasNotificationBaselineParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, hasNotificationBaseline, arg.UserID, arg.RepositoryID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const heartbeatSyncJob = `-- name: HeartbeatSyncJob :one
 UPDATE sync_jobs
 SET progress_total = $1,
@@ -742,6 +878,70 @@ func (q *Queries) InsertActivityEvent(ctx context.Context, arg InsertActivityEve
 	var seq int64
 	err := row.Scan(&seq)
 	return seq, err
+}
+
+const insertNotification = `-- name: InsertNotification :one
+INSERT INTO notifications (
+    user_id, dedup_key, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+    pr_title, commit_sha, actor_login, details_json, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (user_id, dedup_key) DO NOTHING
+RETURNING id
+`
+
+type InsertNotificationParams struct {
+	UserID         int64     `json:"user_id"`
+	DedupKey       string    `json:"dedup_key"`
+	Kind           string    `json:"kind"`
+	Reason         string    `json:"reason"`
+	RepositoryID   int64     `json:"repository_id"`
+	RepositoryName string    `json:"repository_name"`
+	PullRequestID  int64     `json:"pull_request_id"`
+	PrNumber       int64     `json:"pr_number"`
+	PrTitle        string    `json:"pr_title"`
+	CommitSha      string    `json:"commit_sha"`
+	ActorLogin     string    `json:"actor_login"`
+	DetailsJson    string    `json:"details_json"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// idempotent: a second reading of the same activity hits (user_id, dedup_key) and returns no row (ADR-0011, ADR-0017).
+func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertNotification,
+		arg.UserID,
+		arg.DedupKey,
+		arg.Kind,
+		arg.Reason,
+		arg.RepositoryID,
+		arg.RepositoryName,
+		arg.PullRequestID,
+		arg.PrNumber,
+		arg.PrTitle,
+		arg.CommitSha,
+		arg.ActorLogin,
+		arg.DetailsJson,
+		arg.CreatedAt,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertNotificationBaseline = `-- name: InsertNotificationBaseline :exec
+INSERT INTO notification_baselines (user_id, repository_id, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (user_id, repository_id) DO NOTHING
+`
+
+type InsertNotificationBaselineParams struct {
+	UserID       int64     `json:"user_id"`
+	RepositoryID int64     `json:"repository_id"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func (q *Queries) InsertNotificationBaseline(ctx context.Context, arg InsertNotificationBaselineParams) error {
+	_, err := q.db.ExecContext(ctx, insertNotificationBaseline, arg.UserID, arg.RepositoryID, arg.CreatedAt)
+	return err
 }
 
 const listActivityEventsSince = `-- name: ListActivityEventsSince :many
@@ -929,6 +1129,184 @@ func (q *Queries) ListFollowedRepositoriesByUser(ctx context.Context, userID int
 			&i.UpdatedAt,
 			&i.Access,
 			&i.CodeownersStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFollowsWithoutNotificationBaseline = `-- name: ListFollowsWithoutNotificationBaseline :many
+SELECT f.user_id, f.repository_id
+FROM user_repo_follows f
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_baselines b
+    WHERE b.user_id = f.user_id AND b.repository_id = f.repository_id
+)
+ORDER BY f.user_id, f.repository_id
+LIMIT $1
+`
+
+type ListFollowsWithoutNotificationBaselineRow struct {
+	UserID       int64 `json:"user_id"`
+	RepositoryID int64 `json:"repository_id"`
+}
+
+func (q *Queries) ListFollowsWithoutNotificationBaseline(ctx context.Context, limit int32) ([]ListFollowsWithoutNotificationBaselineRow, error) {
+	rows, err := q.db.QueryContext(ctx, listFollowsWithoutNotificationBaseline, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFollowsWithoutNotificationBaselineRow{}
+	for rows.Next() {
+		var i ListFollowsWithoutNotificationBaselineRow
+		if err := rows.Scan(&i.UserID, &i.RepositoryID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsBefore = `-- name: ListNotificationsBefore :many
+SELECT id, user_id, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+       pr_title, commit_sha, actor_login, details_json, created_at, read_at
+FROM notifications
+WHERE user_id = $1 AND id < $2
+ORDER BY id DESC
+LIMIT $3
+`
+
+type ListNotificationsBeforeParams struct {
+	UserID int64 `json:"user_id"`
+	ID     int64 `json:"id"`
+	Limit  int32 `json:"limit"`
+}
+
+type ListNotificationsBeforeRow struct {
+	ID             int64        `json:"id"`
+	UserID         int64        `json:"user_id"`
+	Kind           string       `json:"kind"`
+	Reason         string       `json:"reason"`
+	RepositoryID   int64        `json:"repository_id"`
+	RepositoryName string       `json:"repository_name"`
+	PullRequestID  int64        `json:"pull_request_id"`
+	PrNumber       int64        `json:"pr_number"`
+	PrTitle        string       `json:"pr_title"`
+	CommitSha      string       `json:"commit_sha"`
+	ActorLogin     string       `json:"actor_login"`
+	DetailsJson    string       `json:"details_json"`
+	CreatedAt      time.Time    `json:"created_at"`
+	ReadAt         sql.NullTime `json:"read_at"`
+}
+
+func (q *Queries) ListNotificationsBefore(ctx context.Context, arg ListNotificationsBeforeParams) ([]ListNotificationsBeforeRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNotificationsBefore, arg.UserID, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationsBeforeRow{}
+	for rows.Next() {
+		var i ListNotificationsBeforeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Kind,
+			&i.Reason,
+			&i.RepositoryID,
+			&i.RepositoryName,
+			&i.PullRequestID,
+			&i.PrNumber,
+			&i.PrTitle,
+			&i.CommitSha,
+			&i.ActorLogin,
+			&i.DetailsJson,
+			&i.CreatedAt,
+			&i.ReadAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsSince = `-- name: ListNotificationsSince :many
+SELECT id, user_id, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+       pr_title, commit_sha, actor_login, details_json, created_at, read_at
+FROM notifications
+WHERE id > $1
+ORDER BY id ASC
+LIMIT $2
+`
+
+type ListNotificationsSinceParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListNotificationsSinceRow struct {
+	ID             int64        `json:"id"`
+	UserID         int64        `json:"user_id"`
+	Kind           string       `json:"kind"`
+	Reason         string       `json:"reason"`
+	RepositoryID   int64        `json:"repository_id"`
+	RepositoryName string       `json:"repository_name"`
+	PullRequestID  int64        `json:"pull_request_id"`
+	PrNumber       int64        `json:"pr_number"`
+	PrTitle        string       `json:"pr_title"`
+	CommitSha      string       `json:"commit_sha"`
+	ActorLogin     string       `json:"actor_login"`
+	DetailsJson    string       `json:"details_json"`
+	CreatedAt      time.Time    `json:"created_at"`
+	ReadAt         sql.NullTime `json:"read_at"`
+}
+
+func (q *Queries) ListNotificationsSince(ctx context.Context, arg ListNotificationsSinceParams) ([]ListNotificationsSinceRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNotificationsSince, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotificationsSinceRow{}
+	for rows.Next() {
+		var i ListNotificationsSinceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Kind,
+			&i.Reason,
+			&i.RepositoryID,
+			&i.RepositoryName,
+			&i.PullRequestID,
+			&i.PrNumber,
+			&i.PrTitle,
+			&i.CommitSha,
+			&i.ActorLogin,
+			&i.DetailsJson,
+			&i.CreatedAt,
+			&i.ReadAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1156,6 +1534,41 @@ func (q *Queries) ListUsersWithAccess(ctx context.Context) ([]ListUsersWithAcces
 	return items, nil
 }
 
+const markAllNotificationsRead = `-- name: MarkAllNotificationsRead :execrows
+UPDATE notifications SET read_at = $2 WHERE user_id = $1 AND read_at IS NULL
+`
+
+type MarkAllNotificationsReadParams struct {
+	UserID int64        `json:"user_id"`
+	ReadAt sql.NullTime `json:"read_at"`
+}
+
+func (q *Queries) MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markAllNotificationsRead, arg.UserID, arg.ReadAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const markNotificationRead = `-- name: MarkNotificationRead :execrows
+UPDATE notifications SET read_at = $3 WHERE user_id = $1 AND id = $2 AND read_at IS NULL
+`
+
+type MarkNotificationReadParams struct {
+	UserID int64        `json:"user_id"`
+	ID     int64        `json:"id"`
+	ReadAt sql.NullTime `json:"read_at"`
+}
+
+func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, markNotificationRead, arg.UserID, arg.ID, arg.ReadAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const requestSyncJobCancel = `-- name: RequestSyncJobCancel :execrows
 UPDATE sync_jobs
 SET cancel_requested = TRUE
@@ -1173,6 +1586,21 @@ func (q *Queries) RequestSyncJobCancel(ctx context.Context, arg RequestSyncJobCa
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const saveLogPosition = `-- name: SaveLogPosition :exec
+INSERT INTO log_positions (name, seq) VALUES ($1, $2)
+ON CONFLICT (name) DO UPDATE SET seq = EXCLUDED.seq
+`
+
+type SaveLogPositionParams struct {
+	Name string `json:"name"`
+	Seq  int64  `json:"seq"`
+}
+
+func (q *Queries) SaveLogPosition(ctx context.Context, arg SaveLogPositionParams) error {
+	_, err := q.db.ExecContext(ctx, saveLogPosition, arg.Name, arg.Seq)
+	return err
 }
 
 const unfollowRepository = `-- name: UnfollowRepository :exec
@@ -1388,6 +1816,66 @@ func (q *Queries) UpsertDependabotAnalysis(ctx context.Context, arg UpsertDepend
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertNotificationSettings = `-- name: UpsertNotificationSettings :exec
+INSERT INTO notification_settings (user_id, paused, popups_off, updated_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id) DO UPDATE SET
+    paused = EXCLUDED.paused,
+    popups_off = EXCLUDED.popups_off,
+    updated_at = EXCLUDED.updated_at
+`
+
+type UpsertNotificationSettingsParams struct {
+	UserID    int64     `json:"user_id"`
+	Paused    bool      `json:"paused"`
+	PopupsOff string    `json:"popups_off"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UpsertNotificationSettings(ctx context.Context, arg UpsertNotificationSettingsParams) error {
+	_, err := q.db.ExecContext(ctx, upsertNotificationSettings,
+		arg.UserID,
+		arg.Paused,
+		arg.PopupsOff,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertNotificationWatch = `-- name: UpsertNotificationWatch :exec
+INSERT INTO notification_watches (user_id, pull_request_id, repository_id, turn, head_sha, approved_sha, risk)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id, pull_request_id) DO UPDATE SET
+    repository_id = EXCLUDED.repository_id,
+    turn = EXCLUDED.turn,
+    head_sha = EXCLUDED.head_sha,
+    approved_sha = EXCLUDED.approved_sha,
+    risk = EXCLUDED.risk
+`
+
+type UpsertNotificationWatchParams struct {
+	UserID        int64  `json:"user_id"`
+	PullRequestID int64  `json:"pull_request_id"`
+	RepositoryID  int64  `json:"repository_id"`
+	Turn          string `json:"turn"`
+	HeadSha       string `json:"head_sha"`
+	ApprovedSha   string `json:"approved_sha"`
+	Risk          string `json:"risk"`
+}
+
+func (q *Queries) UpsertNotificationWatch(ctx context.Context, arg UpsertNotificationWatchParams) error {
+	_, err := q.db.ExecContext(ctx, upsertNotificationWatch,
+		arg.UserID,
+		arg.PullRequestID,
+		arg.RepositoryID,
+		arg.Turn,
+		arg.HeadSha,
+		arg.ApprovedSha,
+		arg.Risk,
+	)
+	return err
 }
 
 const upsertPullRequest = `-- name: UpsertPullRequest :one

@@ -18,6 +18,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/adapter/github"
 	httpadapter "github.com/murilo/pr-follower/backend/internal/adapter/http"
 	"github.com/murilo/pr-follower/backend/internal/adapter/http/operation"
+	"github.com/murilo/pr-follower/backend/internal/adapter/notifychannel/panel"
 	"github.com/murilo/pr-follower/backend/internal/adapter/persistence"
 	"github.com/murilo/pr-follower/backend/internal/adapter/sse"
 	"github.com/murilo/pr-follower/backend/internal/domain/port"
@@ -30,6 +31,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/codeowners"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/notify"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
@@ -164,6 +166,7 @@ func main() {
 	triageUC := triage.NewUseCase(userRepo, repoRepo, prRepo, sseHub, prRepo, filesSyncer, prRepo, triageOpts...)
 	webhookUC := webhook.NewIngestUseCase(repoRepo, prRepo, prRepo, sseHub, filesSyncer, ingestOpts...)
 	reviewUC := webhook.NewReviewIngestUseCase(repoRepo, prRepo, prRepo, sseHub)
+	notifications := startNotifications(ctx, cfg, db, sseHub, userRepo, repoRepo, prRepo)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
@@ -187,6 +190,7 @@ func main() {
 		Follows:        repoRepo,
 		FilesUC:        filesUC,
 		Database:       db,
+		Notifications:  notifications,
 	})
 
 	router := server.NewChiRouter(handler, cfg.AllowedOrigin)
@@ -284,4 +288,59 @@ func newActivityHub(ctx context.Context, cfg *config.Config, db *sql.DB) *sse.Hu
 		os.Exit(1)
 	}
 	return hub
+}
+
+// notificationPruneInterval is how often notifications older than notify.Retention are deleted.
+const notificationPruneInterval = time.Hour
+
+// startNotifications runs the notifier (on one replica at a time, behind an advisory lock) and this
+// replica's delivery to the open panel, both woken with the activity hub (ADR-0017). It returns the
+// notification center the API serves.
+func startNotifications(ctx context.Context, cfg *config.Config, db *sql.DB, hub *sse.Hub,
+	users *persistence.UserRepository, repos *persistence.RepositoryRepository, prs *persistence.PullRequestRepository,
+) *notify.Center {
+	store := persistence.NewNotificationStore(db)
+	var lockDB *sql.DB
+	if !strings.HasPrefix(cfg.DatabaseURL, "sqlite://") {
+		lockDB = db
+	}
+	runner := persistence.NewSingleRunner(lockDB)
+	notifier := notify.NewNotifier(notify.NotifierDeps{
+		Log: persistence.NewActivityLog(db), Memory: store, Store: store,
+		Repos: repos, Followers: repos, PRs: prs, Users: users, Files: prs, Reviews: prs,
+		Wake: hub.Wake,
+	})
+	toPanel := notify.NewDispatcher(store, panel.New(hub))
+	if err := toPanel.Start(ctx); err != nil {
+		slog.Error("failed to start the notification delivery", "err", err)
+		os.Exit(1)
+	}
+	center := notify.NewCenter(store, []notify.ChannelInfo{{Name: "panel"}})
+
+	wakes := hub.Wakes(ctx)
+	go func() {
+		prune := time.NewTicker(notificationPruneInterval)
+		defer prune.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-wakes:
+				if !ok {
+					return
+				}
+				if _, err := runner.TryRun(ctx, notify.NotifierLockID, notifier.Pass); err != nil && ctx.Err() == nil {
+					slog.Warn("creating notifications failed", "err", err)
+				}
+				if err := toPanel.Pass(ctx); err != nil && ctx.Err() == nil {
+					slog.Warn("delivering notifications to the panel failed", "err", err)
+				}
+			case <-prune.C:
+				if err := center.Prune(ctx); err != nil && ctx.Err() == nil {
+					slog.Warn("pruning old notifications failed", "err", err)
+				}
+			}
+		}
+	}()
+	return center
 }
