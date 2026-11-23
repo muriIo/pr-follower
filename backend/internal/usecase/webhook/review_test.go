@@ -105,6 +105,44 @@ func TestIngestReviewEvent_RedeliverChangesNothingAndPublishesNothing(t *testing
 	}
 }
 
+// A review can lift or add a branch-protection block: the stored merge state is dropped to
+// unknown so the next workspace load asks GitHub again. A redelivery changes nothing, so it
+// leaves alone the state that load has since read.
+func TestIngestReviewEvent_ReviewChangeMakesTheMergeStateUnknown(t *testing.T) {
+	t.Parallel()
+	reviews, pub := newFakeReviews(), &fakePub{}
+	prs := &fakePRRepo{upserted: &entity.PullRequest{
+		ID: 777, RepositoryID: 10, Number: 88, State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateBlocked, HeadSHA: "sha-88",
+	}}
+	repos := &fakeRepoRepo{repo: &entity.Repository{ID: 10, GitHubRepoID: 9001, FullName: "arvore/hive-web"}}
+	uc := webhook.NewReviewIngestUseCase(repos, prs, reviews, pub)
+	ctx := context.Background()
+
+	if err := uc.IngestReviewEvent(ctx, reviewPayload(5, "approved")); err != nil {
+		t.Fatal(err)
+	}
+	if got := prs.upserted.MergeableState; got != entity.MergeableStateUnknown {
+		t.Fatalf("merge state after an approval = %q, want UNKNOWN", got)
+	}
+
+	prs.upserted.MergeableState = entity.MergeableStateClean // what the next load read from GitHub
+	if err := uc.IngestReviewEvent(ctx, reviewPayload(5, "approved")); err != nil {
+		t.Fatal(err)
+	}
+	if got := prs.upserted.MergeableState; got != entity.MergeableStateClean {
+		t.Fatalf("a redelivery must leave the merge state alone, got %q", got)
+	}
+
+	prs.upserted.MergeableState = entity.MergeableStateConflicting
+	if err := uc.IngestReviewEvent(ctx, reviewPayload(6, "changes_requested")); err != nil {
+		t.Fatal(err)
+	}
+	if got := prs.upserted.MergeableState; got != entity.MergeableStateConflicting {
+		t.Fatalf("a conflict does not depend on reviews and must stay, got %q", got)
+	}
+}
+
 func TestIngestReviewEvent_IgnoresWhatItCannotUse(t *testing.T) {
 	t.Parallel()
 	uc, reviews, pub := newReviewIngest(t)

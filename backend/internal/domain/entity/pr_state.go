@@ -28,6 +28,19 @@ func MergeableStateFromGitHub(state string) MergeableState {
 	}
 }
 
+// AfterReviewOrCheckChange is the merge state to keep once a review was added, changed or
+// dismissed, or a commit's checks changed. Branch protection counts both, so a blocked, clean or
+// unstable state may no longer hold: it becomes unknown until GitHub is asked again (the workspace
+// load does). Conflicts, an out-of-date branch and a draft depend on neither and stay.
+func (s MergeableState) AfterReviewOrCheckChange() MergeableState {
+	switch s {
+	case MergeableStateConflicting, MergeableStateBehind, MergeableStateDraft:
+		return s
+	default:
+		return MergeableStateUnknown
+	}
+}
+
 // CheckRun is one CI check GitHub reported for a commit (check_run webhook).
 type CheckRun struct {
 	ID           int64  `json:"id"`

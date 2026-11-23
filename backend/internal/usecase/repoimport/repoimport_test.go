@@ -38,9 +38,13 @@ type fakeUserAPI struct {
 	statusesErr   error
 	pulls         map[string]entity.RemotePullRequestState // "owner/name#number" -> live state
 	listPRsErr    map[string]error                         // "owner/name" -> error listing its open PRs
+	pullErr       error                                    // every live PR read fails with it
 }
 
 func (f *fakeUserAPI) GetPullRequest(_ context.Context, _ string, owner, name string, number int) (entity.RemotePullRequestState, error) {
+	if f.pullErr != nil {
+		return entity.RemotePullRequestState{}, f.pullErr
+	}
 	state, ok := f.pulls[fmt.Sprintf("%s/%s#%d", owner, name, number)]
 	if !ok {
 		return entity.RemotePullRequestState{}, entity.ErrNotFound

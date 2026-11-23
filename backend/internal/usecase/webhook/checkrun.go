@@ -78,6 +78,8 @@ func (uc *IngestUseCase) syncCI(ctx context.Context, repo *entity.Repository, sh
 			continue
 		}
 		pr.CIStatus = ci
+		// Required checks are part of branch protection: GitHub recomputes the merge state.
+		pr.MergeableState = pr.MergeableState.AfterReviewOrCheckChange()
 		pr.UpdatedAt = time.Now().UTC()
 		if err := uc.prRepo.Upsert(ctx, pr); err != nil {
 			return err
