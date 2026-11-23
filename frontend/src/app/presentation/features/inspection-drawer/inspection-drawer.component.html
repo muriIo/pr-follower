@@ -106,6 +106,9 @@
       @if (drawer().blocked) {
         <p [class]="drawer().blockedCls">{{ drawer().blockedText }}</p>
       }
+      @if (drawer().mergeNote) {
+        <p class="pf-note">{{ drawer().mergeNote }}</p>
+      }
       @if (drawer().ownNote) {
         <p class="pf-note">{{ drawer().ownNote }}</p>
       }

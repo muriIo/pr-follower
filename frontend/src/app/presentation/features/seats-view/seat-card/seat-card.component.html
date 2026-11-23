@@ -62,7 +62,13 @@
               mode="inline-sm"
               [cancelLabel]="'drawer.cancel' | t"
             >
-              <button type="button" class="pf-btn pf-btn-sm" (click)="p.quick()">
+              <button
+                type="button"
+                class="pf-btn pf-btn-sm"
+                [attr.aria-disabled]="p.quickDis === 'true' ? 'true' : null"
+                [attr.title]="p.quickDis === 'true' ? p.quickTip : null"
+                (click)="p.quick()"
+              >
                 {{ p.quickLabel }}
               </button>
             </app-cancellable-action>

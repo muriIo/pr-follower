@@ -62,13 +62,25 @@ export function formatClock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** i18n keys for the GitHub mergeable states that stop a merge; the others do not block. */
+/** i18n keys for the GitHub mergeable states that stop a merge whatever reviews or checks do next. */
 const MERGE_BLOCKER_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
   conflict: 'drawer.blocked.conflict',
   behind: 'drawer.blocked.behind',
-  blocked: 'drawer.blocked.protection',
   draft: 'drawer.blocked.draft',
 };
+
+/**
+ * i18n keys for the mergeable states that only warn. GitHub's "blocked" can lag a review or a check
+ * it has not recounted yet, and "unknown" is still being computed: the merge stays possible, GitHub
+ * decides when it is sent and says which rule refused it.
+ */
+const MERGE_HINT_KEYS: Readonly<Partial<Record<MergeState, string>>> = {
+  blocked: 'drawer.mergeBlockedHint',
+  unknown: 'drawer.mergeUnknown',
+};
+
+/** How long the merge button waits after an approval made here, for GitHub to count it. */
+const MERGE_COOLDOWN_MS = 10_000;
 
 export interface TimelineItemViewModel extends Omit<TimelineEventItem, 'text'> {
   readonly text: string;
@@ -133,6 +145,8 @@ export interface SeatStreamRowViewModel {
   readonly act: ActionViewModel;
   readonly quickTip: string;
   readonly quickLabel: string;
+  /** 'true' while the merge waits for GitHub to count the approval just made. */
+  readonly quickDis: string;
   readonly open: () => void;
   readonly quick: () => void;
 }
@@ -289,6 +303,11 @@ export interface DrawerViewModel {
   readonly blocked: boolean;
   readonly blockedCls: string;
   readonly blockedText: string;
+  /**
+   * About the merge, without blocking it beyond the cooldown: the wait after an approval made here,
+   * GitHub's branch-protection warning, or a state GitHub has not computed yet; or ''.
+   */
+  readonly mergeNote: string;
   readonly showApprove: boolean;
   /** 'true' while checks are still running: approving waits for them. */
   readonly approveDis: string;
@@ -336,6 +355,11 @@ export class WorkspaceStore {
   readonly showMuted = signal(true);
   readonly mergedMap = signal<Record<number, boolean>>({});
   readonly approvedMap = signal<Record<number, boolean>>({});
+  /** PR id -> when (epoch ms) its merge button may be used again after an approval made here. */
+  private readonly mergeCooldownUntil = signal<Readonly<Record<number, number>>>({});
+  /** Ticks every second while a cooldown runs, so the countdown re-renders. */
+  private readonly clock = signal(Date.now());
+  private cooldownTimer: ReturnType<typeof setInterval> | null = null;
   readonly silencedMap = signal<Record<number, I18nText>>({});
   readonly ciOverrides = signal<Record<number, { ci: CiState; ciText: I18nText }>>({});
   readonly events = signal<readonly TimelineEventItem[]>([]);
@@ -362,7 +386,10 @@ export class WorkspaceStore {
     this.cancellation.registerAbortCallback((opId) => {
       void this.prGateway?.cancelServerOperation(opId);
     });
-    this.destroyRef.onDestroy(() => this.stopLiveSession());
+    this.destroyRef.onDestroy(() => {
+      this.stopLiveSession();
+      this.stopMergeCooldownTimer();
+    });
   }
 
   /**
@@ -550,6 +577,7 @@ export class WorkspaceStore {
           const dev = p.depType === 'devDependencies';
           const vLabel = p.verdict ? this.t(RISK_LABEL_KEYS[p.verdict]) : '';
           const safe = isSafeBatchCandidate(p, this.effectiveCi(p).ci);
+          const cooldown = mine ? this.mergeCooldownSeconds(p.id) : 0;
 
           return {
             id: p.id,
@@ -575,10 +603,14 @@ export class WorkspaceStore {
             approvedLabel: mine ? this.t('seats.approvedByYou') : this.t('seats.approvedByTeam', { login: p.approvedBy ?? '' }),
             hasQuick: safe && (mine || !this.isOwnPr(p)),
             act: this.cancellation.getView(actionsMap, `merge:${p.id}`),
-            quickTip: mine ? this.t('seats.quickTip.merge') : this.t('seats.quickTip.approve'),
-            quickLabel: mine ? 'Squash' : this.t('seats.quick.approve'),
+            quickTip: mine && cooldown > 0 ? this.t('drawer.mergeCooldown', { seconds: cooldown }) : mine ? this.t('seats.quickTip.merge') : this.t('seats.quickTip.approve'),
+            quickLabel: mine ? (cooldown > 0 ? `Squash (${cooldown}s)` : 'Squash') : this.t('seats.quick.approve'),
+            quickDis: mine && cooldown > 0 ? 'true' : 'false',
             open: () => this.openPr(p.id),
             quick: () => {
+              if (mine && this.mergeCooldownSeconds(p.id) > 0) {
+                return;
+              }
               if (mine) {
                 void this.mergePr(p.id);
               } else {
@@ -715,14 +747,17 @@ export class WorkspaceStore {
     const batchN = batchAct.running && this.lastBatchTotal ? this.lastBatchTotal : safe.length;
     const safeApproved = safe.filter((p) => approved[p.id]);
     const safePending = safe.filter((p) => !approved[p.id]);
+    const cooldown = Math.max(0, ...safeApproved.map((p) => this.mergeCooldownSeconds(p.id)));
 
     return {
       has: safe.length > 0 || batchAct.running,
       title: this.t('radar.batch.title', { count: batchN }),
       canApprove: safePending.length > 0,
       approveLabel: safeApproved.length > 0 ? this.t('radar.batch.approveRest', { count: safePending.length }) : this.t('radar.batch.approveAll', { count: batchN }),
-      mergeDis: safeApproved.length === 0 ? 'true' : 'false',
-      mergeCls: safePending.length === 0 ? 'pf-btn-primary' : '',
+      mergeDis: safeApproved.length === 0 || cooldown > 0 ? 'true' : 'false',
+      mergeCls: safePending.length === 0 && cooldown === 0 ? 'pf-btn-primary' : '',
+      /** Why merging waits: GitHub is still counting an approval made here, or ''. */
+      mergeTip: cooldown > 0 ? this.t('drawer.mergeCooldown', { seconds: cooldown }) : '',
       mergeLabel:
         safeApproved.length > 0 && safePending.length > 0
           ? this.t('radar.batch.mergeApproved', { count: safeApproved.length })
@@ -836,10 +871,13 @@ export class WorkspaceStore {
           ? this.locale.translate('drawer.codeowners.unknown')
           : this.locale.text(pr.ownersText);
 
-    // Only GitHub decides what blocks a merge (mergeable_state: conflicts, out of date, branch
-    // protection with its required reviews and checks, draft). CI and CODEOWNERS are signals.
+    // Only GitHub decides what blocks a merge (mergeable_state: conflicts, out of date, draft). Branch
+    // protection and a state not computed yet only warn (MERGE_HINT_KEYS); CI and CODEOWNERS are signals.
     const runningText = this.checksRunning(pr) ? this.t('drawer.checksRunning') : '';
     const blockedText = (pr.merge && MERGE_BLOCKER_KEYS[pr.merge] ? this.locale.translate(MERGE_BLOCKER_KEYS[pr.merge]!) : '') || runningText;
+    const cooldown = this.mergeCooldownSeconds(pr.id);
+    const cooldownText = cooldown > 0 ? this.t('drawer.mergeCooldown', { seconds: cooldown }) : '';
+    const hintKey = pr.merge ? MERGE_HINT_KEYS[pr.merge] : undefined;
 
     const vLabel = pr.verdict ? this.t(RISK_LABEL_KEYS[pr.verdict]) : '';
     const openFiles = this.changedFileOpenMap();
@@ -912,6 +950,7 @@ export class WorkspaceStore {
       blocked: Boolean(blockedText),
       blockedCls: 'pf-blocked',
       blockedText,
+      mergeNote: blockedText ? '' : cooldownText || (hintKey ? this.t(hintKey) : ''),
       showAnalyze: pr.dep === true && pr.verdict === null && Boolean(pr.pkg) && (!pr.analysisFailed || pr.analysisRetryable === true),
       analyzeLabel: this.t(pr.analysisFailed ? 'drawer.analyzeRetry' : 'drawer.analyze'),
       silenceCiDis: this.canSilenceUntilCi(pr) ? 'false' : 'true',
@@ -924,9 +963,9 @@ export class WorkspaceStore {
       approveTip: runningText,
       ownNote: own ? this.t('drawer.ownPr') : '',
       approvedMine: mine,
-      mergeCls: (mine || pr.approvedBy) && !blockedText ? 'pf-btn-primary' : '',
-      mergeDis: blockedText ? 'true' : 'false',
-      mergeTip: blockedText || this.t('drawer.mergeTip'),
+      mergeCls: (mine || pr.approvedBy) && !blockedText && !cooldownText && pr.merge !== 'blocked' ? 'pf-btn-primary' : '',
+      mergeDis: blockedText || cooldownText ? 'true' : 'false',
+      mergeTip: blockedText || cooldownText || this.t('drawer.mergeTip'),
       busyDis: act.running ? 'true' : 'false',
       act,
     };
@@ -1461,7 +1500,44 @@ export class WorkspaceStore {
 
   private markApproved(pr: PullRequestItem): void {
     this.approvedMap.update((curr) => ({ ...curr, [pr.id]: true }));
+    this.startMergeCooldown(pr.id);
     this.appendTimelineEvent({ kind: 'ok', type: 'pr.approved', actor: this.viewerLogin(), text: { key: 'timeline.local.approved', params: { pr: pr.number } }, repo: pr.repo, pr: pr.id, fresh: true });
+  }
+
+  /**
+   * GitHub counts an approval for branch protection a moment after accepting it, and a merge sent
+   * before that is refused. The panel waits MERGE_COOLDOWN_MS before offering the merge; the wait is
+   * GitHub's, which the countdown says.
+   */
+  private startMergeCooldown(prId: number): void {
+    const now = Date.now();
+    this.mergeCooldownUntil.update((curr) => ({ ...curr, [prId]: now + MERGE_COOLDOWN_MS }));
+    this.clock.set(now);
+    if (this.cooldownTimer !== null) {
+      return;
+    }
+    this.cooldownTimer = setInterval(() => {
+      const tick = Date.now();
+      this.clock.set(tick);
+      const running = Object.entries(this.mergeCooldownUntil()).filter(([, until]) => until > tick);
+      this.mergeCooldownUntil.set(Object.fromEntries(running));
+      if (running.length === 0) {
+        this.stopMergeCooldownTimer();
+      }
+    }, 1000);
+  }
+
+  private stopMergeCooldownTimer(): void {
+    if (this.cooldownTimer !== null) {
+      clearInterval(this.cooldownTimer);
+      this.cooldownTimer = null;
+    }
+  }
+
+  /** Whole seconds left before the PR's merge button may be used, 0 when it may. */
+  private mergeCooldownSeconds(prId: number): number {
+    const until = this.mergeCooldownUntil()[prId];
+    return until ? Math.max(0, Math.ceil((until - this.clock()) / 1000)) : 0;
   }
 
   private markMerged(pr: PullRequestItem): void {

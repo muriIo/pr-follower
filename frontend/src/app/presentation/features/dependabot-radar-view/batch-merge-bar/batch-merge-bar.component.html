@@ -14,11 +14,15 @@
           type="button"
           [class]="'pf-btn ' + summary().mergeCls"
           [attr.aria-disabled]="summary().mergeDis"
+          [attr.title]="summary().mergeTip || null"
           (click)="summary().mergeDis !== 'true' && batchMerge.emit()"
         >
           {{ summary().mergeLabel }}
         </button>
       </div>
+      @if (summary().mergeTip) {
+        <p class="pf-note" role="status">{{ summary().mergeTip }}</p>
+      }
     }
     @if (batchAction().running) {
       <div class="pf-batch-run">

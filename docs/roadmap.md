@@ -52,6 +52,11 @@ No P1 item is open. In order of value:
 - [x] Reviews of PRs stored before reviews were ingested are filled in by "Sincronizar" (or a re-import), which re-reads the reviews of every open human PR of a repository with CODEOWNERS (#29).
 - [x] `mergeable_state` is often `unknown` in the opening webhook (and after an import or a new commit) and GitHub sends no event when it is computed: a workspace load asks GitHub, with the reader's token, for up to 10 open PRs still unknown and stores an answer for the same head commit. GitHub still computing, failing, or the reader having no token leaves it unknown and never fails the load. Seen on 2026-11-16: a PR stayed `UNKNOWN` in the panel while GitHub said `unstable`.
 - [ ] **P2** Not verified against real GitHub yet: an `UNKNOWN` merge state turning into GitHub's value on the next workspace load.
+- [x] A stored merge state never outlives what changes it. These reset a blocked, clean or unstable state to unknown, for the next load to read:
+  - a review, from the panel or a webhook;
+  - a change in a commit's CI.
+
+  "Sincronizar" reads each open PR's state from GitHub. A merge stores the live state, and after GitHub refuses one it reads the state again. Branch protection's `blocked` only warns, because it can lag a review GitHub has not counted yet: GitHub decides the merge and names the rule when it refuses. After an approval made in the panel, the merge button waits 10 s with a countdown. Seen on 2026-11-23: an approved PR stayed `BLOCKED` with the merge disabled while GitHub said `clean`.
 - [x] Legacy commit statuses (Jenkins, Vercel) count like checks: the `status` webhook and a commit's combined status at import are stored (own table, own id space), listed beside check runs, the latest status of each context decides, and a pending one keeps a PR from looking green. Needs the app subscribed to Status events (#28).
 - [x] Statuses of PRs stored before statuses were ingested are filled in by "Sincronizar", which re-reads the check runs and statuses of every open PR's head commit (#29).
 - [x] Verified against real GitHub (2026-11-16) with statuses created through the API: pending, success and failure arrive by the `status` webhook within seconds, a pending one disables approve and merge, and a status created while no webhook could arrive is read by the sync.

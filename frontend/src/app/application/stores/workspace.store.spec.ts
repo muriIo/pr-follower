@@ -408,7 +408,7 @@ describe('WorkspaceStore truthful PR state', () => {
     expect(drawer.signals.map((sig) => sig.k)).toEqual(['CI', 'CODEOWNERS']);
   });
 
-  it('blocks a merge only for what GitHub reported: conflicts, out of date, branch protection, draft', () => {
+  it('blocks a merge only for what GitHub reported and reviews cannot change: conflicts, out of date, draft', () => {
     const store = setup(
       [{ name: 'acme/owned', branch: 'main', codeowners: 'present' }],
       [
@@ -436,9 +436,41 @@ describe('WorkspaceStore truthful PR state', () => {
     expect(blocked(22)).toBe('');
     expect(blocked(23)).toBe('Mesclagem bloqueada: há conflitos com a branch base.');
     expect(blocked(24)).toBe('Mesclagem bloqueada: a branch está desatualizada em relação à base.');
-    expect(blocked(25)).toBe('Mesclagem bloqueada pela proteção da branch no GitHub (revisões ou checks obrigatórios).');
+    // GitHub's "blocked" can lag a review or a check it has not recounted yet: a warning, never a
+    // disabled button. GitHub decides when the merge is sent and says which rule refused it.
+    expect(blocked(25)).toBe('');
+    store.openPr(25);
+    expect(store.drawer()!.mergeDis).toBe('false');
+    expect(store.drawer()!.mergeCls).toBe('');
+    expect(store.drawer()!.mergeNote).toBe(
+      'O GitHub indicou bloqueio pela proteção da branch (revisões ou checks obrigatórios). Ao mesclar, ele confirma e, se recusar, mostramos o motivo.',
+    );
     expect(blocked(26)).toBe('Mesclagem bloqueada: o PR ainda é rascunho.');
     expect(blocked(27)).toBe('');
+  });
+
+  it('says when GitHub has not told the merge state yet, without blocking the merge', () => {
+    const store = setup(
+      [{ name: 'acme/owned', branch: 'main' }],
+      [
+        pr(31, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'unknown' }),
+        pr(32, 'acme/owned', { ci: 'ok', owners: 'ok', approvedBy: '@ana', merge: 'clean' }),
+        pr(33, 'acme/owned', { ci: 'run', owners: 'ok', merge: 'unknown' }),
+      ],
+    );
+    const view = (id: number) => {
+      store.openPr(id);
+      const d = store.drawer()!;
+      return { note: d.mergeNote, merge: d.mergeDis };
+    };
+    // GitHub decides when the merge is sent and says why if it refuses.
+    expect(view(31)).toEqual({
+      note: 'O GitHub ainda não calculou se este PR pode ser mesclado. Ao mesclar, ele decide e, se recusar, mostramos o motivo.',
+      merge: 'false',
+    });
+    expect(view(32)).toEqual({ note: '', merge: 'false' });
+    // A known blocker says more than "unknown": only the blocker shows.
+    expect(view(33)).toEqual({ note: '', merge: 'true' });
   });
 
   it('shows an unchecked CODEOWNERS as unknown, never as a pending review', () => {
@@ -767,6 +799,52 @@ describe('WorkspaceStore acting on GitHub as the user', () => {
     store.prs.set([prOf(1, '@bia'), prOf(2, '@OctoCat')]);
     return { store, gateway, translate: (key: string, params?: Record<string, string | number>) => TestBed.inject(LocaleStore).translate(key, params) };
   }
+
+  it('holds the merge for 10s after an approval, counting down and saying the wait is GitHub\'s', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, translate } = setup({});
+      store.openPr(1);
+      expect(store.drawer()!.mergeDis).toBe('false');
+
+      await store.approvePr(1);
+      expect(store.drawer()!.mergeDis).toBe('true');
+      expect(store.drawer()!.mergeNote).toBe(translate('drawer.mergeCooldown', { seconds: 10 }));
+      expect(store.drawer()!.mergeTip).toBe(translate('drawer.mergeCooldown', { seconds: 10 }));
+
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(store.drawer()!.mergeNote).toBe(translate('drawer.mergeCooldown', { seconds: 6 }));
+
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(store.drawer()!.mergeDis).toBe('false');
+      expect(store.drawer()!.mergeNote).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the quick Squash and the batch merge too while GitHub counts the approval', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, translate } = setup({});
+      store.prs.set([{ ...prOf(1, '@dependabot[bot]'), dep: true, verdict: 'baixo', ci: 'ok' }]);
+
+      await store.approvePr(1);
+      const row = () => store.allSeats()[0].stream.find((r) => r.id === 1)!;
+      expect(row().quickDis).toBe('true');
+      expect(row().quickLabel).toBe('Squash (10s)');
+      expect(store.safeBatchSummary().mergeDis).toBe('true');
+      expect(store.safeBatchSummary().mergeTip).toBe(translate('drawer.mergeCooldown', { seconds: 10 }));
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(row().quickDis).toBe('false');
+      expect(row().quickLabel).toBe('Squash');
+      expect(store.safeBatchSummary().mergeDis).toBe('false');
+      expect(store.safeBatchSummary().mergeTip).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('never approves the user\'s own PR: nothing is sent, and the drawer does not offer it', async () => {
     const { store, gateway, translate } = setup({});

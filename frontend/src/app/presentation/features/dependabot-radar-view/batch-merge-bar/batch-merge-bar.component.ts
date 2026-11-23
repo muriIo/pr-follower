@@ -10,6 +10,8 @@ export interface SafeBatchSummaryViewModel {
   readonly mergeDis: string;
   readonly mergeCls: string;
   readonly mergeLabel: string;
+  /** Why merging waits (GitHub is still counting an approval made here), or ''. */
+  readonly mergeTip: string;
 }
 
 @Component({
