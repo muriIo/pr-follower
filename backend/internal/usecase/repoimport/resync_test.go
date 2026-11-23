@@ -135,6 +135,76 @@ func TestResync_RefreshesWhatChangedWhileNoWebhookArrived(t *testing.T) {
 	}
 }
 
+// The list GitHub returns has no merge state, so the resync reads each open PR: the user asked for
+// GitHub's word, and a BLOCKED lifted by an approval must not survive it. A state GitHub is still
+// computing is stored as unknown; a PR whose state cannot be read keeps the stored one.
+func TestResync_ReadsTheMergeStateGitHubHasNow(t *testing.T) {
+	t.Parallel()
+	w := followedWeb(t)
+	for _, n := range []int{7, 8, 9} {
+		pr := w.pr(n)
+		pr.MergeableState = entity.MergeableStateBlocked
+		w.prs.prs[[2]uint64{w.repo.ID, uint64(n)}] = pr
+	}
+	w.api.openPRs["acme/web"] = append(w.api.openPRs["acme/web"], entity.RemotePullRequest{
+		GitHubPRID: 10001, Number: 10, Title: "fix: late", AuthorLogin: "bia", HeadSHA: "sha10", BaseRef: "main"})
+	w.api.pulls = map[string]entity.RemotePullRequestState{
+		"acme/web#7":  {Open: true, HeadSHA: w.pr(7).HeadSHA, MergeableState: entity.MergeableStateClean},
+		"acme/web#8":  {Open: true, HeadSHA: w.pr(8).HeadSHA, MergeableState: entity.MergeableStateUnknown},
+		"acme/web#10": {Open: true, HeadSHA: "sha10", MergeableState: entity.MergeableStateBehind},
+		// #9 cannot be read
+	}
+
+	res, err := w.uc.Resync(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n, want := range map[int]entity.MergeableState{
+		7:  entity.MergeableStateClean,
+		8:  entity.MergeableStateUnknown,
+		9:  entity.MergeableStateBlocked,
+		10: entity.MergeableStateBehind,
+	} {
+		if got := w.pr(n).MergeableState; got != want {
+			t.Errorf("#%d merge state = %q, want %q", n, got, want)
+		}
+	}
+	if res.Updated != 2 || res.Added != 1 {
+		t.Fatalf("#7 and #8 changed, #10 was added: %+v", res)
+	}
+
+	// A head GitHub moved since the list was read: that state is not about the stored commit.
+	pr := w.pr(7)
+	w.api.pulls["acme/web#7"] = entity.RemotePullRequestState{Open: true, HeadSHA: "newer", MergeableState: entity.MergeableStateConflicting}
+	if _, err := w.uc.Resync(context.Background(), userID); err != nil {
+		t.Fatal(err)
+	}
+	if got := w.pr(7).MergeableState; got != pr.MergeableState {
+		t.Fatalf("the state of another commit must not be stored, got %q", got)
+	}
+}
+
+// Reading the merge states is the user's GitHub budget too: a rate limit stops the resync like any
+// other read, while any other failure to read one only leaves that PR's state as it was.
+func TestResync_MergeStateReadsStopAtTheRateLimitOnly(t *testing.T) {
+	t.Parallel()
+	w := followedWeb(t)
+	w.api.pullErr = errors.New("github is flaky")
+	res, err := w.uc.Resync(context.Background(), userID)
+	if err != nil || len(res.Failed) != 0 {
+		t.Fatalf("an unreadable merge state is not a failure: err=%v %+v", err, res)
+	}
+
+	w.api.pullErr = &entity.RateLimitedError{ResetAt: time.Now().Add(time.Hour)}
+	res, err = w.uc.Resync(context.Background(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Failed) != 1 || !errors.Is(res.Failed[0].Err, entity.ErrRateLimited) {
+		t.Fatalf("a rate limit on the merge-state reads is reported: %+v", res)
+	}
+}
+
 func TestResync_PicksUpWhatAppearedAndReopened(t *testing.T) {
 	t.Parallel()
 	w := followedWeb(t)

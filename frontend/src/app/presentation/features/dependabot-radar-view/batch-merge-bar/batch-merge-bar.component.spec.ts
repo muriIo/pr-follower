@@ -14,6 +14,7 @@ describe('BatchMergeBarComponent', () => {
       mergeDis: 'false',
       mergeCls: 'pf-btn-primary',
       mergeLabel: 'Mesclar Todos os 4',
+      mergeTip: '',
     };
     const idleAction: ActionViewModel = {
       idle: true,
@@ -56,7 +57,7 @@ describe('BatchMergeBarComponent', () => {
       providers: [{ provide: TRANSLATION_GATEWAY, useValue: { loadDictionary: async () => ({}) } }],
     });
     const fixture = TestBed.createComponent(BatchMergeBarComponent);
-    fixture.componentRef.setInput('summary', { has: false, title: '', canApprove: false, approveLabel: '', mergeDis: 'true', mergeCls: '', mergeLabel: '' });
+    fixture.componentRef.setInput('summary', { has: false, title: '', canApprove: false, approveLabel: '', mergeDis: 'true', mergeCls: '', mergeLabel: '', mergeTip: '' });
     fixture.componentRef.setInput('batchAction', {
       idle: true, running: false, hasNote: true, label: '', pct: 0,
       note: 'Lote parado: 1 de 3 mesclados. O PR #102 falhou.', noteCls: 'pf-note pf-note-err',

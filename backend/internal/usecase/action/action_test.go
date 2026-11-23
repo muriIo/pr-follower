@@ -3,7 +3,9 @@ package action_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +113,7 @@ type fakeGitHub struct {
 	commitStatuses                   map[string][]entity.CommitStatus // head commit -> legacy statuses
 	checksErr                        error
 	onMerge                          func(prNumber int)
+	onMergeRefused                   func(prNumber int) // GitHub refused the merge (mergeErr, not applied)
 
 	// what the use case did
 	writeTokens []string
@@ -123,7 +126,8 @@ type fakeGitHub struct {
 func newFakeGitHub(prs ...int) *fakeGitHub {
 	f := &fakeGitHub{live: map[int]*entity.RemotePullRequestState{}, reviews: map[int][]entity.PullRequestReview{}}
 	for _, n := range prs {
-		f.live[n] = &entity.RemotePullRequestState{Open: true, HeadSHA: "sha-" + string(rune('0'+n%10)), AuthorLogin: "alice"}
+		f.live[n] = &entity.RemotePullRequestState{Open: true, HeadSHA: "sha-" + string(rune('0'+n%10)), AuthorLogin: "alice",
+			MergeableState: entity.MergeableStateUnknown}
 	}
 	return f
 }
@@ -164,6 +168,9 @@ func (f *fakeGitHub) MergePullRequest(ctx context.Context, token string, _ entit
 	f.writeTokens = append(f.writeTokens, token)
 	f.merged = append(f.merged, n)
 	if f.mergeErr != nil && !f.applyThenFail {
+		if f.onMergeRefused != nil {
+			f.onMergeRefused(n)
+		}
 		return f.mergeErr
 	}
 	f.live[n].Open, f.live[n].Merged = false, true
@@ -258,7 +265,8 @@ func newFixture(tokens fakeTokens, prs ...*entity.PullRequest) fixture {
 }
 
 func openPR(id uint64, number int, author string) *entity.PullRequest {
-	return &entity.PullRequest{ID: id, RepositoryID: 10, Number: number, AuthorLogin: author, State: entity.PRStateOpen, HeadSHA: "sha-" + string(rune('0'+number%10))}
+	return &entity.PullRequest{ID: id, RepositoryID: 10, Number: number, AuthorLogin: author, State: entity.PRStateOpen,
+		MergeableState: entity.MergeableStateUnknown, HeadSHA: "sha-" + string(rune('0'+number%10))}
 }
 
 var ctx = context.Background()
@@ -419,6 +427,45 @@ func TestApprovePR_AnAmbiguousAnswerIsConfirmedAgainstGitHub(t *testing.T) {
 	}
 }
 
+// An approval can lift a branch-protection block, so the stored merge state is no longer known:
+// the workspace load that follows the pr.approved event asks GitHub again. When GitHub already had
+// the approval, the live read just made is current and is kept as is.
+func TestApprovePR_LeavesTheMergeStateForGitHubToTell(t *testing.T) {
+	t.Parallel()
+	blocked := openPR(1, 11, "alice")
+	blocked.MergeableState = entity.MergeableStateBlocked
+	f := newFixture(fakeTokens{}, blocked)
+	if err := f.uc.ApprovePR(ctx, 1, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.prs.prs[1].MergeableState; got != entity.MergeableStateUnknown {
+		t.Fatalf("merge state after a new approval = %q, want UNKNOWN", got)
+	}
+
+	conflicting := openPR(1, 11, "alice")
+	conflicting.MergeableState = entity.MergeableStateConflicting
+	g := newFixture(fakeTokens{}, conflicting)
+	if err := g.uc.ApprovePR(ctx, 1, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.prs.prs[1].MergeableState; got != entity.MergeableStateConflicting {
+		t.Fatalf("an approval does not solve a conflict, got %q", got)
+	}
+
+	stale := openPR(1, 11, "alice")
+	stale.MergeableState = entity.MergeableStateBlocked
+	h := newFixture(fakeTokens{}, stale)
+	h.gh.live[11].MergeableState = entity.MergeableStateClean
+	h.gh.reviews[11] = []entity.PullRequestReview{{GitHubReviewID: 7, ReviewerLogin: "octocat", State: entity.ReviewApproved,
+		CommitSHA: h.gh.live[11].HeadSHA}}
+	if err := h.uc.ApprovePR(ctx, 1, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.prs.prs[1].MergeableState; got != entity.MergeableStateClean {
+		t.Fatalf("already approved on GitHub: keep what GitHub just said, got %q", got)
+	}
+}
+
 // failingAfterWrite reads fine before the write and fails every read after it.
 type failingAfterWrite struct{ *fakeGitHub }
 
@@ -494,6 +541,53 @@ func TestMergePR_AnAmbiguousAnswerIsConfirmedAgainstGitHub(t *testing.T) {
 	notMergeable.gh.mergeErr = entity.ErrConflict
 	if err := notMergeable.uc.MergePR(ctx, 1, 1, ""); !errors.Is(err, entity.ErrConflict) || len(notMergeable.pub.events) != 0 || notMergeable.prs.prs[1].State != entity.PRStateOpen {
 		t.Fatalf("a refused merge changes nothing: err=%v", err)
+	}
+}
+
+// GitHub decides what a merge needs. The stored merge state is a hint: the live state read before
+// merging replaces it, and after a refusal it is read again so the panel shows the blocker GitHub
+// named; the refusal itself, with GitHub's explanation, is what the user is told.
+func TestMergePR_StoresWhatGitHubSaysAboutMergingIt(t *testing.T) {
+	t.Parallel()
+	refusal := fmt.Errorf("%w: At least 1 approving review is required by reviewers with write access.", entity.ErrConflict)
+
+	f := newFixture(fakeTokens{}, openPR(1, 11, "alice")) // stored UNKNOWN, GitHub still computing
+	f.gh.mergeErr = refusal
+	f.gh.onMergeRefused = func(n int) { f.gh.live[n].MergeableState = entity.MergeableStateBlocked }
+	if err := f.uc.MergePR(ctx, 1, 1, ""); !errors.Is(err, entity.ErrConflict) || !strings.Contains(err.Error(), "approving review is required") {
+		t.Fatalf("the refusal is passed on with GitHub's reason, got %v", err)
+	}
+	if got := f.prs.prs[1].MergeableState; got != entity.MergeableStateBlocked {
+		t.Fatalf("after a refusal the state GitHub has now is stored, got %q", got)
+	}
+	if len(f.pub.events) != 0 || f.prs.prs[1].State != entity.PRStateOpen {
+		t.Fatalf("a refused merge publishes nothing and keeps the PR open: %+v", f.pub.events)
+	}
+
+	// The live read before merging corrects a stale stored state even when nothing is written.
+	stale := openPR(1, 11, "alice")
+	stale.MergeableState = entity.MergeableStateBlocked
+	g := newFixture(fakeTokens{}, stale)
+	g.gh.live[11].MergeableState = entity.MergeableStateClean
+	g.gh.runs = map[string][]entity.CheckRun{headOf11: {running("build")}}
+	if err := g.uc.MergePR(ctx, 1, 1, ""); !errors.Is(err, entity.ErrChecksRunning) {
+		t.Fatalf("expected ErrChecksRunning, got %v", err)
+	}
+	if got := g.prs.prs[1].MergeableState; got != entity.MergeableStateClean {
+		t.Fatalf("the live state replaces the stored one, got %q", got)
+	}
+
+	// When the read after the refusal fails, the user still gets GitHub's refusal, not the read error.
+	h := newFixture(fakeTokens{}, openPR(1, 11, "alice"))
+	h.gh.mergeErr = refusal
+	after := &failingAfterWrite{fakeGitHub: h.gh}
+	uc := action.NewUseCase(action.Deps{PRs: h.prs, Repos: &fakeRepoRepo{}, Users: fakeUsers{}, Tokens: fakeTokens{},
+		GitHub: after, State: after, Reviews: h.reviews, Pub: h.pub})
+	if err := uc.MergePR(ctx, 1, 1, ""); !errors.Is(err, refusal) {
+		t.Fatalf("expected the refusal, got %v", err)
+	}
+	if got := h.prs.prs[1].MergeableState; got != entity.MergeableStateUnknown {
+		t.Fatalf("nothing could be read: the state stays as it was, got %q", got)
 	}
 }
 

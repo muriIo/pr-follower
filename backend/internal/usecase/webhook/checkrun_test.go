@@ -186,6 +186,44 @@ func TestIngestCheckRunEvent_DerivesPRCIFromAllRuns(t *testing.T) {
 	}
 }
 
+// Required checks are part of branch protection: when a commit's CI changes, a blocked, clean or
+// unstable merge state may no longer hold, so it becomes unknown for the next workspace load to read.
+// A delivery that changes nothing leaves alone the state that load has since read.
+func TestIngestCheckRunEvent_ACIChangeMakesTheMergeStateUnknown(t *testing.T) {
+	t.Parallel()
+	uc, checks, _ := checkRunSetup()
+	checks.prs[0].MergeableState = entity.MergeableStateBlocked
+	ctx := context.Background()
+	mergeState := func() entity.MergeableState {
+		checks.mu.Lock()
+		defer checks.mu.Unlock()
+		return checks.prs[0].MergeableState
+	}
+
+	if err := uc.IngestCheckRunEvent(ctx, run(1, "completed", "success")); err != nil {
+		t.Fatal(err)
+	}
+	if got := mergeState(); got != entity.MergeableStateUnknown {
+		t.Fatalf("merge state after the checks passed = %q, want UNKNOWN", got)
+	}
+
+	checks.prs[0].MergeableState = entity.MergeableStateClean // what the next load read
+	if err := uc.IngestCheckRunEvent(ctx, run(1, "completed", "success")); err != nil {
+		t.Fatal(err)
+	}
+	if got := mergeState(); got != entity.MergeableStateClean {
+		t.Fatalf("a redelivery must leave the merge state alone, got %q", got)
+	}
+
+	checks.prs[0].MergeableState = entity.MergeableStateConflicting
+	if err := uc.IngestCheckRunEvent(ctx, run(2, "completed", "failure")); err != nil {
+		t.Fatal(err)
+	}
+	if got := mergeState(); got != entity.MergeableStateConflicting {
+		t.Fatalf("a conflict does not depend on checks and must stay, got %q", got)
+	}
+}
+
 func TestIngestCheckRunEvent_RedeliveryIsIdempotent(t *testing.T) {
 	t.Parallel()
 	uc, checks, pub := checkRunSetup()

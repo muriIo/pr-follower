@@ -55,6 +55,7 @@ describe('SeatCardComponent', () => {
           },
           quickTip: '',
           quickLabel: 'Aprovar',
+          quickDis: 'false',
           open: openSpy,
           quick: quickSpy,
         },

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -123,7 +124,10 @@ func (uc *UseCase) approve(ctx context.Context, t *target, live entity.RemotePul
 		return err
 	}
 	if existing != nil { // converge: GitHub already has it, nothing to write or announce
-		return uc.recordReview(ctx, t, *existing)
+		if err := uc.recordReview(ctx, t, *existing); err != nil {
+			return err
+		}
+		return uc.keepMergeState(ctx, t, live)
 	}
 	if err := uc.requireChecksFinished(ctx, t, live); err != nil {
 		return err
@@ -146,7 +150,47 @@ func (uc *UseCase) approve(ctx context.Context, t *target, live entity.RemotePul
 			return err
 		}
 	}
+	// The live state was read before the approval: GitHub recomputes it now.
+	if err := uc.storeMergeState(ctx, t, t.pr.MergeableState.AfterReviewOrCheckChange()); err != nil {
+		return err
+	}
 	return uc.publish(ctx, t, "approve", "pr.approved", nil)
+}
+
+// keepMergeState stores the merge state GitHub just reported for the stored head commit. An
+// unknown state (GitHub is still computing) or one of another commit says nothing about ours.
+func (uc *UseCase) keepMergeState(ctx context.Context, t *target, live entity.RemotePullRequestState) error {
+	if live.MergeableState == entity.MergeableStateUnknown || live.HeadSHA != t.pr.HeadSHA {
+		return nil
+	}
+	return uc.storeMergeState(ctx, t, live.MergeableState)
+}
+
+// learnWhyMergeWasRefused reads the PR again after GitHub refused to merge it and stores the merge
+// state GitHub has now, so the panel shows the blocker instead of offering the same merge again.
+// It is best effort: a failed read leaves the stored state, and the refusal is reported either way.
+func (uc *UseCase) learnWhyMergeWasRefused(ctx context.Context, t *target) {
+	after, err := uc.live(ctx, t)
+	if err != nil {
+		return
+	}
+	if err := uc.keepMergeState(ctx, t, after); err != nil && ctx.Err() == nil {
+		slog.Warn("storing the merge state after a refused merge failed", "pr", t.pr.ID, "err", err)
+	}
+}
+
+// storeMergeState writes the PR's merge state when it changed.
+func (uc *UseCase) storeMergeState(ctx context.Context, t *target, state entity.MergeableState) error {
+	if state == t.pr.MergeableState {
+		return nil
+	}
+	next := *t.pr
+	next.MergeableState = state
+	if err := uc.prRepo.Upsert(ctx, &next); err != nil {
+		return err
+	}
+	*t.pr = next
+	return nil
 }
 
 // requireChecksFinished refuses to approve or merge while any check or commit status of the head
@@ -225,6 +269,10 @@ func (uc *UseCase) merge(ctx context.Context, t *target, live entity.RemotePullR
 	if !live.Open {
 		return fmt.Errorf("%w: the pull request is closed", entity.ErrConflict)
 	}
+	// The stored merge state is only a hint: GitHub's word replaces it, and GitHub decides the merge.
+	if err := uc.keepMergeState(ctx, t, live); err != nil {
+		return err
+	}
 	if err := uc.requireChecksFinished(ctx, t, live); err != nil {
 		return err
 	}
@@ -232,6 +280,10 @@ func (uc *UseCase) merge(ctx context.Context, t *target, live entity.RemotePullR
 		method = "squash"
 	}
 	if err := uc.ghGateway.MergePullRequest(ctx, t.token, *t.repo, t.pr.Number, method); err != nil {
+		if errors.Is(err, entity.ErrConflict) {
+			uc.learnWhyMergeWasRefused(ctx, t)
+			return err // GitHub's refusal, with its reason, is what the user is told
+		}
 		if !errors.Is(err, entity.ErrOutcomeUnknown) {
 			return err
 		}
@@ -285,6 +337,8 @@ func (uc *UseCase) BatchApproveAndMerge(ctx context.Context, userID uint64, prID
 			if err := uc.approve(ctx, t, live, "Approved via PR Follower"); err != nil {
 				return completed, err
 			}
+			// The merge state was read before the approval, which GitHub now recomputes.
+			live.MergeableState = entity.MergeableStateUnknown
 			if err := uc.merge(ctx, t, live, method); err != nil {
 				return completed, err
 			}

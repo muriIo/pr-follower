@@ -86,6 +86,13 @@ func (uc *ReviewIngestUseCase) IngestReviewEvent(ctx context.Context, p ReviewEv
 	if !changed {
 		return nil
 	}
+	if next := pr.MergeableState.AfterReviewOrCheckChange(); next != pr.MergeableState {
+		updated := *pr
+		updated.MergeableState = next
+		if err := uc.prRepo.Upsert(ctx, &updated); err != nil {
+			return err
+		}
+	}
 	return uc.pub.Publish(ctx, entity.ActivityEvent{
 		ID:             fmt.Sprintf("wh-review-%d-%d", p.ReviewID, time.Now().UnixNano()),
 		Type:           reviewEventTypes[state],

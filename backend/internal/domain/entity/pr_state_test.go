@@ -39,6 +39,26 @@ func TestMergeableStateFromGitHub(t *testing.T) {
 	}
 }
 
+// A review or a check can lift or add a branch-protection block, so a state that rests on them is
+// unknown until GitHub is asked again; conflicts, an out-of-date branch and a draft stay.
+func TestMergeableState_AfterReviewOrCheckChange(t *testing.T) {
+	t.Parallel()
+	cases := map[entity.MergeableState]entity.MergeableState{
+		entity.MergeableStateBlocked:     entity.MergeableStateUnknown,
+		entity.MergeableStateClean:       entity.MergeableStateUnknown,
+		entity.MergeableStateUnstable:    entity.MergeableStateUnknown,
+		entity.MergeableStateUnknown:     entity.MergeableStateUnknown,
+		entity.MergeableStateConflicting: entity.MergeableStateConflicting,
+		entity.MergeableStateBehind:      entity.MergeableStateBehind,
+		entity.MergeableStateDraft:       entity.MergeableStateDraft,
+	}
+	for in, want := range cases {
+		if got := in.AfterReviewOrCheckChange(); got != want {
+			t.Errorf("%q.AfterReviewOrCheckChange() = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestDeriveCIStatus(t *testing.T) {
 	t.Parallel()
 	run := func(status, conclusion string) entity.CheckRun {

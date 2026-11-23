@@ -183,8 +183,9 @@ type backfillStats struct {
 // backfillOpenPullRequests stores the repository's open PRs and their CI, so they show up without
 // waiting for their next webhook. With refresh false (import) a PR that is already stored is kept as
 // is: webhooks keep it current, and the older listing must never rewind it. With refresh true
-// (resync, the user asked GitHub's current word) a stored PR is brought in line with GitHub. Merge
-// state stays unknown (the list does not carry it) and no activity is published per PR.
+// (resync, the user asked GitHub's current word) a stored PR is brought in line with GitHub, its
+// merge state read one PR at a time (the list does not carry it; an import leaves it unknown for the
+// workspace load to read). No activity is published per PR.
 func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, refresh bool) (backfillStats, error) {
 	stats := backfillStats{open: map[int]bool{}}
 	open, err := uc.github.ListOpenPullRequests(ctx, token, target.Owner, target.Name)
@@ -220,6 +221,16 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 		if err := ctx.Err(); err != nil {
 			return stats, context.Cause(ctx)
 		}
+		merge := entity.MergeableStateUnknown
+		if refresh {
+			state, ok, err := uc.liveMergeState(ctx, token, target, remote)
+			if err != nil {
+				return stats, err
+			}
+			if ok {
+				merge = state
+			}
+		}
 		pr := &entity.PullRequest{
 			RepositoryID:   repo.ID,
 			RepositoryName: repo.FullName,
@@ -231,7 +242,7 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 			IsDependabot:   entity.IsDependabotAuthor(remote.AuthorLogin),
 			IsDraft:        remote.IsDraft,
 			State:          entity.PRStateOpen,
-			MergeableState: entity.MergeableStateUnknown,
+			MergeableState: merge,
 			CIStatus:       ci,
 			HeadSHA:        remote.HeadSHA,
 			BaseRef:        remote.BaseRef,
@@ -249,8 +260,9 @@ func (uc *UseCase) backfillOpenPullRequests(ctx context.Context, token string, r
 }
 
 // refreshPullRequest brings a stored PR in line with what GitHub lists now: title, draft flag, base,
-// head commit (and the CI of that commit), and open again if it was reopened. A new head commit has
-// no known merge state yet. It writes only when something differs, and reports whether it did.
+// head commit (and the CI of that commit), open again if it was reopened, and the merge state GitHub
+// has now for that head (unknown when it cannot say). It writes only when something differs, and
+// reports whether it did.
 func (uc *UseCase) refreshPullRequest(ctx context.Context, token string, repo *entity.Repository, target entity.InstallationRepository, existing *entity.PullRequest, remote entity.RemotePullRequest) (bool, error) {
 	ci, err := uc.recordCheckRuns(ctx, token, repo, target, remote.HeadSHA)
 	if err != nil {
@@ -262,8 +274,16 @@ func (uc *UseCase) refreshPullRequest(ctx context.Context, token string, repo *e
 	if existing.HeadSHA != remote.HeadSHA || existing.State != entity.PRStateOpen {
 		next.MergeableState = entity.MergeableStateUnknown
 	}
+	state, ok, err := uc.liveMergeState(ctx, token, target, remote)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		next.MergeableState = state
+	}
 	if next.Title == existing.Title && next.IsDraft == existing.IsDraft && next.BaseRef == existing.BaseRef &&
-		next.HeadSHA == existing.HeadSHA && next.CIStatus == existing.CIStatus && next.State == existing.State {
+		next.HeadSHA == existing.HeadSHA && next.CIStatus == existing.CIStatus && next.State == existing.State &&
+		next.MergeableState == existing.MergeableState {
 		return false, nil
 	}
 	next.UpdatedAt = uc.nowFunc().UTC()
@@ -272,6 +292,26 @@ func (uc *UseCase) refreshPullRequest(ctx context.Context, token string, repo *e
 	}
 	*existing = next
 	return true, nil
+}
+
+// liveMergeState asks GitHub for a listed PR's merge state, which the list does not carry. ok is
+// false when GitHub cannot say for the listed head commit (unreadable, closed or pushed since). Only
+// a cancellation or a rate limit is an error: one unreadable PR never fails the resync (ADR-0013).
+func (uc *UseCase) liveMergeState(ctx context.Context, token string, target entity.InstallationRepository, remote entity.RemotePullRequest) (entity.MergeableState, bool, error) {
+	live, err := uc.github.GetPullRequest(ctx, token, target.Owner, target.Name, remote.Number)
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", false, context.Cause(ctx)
+		}
+		if errors.Is(err, entity.ErrRateLimited) {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	if !live.Open || live.HeadSHA != remote.HeadSHA {
+		return "", false, nil
+	}
+	return live.MergeableState, true, nil
 }
 
 // syncTurnFacts reads what decides a PR's turn: its changed files and its reviews. Both are only
