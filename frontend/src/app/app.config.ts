@@ -8,7 +8,10 @@ import {
   REPOSITORY_IMPORT_GATEWAY,
   TRANSLATION_GATEWAY,
 } from './domain/gateways/workspace.gateways';
+import { NOTIFICATION_DEVICE, NOTIFICATION_GATEWAY } from './domain/gateways/notification.gateways';
 import { HttpAuthGateway } from './infrastructure/auth/http-auth.gateway';
+import { BrowserNotificationDevice } from './infrastructure/browser/browser-notification-device';
+import { HttpNotificationGateway } from './infrastructure/http/http-notification.gateway';
 import { HttpPullRequestGateway } from './infrastructure/http/http-pull-request.gateway';
 import { HttpRepositoryImportGateway } from './infrastructure/http/http-repository-import.gateway';
 import { JsonTranslationGateway } from './infrastructure/i18n/json-translation.gateway';
@@ -21,6 +24,8 @@ export function provideAppGateways(): Provider[] {
     { provide: TRANSLATION_GATEWAY, useExisting: JsonTranslationGateway },
     { provide: AUTH_GATEWAY, useExisting: HttpAuthGateway },
     { provide: REPOSITORY_IMPORT_GATEWAY, useExisting: HttpRepositoryImportGateway },
+    { provide: NOTIFICATION_GATEWAY, useExisting: HttpNotificationGateway },
+    { provide: NOTIFICATION_DEVICE, useExisting: BrowserNotificationDevice },
   ];
 }
 

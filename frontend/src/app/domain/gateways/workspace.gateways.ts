@@ -9,6 +9,7 @@ import {
   WorkspaceDataset,
 } from '../models/workspace.models';
 import { GitHubAccountsResult, ImportableRepository } from '../models/repository-import.models';
+import { NotificationItem } from '../models/notification.models';
 
 export interface ActionRequestOptions {
   readonly signal?: AbortSignal;
@@ -57,6 +58,8 @@ export interface LiveEventGateway {
   connect(
     onEvent: (event: Omit<TimelineEventItem, 'key' | 't'>) => void,
     onStateChange: (state: SseConnectionState) => void,
+    /** The signed-in user's own notifications (ADR-0017). */
+    onNotification?: (notification: NotificationItem) => void,
   ): () => void;
 }
 

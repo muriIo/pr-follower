@@ -1,0 +1,18 @@
+<button
+  type="button"
+  class="pf-bell"
+  [class.has-unread]="store.badge() !== ''"
+  [attr.aria-expanded]="store.isOpen()"
+  aria-controls="pf-notification-center"
+  [attr.aria-label]="label()"
+  [attr.title]="label()"
+  (click)="store.toggleOpen()"
+>
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 6.5a4 4 0 0 1 8 0c0 3 1.25 4.25 1.75 5H2.25C2.75 10.75 4 9.5 4 6.5Z"></path>
+    <path d="M6.5 13.5a1.5 1.5 0 0 0 3 0"></path>
+  </svg>
+  @if (store.badge(); as badge) {
+    <span class="pf-bell-badge" aria-hidden="true">{{ badge }}</span>
+  }
+</button>

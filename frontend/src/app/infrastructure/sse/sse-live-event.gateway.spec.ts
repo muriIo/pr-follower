@@ -222,4 +222,28 @@ describe('SseLiveEventGateway', () => {
     expect(texts).toEqual([]);
     disconnect();
   });
+
+  it('hands a notification event to its own callback, never to the activity timeline', () => {
+    (globalThis as { EventSource?: unknown }).EventSource = FakeEventSource;
+    TestBed.configureTestingModule({ providers: [SseLiveEventGateway] });
+    const gateway = TestBed.inject(SseLiveEventGateway);
+    const activities: unknown[] = [];
+    const notifications: { id: number; kind: string; popUp: boolean }[] = [];
+    const disconnect = gateway.connect(
+      (ev) => activities.push(ev),
+      () => undefined,
+      (n) => notifications.push(n),
+    );
+    FakeEventSource.last.open();
+    FakeEventSource.last.emit('notification', {
+      id: 41, kind: 'turn', reason: 'review_requested', repository_id: 10, pull_request_id: 77, pr_number: 35,
+      created_at: '2026-11-23T09:00:00Z', pop_up: true,
+    });
+    FakeEventSource.last.emit('notification', 'not an object');
+
+    expect(activities).toHaveLength(0);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({ id: 41, kind: 'turn', popUp: true });
+    disconnect();
+  });
 });

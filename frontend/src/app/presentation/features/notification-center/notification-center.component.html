@@ -1,0 +1,48 @@
+<aside
+  id="pf-notification-center"
+  class="pf-notif"
+  role="dialog"
+  aria-labelledby="pf-notif-title"
+  (keydown.escape)="store.close()"
+>
+  <header class="pf-notif-head">
+    <h2 id="pf-notif-title" class="pf-notif-title">{{ 'notifications.title' | t }}</h2>
+    <button type="button" class="pf-icon-btn" [attr.aria-label]="'notifications.close' | t" (click)="store.close()">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true">
+        <path d="M4 4l8 8M12 4l-8 8"></path>
+      </svg>
+    </button>
+  </header>
+
+  <div class="pf-notif-tabs" role="tablist">
+    <button
+      type="button"
+      role="tab"
+      class="pf-notif-tab"
+      [attr.aria-selected]="store.tab() === 'list'"
+      (click)="store.setTab('list')"
+    >
+      {{ 'notifications.tab.list' | t }}
+      @if (store.badge(); as badge) {
+        <span class="pf-count pf-count-turn">{{ badge }}</span>
+      }
+    </button>
+    <button
+      type="button"
+      role="tab"
+      class="pf-notif-tab"
+      [attr.aria-selected]="store.tab() === 'settings'"
+      (click)="store.setTab('settings')"
+    >
+      {{ 'notifications.tab.settings' | t }}
+    </button>
+  </div>
+
+  <div class="pf-notif-body" role="tabpanel">
+    @if (store.tab() === 'list') {
+      <app-notification-list />
+    } @else {
+      <app-notification-settings />
+    }
+  </div>
+</aside>

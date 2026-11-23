@@ -4,11 +4,12 @@ import { LocaleStore } from '../../../application/stores/locale.store';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { TranslatePipe } from '../../../infrastructure/i18n/json-translation.gateway';
 import { StatusDotComponent } from '../../common/status-dot/status-dot.component';
+import { NotificationBellComponent } from '../notification-bell/notification-bell.component';
 
 @Component({
   selector: 'app-sidebar-nav',
   standalone: true,
-  imports: [StatusDotComponent, TranslatePipe],
+  imports: [StatusDotComponent, NotificationBellComponent, TranslatePipe],
   templateUrl: './sidebar-nav.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

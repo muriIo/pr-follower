@@ -1,0 +1,90 @@
+<div class="pf-notif-actions">
+  <button
+    type="button"
+    class="pf-btn pf-btn-sm"
+    [attr.aria-disabled]="store.unread() === 0"
+    (click)="markAll()"
+  >
+    {{ 'notifications.markAllRead' | t }}
+  </button>
+</div>
+
+@if (store.loadError()) {
+  <p class="pf-note pf-note-err" role="alert">{{ 'notifications.loadFailed' | t }}</p>
+}
+
+@if (ordered().length === 0) {
+  <p class="pf-notif-empty">{{ 'notifications.empty' | t }}</p>
+} @else {
+  <ul class="pf-notif-list">
+    @for (group of ordered(); track group.key) {
+      <li class="pf-notif-item" [class]="'pf-notif-item pf-notif-' + group.kind" [class.is-unread]="group.unread > 0">
+        @if (group.items.length === 1) {
+          @for (row of group.items; track row.id) {
+            <button type="button" class="pf-notif-open" (click)="store.activate([row.id])">
+              <span class="pf-notif-icon" aria-hidden="true">{{ icon(row) }}</span>
+              <span class="pf-notif-text">
+                <span class="pf-notif-heading">{{ row.heading }}</span>
+                <span class="pf-notif-line">{{ row.line }}</span>
+                <span class="pf-notif-pr">{{ row.title }}</span>
+              </span>
+              <span class="pf-notif-meta">
+                <time>{{ ago(row.createdAt) }}</time>
+                @if (!row.read) {
+                  <span class="pf-notif-dot" role="img" [attr.aria-label]="'notifications.unreadDot' | t"></span>
+                }
+              </span>
+            </button>
+          }
+        } @else {
+          <button type="button" class="pf-notif-open" (click)="store.activate(ids(group))">
+            <span class="pf-notif-icon" aria-hidden="true">{{ icon(group.items[0]) }}</span>
+            <span class="pf-notif-text">
+              <span class="pf-notif-heading">{{ group.title }}</span>
+              <span class="pf-notif-pr">{{ group.items[0].title }}</span>
+            </span>
+            <span class="pf-notif-meta">
+              <time>{{ ago(group.items[0].createdAt) }}</time>
+              @if (group.unread) {
+                <span class="pf-notif-dot" role="img" [attr.aria-label]="'notifications.unreadDot' | t"></span>
+              }
+            </span>
+          </button>
+          <button
+            type="button"
+            class="pf-notif-expand"
+            [attr.aria-expanded]="store.expanded().has(group.key)"
+            (click)="store.toggleGroup(group.key)"
+          >
+            @if (store.expanded().has(group.key)) {
+              {{ 'notifications.collapse' | t }}
+            } @else {
+              {{ 'notifications.expand' | t: { count: group.items.length } }}
+            }
+          </button>
+          @if (store.expanded().has(group.key)) {
+            <ul class="pf-notif-sublist">
+              @for (row of group.items; track row.id) {
+                <li>
+                  <button type="button" class="pf-notif-open pf-notif-open-sm" [class.is-unread]="!row.read" (click)="store.activate([row.id])">
+                    <span class="pf-notif-icon" aria-hidden="true">{{ icon(row) }}</span>
+                    <span class="pf-notif-text">
+                      <span class="pf-notif-line">{{ row.heading }}</span>
+                      <span class="pf-notif-pr">{{ row.title }}</span>
+                    </span>
+                    <span class="pf-notif-meta">
+                      <time>{{ ago(row.createdAt) }}</time>
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        }
+      </li>
+    }
+  </ul>
+  @if (store.canLoadMore()) {
+    <button type="button" class="pf-btn pf-btn-sm pf-notif-more" (click)="store.loadMore()">{{ 'notifications.loadMore' | t }}</button>
+  }
+}

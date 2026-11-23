@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { AuthStore } from '../../../application/stores/auth.store';
+import { NotificationStore } from '../../../application/stores/notification.store';
 import { RepositoryImportStore } from '../../../application/stores/repository-import.store';
 import { WorkspaceStore } from '../../../application/stores/workspace.store';
 import { CodeownersInboxViewComponent } from '../../features/codeowners-inbox-view/codeowners-inbox-view.component';
@@ -7,6 +8,7 @@ import { DependabotRadarViewComponent } from '../../features/dependabot-radar-vi
 import { NoticeBarComponent } from '../../common/notice-bar/notice-bar.component';
 import { InspectionDrawerComponent } from '../../features/inspection-drawer/inspection-drawer.component';
 import { LoginViewComponent } from '../../features/login-view/login-view.component';
+import { NotificationCenterComponent } from '../../features/notification-center/notification-center.component';
 import { RepositoryImportViewComponent } from '../../features/repository-import-view/repository-import-view.component';
 import { SeatsViewComponent } from '../../features/seats-view/seats-view.component';
 import { TimelineViewComponent } from '../../features/timeline-view/timeline-view.component';
@@ -25,6 +27,7 @@ import { SidebarNavComponent } from '../sidebar-nav/sidebar-nav.component';
     RepositoryImportViewComponent,
     InspectionDrawerComponent,
     NoticeBarComponent,
+    NotificationCenterComponent,
   ],
   templateUrl: './workspace-shell.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,6 +35,7 @@ import { SidebarNavComponent } from '../sidebar-nav/sidebar-nav.component';
 export class WorkspaceShellComponent {
   readonly store = inject(WorkspaceStore);
   readonly authStore = inject(AuthStore);
+  readonly notifications = inject(NotificationStore);
   private readonly importStore = inject(RepositoryImportStore);
 
   constructor() {
