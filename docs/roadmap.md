@@ -2,7 +2,7 @@
 
 What is finished and what is still open, by module. This is the single status list: tick an item (`[x]`) or add one in the same PR that changes it. Design lives in [`implementation-plan.md`](implementation-plan.md), rules in [`adr/`](adr/README.md).
 
-Last reviewed: 2026-11-16 (open items checked against the code after #47 and the v1 hardening; GitHub-facing paths verified against a real repository, see [`real-github-verification.md`](real-github-verification.md)).
+Last reviewed: 2026-11-25 (every commit since the 2026-11-16 review checked against the items after #84, and the open items rechecked against the code; GitHub-facing paths verified against a real repository, see [`real-github-verification.md`](real-github-verification.md)).
 
 **Priorities** for open items:
 - **P0**: wrong or unsafe today; fix before anything else.
@@ -13,6 +13,7 @@ Last reviewed: 2026-11-16 (open items checked against the code after #47 and the
 
 No P1 item is open. In order of value:
 1. **P2** A periodic background resync, so a repository nobody syncs after downtime does not stay stale ([PR state](#3-pr-state-from-github)).
+2. **P2** Notifications with the panel closed (Web Push), the second slice of the notification center ([Live updates](#7-live-updates--timeline)).
 
 ## 1. Identity & sessions
 
@@ -56,7 +57,7 @@ No P1 item is open. In order of value:
   - a review, from the panel or a webhook;
   - a change in a commit's CI.
 
-  "Sincronizar" reads each open PR's state from GitHub. A merge stores the live state, and after GitHub refuses one it reads the state again. Branch protection's `blocked` only warns, because it can lag a review GitHub has not counted yet: GitHub decides the merge and names the rule when it refuses. After an approval made in the panel, the merge button waits 10 s with a countdown. Seen on 2026-11-23: an approved PR stayed `BLOCKED` with the merge disabled while GitHub said `clean`.
+  "Sincronizar" reads each open PR's state from GitHub. A merge stores the live state, and after GitHub refuses one it reads the state again. Branch protection's `blocked` only warns, because it can lag a review GitHub has not counted yet: GitHub decides the merge and names the rule when it refuses. After an approval made in the panel, the merge button waits 10 s with a countdown. Seen on 2026-11-23: an approved PR stayed `BLOCKED` with the merge disabled while GitHub said `clean` (#82).
 - [x] Legacy commit statuses (Jenkins, Vercel) count like checks: the `status` webhook and a commit's combined status at import are stored (own table, own id space), listed beside check runs, the latest status of each context decides, and a pending one keeps a PR from looking green. Needs the app subscribed to Status events (#28).
 - [x] Statuses of PRs stored before statuses were ingested are filled in by "Sincronizar", which re-reads the check runs and statuses of every open PR's head commit (#29).
 - [x] Verified against real GitHub (2026-11-16) with statuses created through the API: pending, success and failure arrive by the `status` webhook within seconds, a pending one disables approve and merge, and a status created while no webhook could arrive is read by the sync.
@@ -117,7 +118,7 @@ No P1 item is open. In order of value:
 - [x] Verified with two running replicas (2026-11-16): two API processes on one Postgres behind an nginx that picks a replica per request. Webhooks accepted by either replica reached a live stream held by the other (8 real commit statuses, CI events in the drawer and timeline), and a sync started on one replica was followed to the end by progress polls answered by the other.
 - [ ] **P2** Not verified with two running replicas yet: a sync or an operation cancelled on the replica that does not run it (covered by tests only; a two-repository sync ends in about two seconds, too fast to cancel by hand).
 - [ ] **P2** A stream that reconnects does not replay what it missed (the SPA reloads the workspace instead), and the timeline shows at most 200 events.
-- [x] Notification center (2026-11-23, ADR-0017, terms in [`GLOSSARY.md`](../GLOSSARY.md)): the API creates a notification when something just became the user's to act on, never for a state that persists, and never for what the user did themselves: a PR entering Minha Vez (review requested, new commit, snooze ended, author replied), a Dependabot analysis that comes out Alto Risco (once per climb, to every follower but the one who claimed it), and an involved PR (reviewed, commented or claimed) merged or closed by someone else, its approval dismissed, or its CI red after the approval. A notifier reads the activity log in order, one replica at a time (advisory lock), with its own stored position; a repository is recorded silently the first time it is seen for a user, and the upgrade starts at the newest activity, so nothing old notifies. Each notification is unique per user, kind, reason, PR and commit, so a redelivery creates nothing. The panel gets the user's own notifications on the SSE stream (`notification` event), lists them in a side panel opened from a bell (unread count, 9+), groups a burst of one kind into one entry and one system popup (`Notification` API, one `tag` per kind), skips the popup while the panel is on screen, and keeps read state in step across the browser's tabs. Settings live on the server: a pause and a popup switch per kind; the five browser-permission states each show their one action. Kept 30 days.
+- [x] Notification center (2026-11-25, #84, ADR-0017, terms in [`GLOSSARY.md`](../GLOSSARY.md)): the API creates a notification when something just became the user's to act on, never for a state that persists, and never for what the user did themselves: a PR entering Minha Vez (review requested, new commit, snooze ended, author replied), a Dependabot analysis that comes out Alto Risco (once per climb, to every follower but the one who claimed it), and an involved PR (reviewed, commented or claimed) merged or closed by someone else, its approval dismissed, or its CI red after the approval. A notifier reads the activity log in order, one replica at a time (advisory lock), with its own stored position; a repository is recorded silently the first time it is seen for a user, and the upgrade starts at the newest activity, so nothing old notifies. Each notification is unique per user, kind, reason, PR and commit, so a redelivery creates nothing. The panel gets the user's own notifications on the SSE stream (`notification` event), lists them in a side panel opened from a bell (unread count, 9+), groups a burst of one kind into one entry and one system popup (`Notification` API, one `tag` per kind), skips the popup while the panel is on screen, and keeps read state in step across the browser's tabs. Settings live on the server: a pause and a popup switch per kind; the five browser-permission states each show their one action. Kept 30 days. Clicking a notification or its popup opens what it is about: one PR opens Minha Vez (Radar for Alto Risco) with that PR's drawer, a burst opens its perspective, a PR not loaded yet reloads the workspace first, and a PR that is gone or a repository no longer followed says so. The panel resizes like the PR drawer (drag, double-click, arrow keys; its width is remembered), and only one of the two is open at a time.
 - [ ] **P2** Notifications with the panel closed (Web Push): a `webpush` delivery channel switched on by the VAPID keys, a push-only service worker, device registrations (`notification_endpoints`), and the operator docs (outbound push-service hosts, Compose, Kubernetes and ECS snippets).
 - [ ] **P2** Read state reaches another device's open panel only when that panel is shown again (tabs of one browser agree at once).
 - [ ] **P2** A turn that changes with no activity (a PR's changed files read for the first time on a workspace load) notifies only at the next activity on that PR.
@@ -136,6 +137,7 @@ No P1 item is open. In order of value:
 
 - [x] Angular 22 standalone, Signals, modular `common` / `features` / `layout` (ADR-0009).
 - [x] pt-BR / en-US i18n, with a gate on keys used in templates (ADR-0008).
+- [x] The current language's dictionary loads before the first render (#84). `pt-BR.json` used to be fetched only on a language switch, so the 262 of its 442 keys missing from the built-in dictionary (the follow button's "Importando PRs...", review and check labels, some errors) showed as raw keys; the built-in one stays as the fallback when the file cannot be read.
 - [x] No hardcoded display text: store, mapper and templates render keys (with params and plurals); the ADR-0008 gate fails on literal text (#17).
 - [x] Timeline follows the locale: activity carries its type and params (title, method, package...), never a sentence; the client phrases it.
 - [x] No demo data in production; sample data only in test fixtures (#10).
@@ -161,7 +163,7 @@ No P1 item is open. In order of value:
 
 ## 11. Engineering guidelines
 
-- [x] ADR-0001 to ADR-0016, each with an executable gate (`make adr-check`).
+- [x] ADR-0001 to ADR-0017, each with an executable gate (`make adr-check`).
 - [x] `AGENTS.md` / `CLAUDE.md` for agents; implementation plan; production runbook; this roadmap.
 
 ## 12. Business & distribution
@@ -174,8 +176,10 @@ Decisions and open questions: [`business-and-distribution.md`](business-and-dist
 - [x] Distribution model: CI on every PR, semver tags publish images to GHCR with a GitHub Release (2026-11-13). Revised 2026-11-16: each team deploys tagged images itself; this repository runs no staging or production.
 - [x] CI workflow running `make check` on PRs and `main` (`.github/workflows/ci.yml`; Postgres-backed tests included).
 - [x] Required CI checks enforced on `main` and `develop` since the repository went public (2026-11-17); a direct push is rejected ([distribution §2](business-and-distribution.md#2-distribution)).
-- [ ] **P2** Go public at launch: secrets check of the git history, `CONTRIBUTING.md`, `.github/FUNDING.yml` (README and `SECURITY.md` done), then verify the rulesets are enforced.
+- [ ] **P2** Public-repository basics: `CONTRIBUTING.md` and `.github/FUNDING.yml`. The repository is public, and the README, `SECURITY.md`, the history's secrets scan (Gitleaks, `make security`) and the enforced rulesets are done.
 - [x] Release workflow (`.github/workflows/release.yml`, 2026-11-17): a `vX.Y.Z` tag on a `main` commit with green CI publishes both images to GHCR for amd64 and arm64, with an SBOM, build provenance and a GitHub artifact attestation, and creates the GitHub Release from the tag's notes ([distribution §2](business-and-distribution.md#2-distribution)).
 - [x] First release: [`v0.1.0`](https://github.com/muriIo/pr-follower/releases/tag/v0.1.0) (2026-11-18), after a `v0.1.0-rc.1` dry run that also ran the images end to end in the Compose bundle (sign-in, app install, webhooks through smee).
 - [x] Landing page (2026-11-18): a static page in `landing/` (no build, no JavaScript, fonts and WebP screenshots self-hosted), published to GitHub Pages by `.github/workflows/pages.yml` when a change to it reaches `main` ([ADR-0014](adr/0014-static-landing-page-on-github-pages.md)). Needs Settings → Pages → Source: GitHub Actions once.
+- [x] Every release ships an upgrade guide (2026-11-19): `docs/upgrades/UNRELEASED.md` collects the operator's steps during a cycle and becomes `docs/upgrades/vX.Y.Z.md` at release, and the deploy files pin the version; the release workflow refuses a tag whose guide or pins are missing, and appends the guide (digests filled in) to the GitHub Release.
+- [x] Second release: [`v0.2.0`](https://github.com/muriIo/pr-follower/releases/tag/v0.2.0) (2026-11-19), with the first deployment's feedback (advisory-locked migrations, `/api/v1/healthz`, read-only filesystems, Kubernetes examples), the org allowlist, and claim and snooze limited to followed repositories.
 - [x] First deployment at the first company (2026-11-18): its own GitHub App, database and pipeline, deploying v0.1.0 from GHCR. Its feedback is addressed under [Backend platform & operations](#10-backend-platform--operations) (2026-11-19).
