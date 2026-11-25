@@ -232,6 +232,34 @@ describe('NotificationStore', () => {
     expect(store.groups()[0].items[0].line).toBe(t.translate('notifications.reason.merged', { actor: 'carol' }));
   });
 
+  it('sizes the panel within its bounds, steps it, resets it and remembers it', () => {
+    store.resetWidth();
+    expect(store.width()).toBe(400);
+    store.startResize();
+    expect(store.isResizing()).toBe(true);
+    store.setWidth(520, 900);
+    expect(store.width()).toBe(520);
+    store.setWidth(100, 900);
+    expect(store.width()).toBe(320);
+    store.setWidth(2000, 700);
+    expect(store.width()).toBe(700);
+    store.endResize();
+    expect(store.isResizing()).toBe(false);
+    store.resetWidth();
+    store.stepWidth(24, 900);
+    expect(store.width()).toBe(424);
+    expect(localStorage.getItem('pf-notif-w')).toBe('424');
+    store.resetWidth();
+  });
+
+  it('tells the workspace when the center opens, not when it closes', () => {
+    let opened = 0;
+    store.setOnOpen(() => opened++);
+    store.toggleOpen();
+    store.toggleOpen();
+    expect(opened).toBe(1);
+  });
+
   it('forgets everything when the session ends', () => {
     store.stop();
     expect(store.items()).toEqual([]);

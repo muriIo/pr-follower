@@ -33,4 +33,30 @@ describe('NotificationCenterComponent', () => {
     el.querySelector('aside')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     expect(store.isOpen()).toBe(false);
   });
+
+  it('resizes like the other drawers: drag, double-click reset and arrow keys', () => {
+    const { el, store, fixture } = render();
+    store.resetWidth();
+    fixture.detectChanges();
+    const handle = el.querySelector('#pf-notif-resize') as HTMLElement;
+    expect(handle).toBeTruthy();
+    expect(el.querySelector('aside')!.style.getPropertyValue('--pf-nw')).toBe('400px');
+
+    handle.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 800, pointerId: 1, bubbles: true }));
+    expect(store.isResizing()).toBe(true);
+    handle.dispatchEvent(new PointerEvent('pointermove', { clientX: 700, pointerId: 1, bubbles: true }));
+    fixture.detectChanges();
+    expect(store.width()).toBe(500);
+    expect(el.querySelector('aside')!.style.getPropertyValue('--pf-nw')).toBe('500px');
+    handle.dispatchEvent(new PointerEvent('pointerup', { clientX: 700, pointerId: 1, bubbles: true }));
+    expect(store.isResizing()).toBe(false);
+
+    handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    expect(store.width()).toBe(400);
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(store.width()).toBe(424);
+    handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(store.width()).toBe(400);
+    store.resetWidth();
+  });
 });

@@ -401,7 +401,7 @@ a.pf-btn { text-decoration: none; }
 .pf-bell-badge { position: absolute; top: -3px; right: -5px; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; color: #fff; background: var(--rose); box-shadow: 0 0 0 2px var(--canvas); }
 .pf-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-2); }
 .pf-icon-btn:hover { background: var(--surface-hover); color: var(--text); }
-.pf-notif { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; width: min(400px, 100%); background: var(--elevated); border-left: 1px solid var(--border); box-shadow: -16px 0 32px rgba(0, 0, 0, .35); animation: pf-dock-in .18s ease-out; }
+.pf-notif { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; width: min(var(--pf-nw, 400px), 100%); background: var(--elevated); border-left: 1px solid var(--border); box-shadow: -16px 0 32px rgba(0, 0, 0, .35); animation: pf-dock-in .18s ease-out; }
 .pf-notif-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-2); }
 .pf-notif-title { font-size: 15px; font-weight: 600; }
 .pf-notif-tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--border); }
@@ -410,6 +410,11 @@ a.pf-btn { text-decoration: none; }
 .pf-notif-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--indigo); font-weight: 500; }
 .pf-notif-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-4) var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
 .pf-notif-actions { display: flex; justify-content: flex-end; }
+.pf-notif.is-resizing { cursor: col-resize; user-select: none; }
+.pf-notif.is-resizing .pf-resize::before { background: var(--focus); }
+.pf-notif.is-resizing .pf-grip { color: var(--text); border-color: var(--focus); }
+/* The list's host takes no box, so the body's gap spaces its button, notes and list. */
+app-notification-list { display: contents; }
 .pf-notif-empty { padding: 40px 8px; text-align: center; color: var(--text-2); }
 .pf-notif-list, .pf-notif-sublist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .pf-notif-item { --pf-kind: var(--indigo); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--pf-kind); border-radius: 8px; overflow: hidden; }

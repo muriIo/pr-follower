@@ -1523,6 +1523,19 @@ describe('WorkspaceStore notifications', () => {
     return { store, center, deliver: (n: NotificationItem) => deliver?.(n) };
   }
 
+  it('shows one side panel at a time: the center closes the PR drawer and a PR closes the center', () => {
+    const { store, center } = setup();
+    const pr = store.prs()[0];
+    store.openPr(pr.id);
+    center.toggleOpen();
+    expect(center.isOpen()).toBe(true);
+    expect(store.selectedPrId()).toBeNull();
+
+    store.openPr(pr.id);
+    expect(store.selectedPrId()).toBe(pr.id);
+    expect(center.isOpen()).toBe(false);
+  });
+
   it('hands live notifications to the notification center', () => {
     const { store, center, deliver } = setup();
     const pr = store.prs().find((p) => !p.dep)!;

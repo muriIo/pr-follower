@@ -1,10 +1,40 @@
 <aside
   id="pf-notification-center"
   class="pf-notif"
+  [class.is-resizing]="store.isResizing()"
+  [style.--pf-nw.px]="store.width()"
   role="dialog"
   aria-labelledby="pf-notif-title"
   (keydown.escape)="store.close()"
 >
+  <div
+    id="pf-notif-resize"
+    class="pf-resize"
+    role="separator"
+    tabindex="0"
+    aria-orientation="vertical"
+    [attr.aria-label]="'drawer.resize' | t"
+    [attr.aria-valuemin]="320"
+    [attr.aria-valuenow]="store.width()"
+    (pointerdown)="onResizeStart($event)"
+    (pointermove)="onResizeMove($event)"
+    (pointerup)="onResizeEnd($event)"
+    (pointercancel)="onResizeEnd($event)"
+    (dblclick)="store.resetWidth()"
+    (keydown)="onResizeKeydown($event)"
+  >
+    <span class="pf-grip" aria-hidden="true">
+      <svg width="6" height="14" viewBox="0 0 6 14" fill="currentColor">
+        <circle cx="1.25" cy="2" r="1"></circle>
+        <circle cx="4.75" cy="2" r="1"></circle>
+        <circle cx="1.25" cy="7" r="1"></circle>
+        <circle cx="4.75" cy="7" r="1"></circle>
+        <circle cx="1.25" cy="12" r="1"></circle>
+        <circle cx="4.75" cy="12" r="1"></circle>
+      </svg>
+    </span>
+  </div>
+
   <header class="pf-notif-head">
     <h2 id="pf-notif-title" class="pf-notif-title">{{ 'notifications.title' | t }}</h2>
     <button type="button" class="pf-icon-btn" [attr.aria-label]="'notifications.close' | t" (click)="store.close()">

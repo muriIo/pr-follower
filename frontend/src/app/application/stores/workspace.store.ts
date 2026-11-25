@@ -408,6 +408,7 @@ export class WorkspaceStore {
     }
     void this.loadWorkspace();
     this.notifications.setOpener((items) => void this.openNotified(items));
+    this.notifications.setOnOpen(() => this.closeDrawer()); // one side panel at a time
     void this.notifications.start();
     this.disconnectLive =
       this.sseGateway?.connect(
@@ -1028,6 +1029,7 @@ export class WorkspaceStore {
   }
 
   openPr(prId: number): void {
+    this.notifications.close(); // one side panel at a time
     this.closingDrawer.set(false);
     this.selectedPrId.set(prId);
     this.selectedTreeNode.set(null);

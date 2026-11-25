@@ -17,6 +17,11 @@ export const POPUP_BURST_MS = 1500;
 const CENTER_BURST_MS = 2 * 60_000;
 /** How many PR titles a grouped popup lists. */
 const POPUP_TITLES = 3;
+/** The panel's width bounds (px), remembered in this browser like the PR drawer's. */
+const PANEL_MIN_PX = 320;
+const PANEL_DEFAULT_PX = 400;
+const PANEL_STORED_MAX_PX = 1200;
+const PANEL_WIDTH_KEY = 'pf-notif-w';
 
 /** One of the five states the settings show (the browser permission, then the user's pause). */
 export type NotificationStatus = 'unsupported' | 'default' | 'active' | 'paused' | 'denied';
@@ -58,6 +63,8 @@ export class NotificationStore {
   readonly tab = signal<'list' | 'settings'>('list');
   readonly loadError = signal<ActionError | null>(null);
   readonly expanded = signal<ReadonlySet<string>>(new Set());
+  readonly width = signal(loadPanelWidth());
+  readonly isResizing = signal(false);
   private readonly nextBefore = signal<number | null>(null);
 
   readonly canLoadMore = computed(() => this.nextBefore() !== null);
@@ -108,6 +115,7 @@ export class NotificationStore {
   });
 
   private opener: ((items: readonly NotificationItem[]) => void) | null = null;
+  private onOpen: (() => void) | null = null;
   private popupBuffer: NotificationItem[] = [];
   private popupTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribers: (() => void)[] = [];
@@ -153,6 +161,11 @@ export class NotificationStore {
   /** What opening notifications does (the workspace decides: the drawer, a perspective). */
   setOpener(fn: (items: readonly NotificationItem[]) => void): void {
     this.opener = fn;
+  }
+
+  /** What opening the center does to the rest of the screen (the workspace closes its PR drawer). */
+  setOnOpen(fn: () => void): void {
+    this.onOpen = fn;
   }
 
   /** Reloads the newest page: after a reconnect or when the tab is shown again. */
@@ -257,6 +270,7 @@ export class NotificationStore {
     this.isOpen.update((open) => !open);
     if (this.isOpen()) {
       this.refreshPermission();
+      this.onOpen?.();
     }
   }
 
@@ -276,6 +290,33 @@ export class NotificationStore {
       }
       return next;
     });
+  }
+
+  startResize(): void {
+    this.isResizing.set(true);
+  }
+
+  endResize(): void {
+    this.isResizing.set(false);
+  }
+
+  /** Sets the panel's width within its bounds and remembers it. */
+  setWidth(nextPx: number, maxPx: number = 960): void {
+    const clamped = Math.round(Math.min(Math.max(PANEL_MIN_PX, maxPx), Math.max(PANEL_MIN_PX, nextPx)));
+    this.width.set(clamped);
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(clamped));
+    } catch {
+      // Storage blocked: the width still applies to this page.
+    }
+  }
+
+  stepWidth(deltaPx: number, maxPx: number = 960): void {
+    this.setWidth(this.width() + deltaPx, maxPx);
+  }
+
+  resetWidth(): void {
+    this.setWidth(PANEL_DEFAULT_PX);
   }
 
   private async loadOptions(): Promise<void> {
@@ -375,4 +416,16 @@ export class NotificationStore {
       createdAt: n.createdAt,
     };
   }
+}
+
+function loadPanelWidth(): number {
+  try {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    if (Number.isFinite(saved) && saved >= PANEL_MIN_PX && saved <= PANEL_STORED_MAX_PX) {
+      return Math.round(saved);
+    }
+  } catch {
+    // Storage blocked: start at the default.
+  }
+  return PANEL_DEFAULT_PX;
 }
