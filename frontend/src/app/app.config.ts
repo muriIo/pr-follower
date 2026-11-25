@@ -1,6 +1,7 @@
-import { ApplicationConfig, Provider, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, Provider, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { routes } from './app.routes';
+import { LocaleStore } from './application/stores/locale.store';
 import {
   AUTH_GATEWAY,
   LIVE_EVENT_GATEWAY,
@@ -34,5 +35,7 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideRouter(routes),
     ...provideAppGateways(),
+    // The first render needs the whole dictionary: the built-in one covers only part of the UI.
+    provideAppInitializer(() => inject(LocaleStore).load()),
   ],
 };

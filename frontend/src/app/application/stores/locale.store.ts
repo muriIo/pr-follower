@@ -465,6 +465,22 @@ export class LocaleStore {
     return typeof value === 'string' ? value : this.translate(value.key, value.params);
   }
 
+  /**
+   * Loads the current language's dictionary (at startup, before the first render). The built-in
+   * messages cover only part of the UI, so they stay as the fallback when the file cannot be read.
+   */
+  async load(): Promise<void> {
+    if (!this.gateway) {
+      return;
+    }
+    try {
+      const loaded = await this.gateway.loadDictionary(this.locale());
+      this.dictionary.set({ ...DEFAULT_PT_BR_DICTIONARY, ...loaded });
+    } catch {
+      // Unreachable dictionary: render with the built-in messages.
+    }
+  }
+
   async switchLocale(nextLocale: 'pt-BR' | 'en-US'): Promise<void> {
     if (this.gateway) {
       const loaded = await this.gateway.loadDictionary(nextLocale);
