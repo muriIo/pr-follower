@@ -1,5 +1,6 @@
 # PR Follower
 
+
 > Um painel único e ao vivo para os PRs que dependem de você: revisões pedidas pelo CODEOWNERS e PRs do Dependabot, com o que importa em cada um.
 
 [![CI](https://github.com/muriIo/pr-follower/actions/workflows/ci.yml/badge.svg)](https://github.com/muriIo/pr-follower/actions/workflows/ci.yml)
