@@ -44,6 +44,7 @@ func (uc *UseCase) ResyncReporting(ctx context.Context, userID uint64, report fu
 	}
 
 	sort.Slice(followed, func(i, j int) bool { return followed[i].FullName < followed[j].FullName })
+	actor := uc.actorLogin(ctx, userID) // what the sync finds is not news to whoever ran it (ADR-0017)
 
 	for i := range followed {
 		repo := &followed[i]
@@ -59,7 +60,7 @@ func (uc *UseCase) ResyncReporting(ctx context.Context, userID uint64, report fu
 		stats, err := uc.backfillOpenPullRequests(ctx, token, repo, target, true)
 		var closed, merged int
 		if err == nil {
-			closed, merged, err = uc.closeMissingPullRequests(ctx, token, repo, stats.open)
+			closed, merged, err = uc.closeMissingPullRequests(ctx, token, actor, repo, stats.open)
 		}
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -89,7 +90,7 @@ func (uc *UseCase) ResyncReporting(ctx context.Context, userID uint64, report fu
 // closeMissingPullRequests closes the stored open PRs that GitHub did not list, after asking GitHub
 // what became of each: only one that is really not open is closed (merged, or closed without
 // merging), and each is announced.
-func (uc *UseCase) closeMissingPullRequests(ctx context.Context, token string, repo *entity.Repository, listed map[int]bool) (closed, merged int, err error) {
+func (uc *UseCase) closeMissingPullRequests(ctx context.Context, token, actor string, repo *entity.Repository, listed map[int]bool) (closed, merged int, err error) {
 	stored, err := uc.prs.ListOpenByRepoIDs(ctx, []uint64{repo.ID})
 	if err != nil {
 		return 0, 0, err
@@ -133,6 +134,7 @@ func (uc *UseCase) closeMissingPullRequests(ctx context.Context, token string, r
 			RepositoryName: repo.FullName,
 			PullRequestID:  pr.ID,
 			PRNumber:       pr.Number,
+			ActorLogin:     actor,
 			OccurredAt:     uc.nowFunc().UTC(),
 		})
 	}

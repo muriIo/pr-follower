@@ -48,6 +48,7 @@ func ValidateRepository(repoRoot string) (*ValidationReport, error) {
 	validateADR0014StaticLandingPage(repoRoot, report)
 	validateADR0015OrgAllowlistedSignIn(repoRoot, report)
 	validateADR0016LockedMigrations(repoRoot, report)
+	validateADR0017NotificationsFromTheAPI(repoRoot, report)
 
 	if len(report.Violations) > 0 {
 		return report, fmt.Errorf("found %d ADR compliance violation(s):\n- %s",

@@ -42,5 +42,9 @@
     @if (store.drawer(); as d) {
       <app-inspection-drawer [drawer]="d" />
     }
+
+    @if (notifications.isOpen()) {
+      <app-notification-center />
+    }
   </div>
 }

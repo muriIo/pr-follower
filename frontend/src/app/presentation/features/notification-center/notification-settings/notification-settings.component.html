@@ -1,0 +1,42 @@
+<section class="pf-notif-section" aria-labelledby="pf-notif-status-label">
+  <h3 id="pf-notif-status-label" class="pf-section">{{ 'notifications.status.label' | t }}</h3>
+  <p class="pf-notif-status" [class]="'pf-notif-status is-' + store.status()" role="status">
+    <span class="pf-notif-status-dot" aria-hidden="true"></span>
+    {{ 'notifications.status.' + store.status() | t }}
+  </p>
+  <p class="pf-note">{{ 'notifications.status.' + store.status() + '.help' | t }}</p>
+  @if (store.status() === 'default') {
+    <button type="button" class="pf-btn pf-btn-primary" (click)="store.enable()">{{ 'notifications.enable' | t }}</button>
+  }
+  @if (store.status() === 'active' || store.status() === 'paused') {
+    <button
+      type="button"
+      class="pf-toggle"
+      role="switch"
+      [attr.aria-checked]="store.status() === 'paused'"
+      (click)="store.setPaused(store.status() !== 'paused')"
+    >
+      <span class="pf-switch" aria-hidden="true"></span>
+      {{ 'notifications.pause' | t }}
+    </button>
+    <p class="pf-note">{{ 'notifications.pause.hint' | t }}</p>
+  }
+</section>
+
+<section class="pf-notif-section" aria-labelledby="pf-notif-kinds-label">
+  <h3 id="pf-notif-kinds-label" class="pf-section">{{ 'notifications.popups' | t }}</h3>
+  <p class="pf-note">{{ 'notifications.popups.hint' | t }}</p>
+  @for (k of store.kinds(); track k.kind) {
+    <div class="pf-notif-kind" [class]="'pf-notif-kind pf-notif-' + k.kind">
+      <button type="button" class="pf-toggle" role="switch" [attr.aria-checked]="k.on" (click)="store.togglePopups(k.kind)">
+        <span class="pf-switch" aria-hidden="true"></span>
+        {{ k.label }}
+      </button>
+      <p class="pf-note">{{ k.hint }}</p>
+    </div>
+  }
+</section>
+
+@if (!store.pushOffered()) {
+  <p class="pf-note pf-notif-push">{{ 'notifications.push.unavailable' | t }}</p>
+}

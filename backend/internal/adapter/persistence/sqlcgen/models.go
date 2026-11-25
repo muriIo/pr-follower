@@ -50,6 +50,52 @@ type DependabotAnalysisFailure struct {
 	FailedAt      time.Time `json:"failed_at"`
 }
 
+type LogPosition struct {
+	Name string `json:"name"`
+	Seq  int64  `json:"seq"`
+}
+
+type Notification struct {
+	ID             int64        `json:"id"`
+	UserID         int64        `json:"user_id"`
+	DedupKey       string       `json:"dedup_key"`
+	Kind           string       `json:"kind"`
+	Reason         string       `json:"reason"`
+	RepositoryID   int64        `json:"repository_id"`
+	RepositoryName string       `json:"repository_name"`
+	PullRequestID  int64        `json:"pull_request_id"`
+	PrNumber       int64        `json:"pr_number"`
+	PrTitle        string       `json:"pr_title"`
+	CommitSha      string       `json:"commit_sha"`
+	ActorLogin     string       `json:"actor_login"`
+	DetailsJson    string       `json:"details_json"`
+	CreatedAt      time.Time    `json:"created_at"`
+	ReadAt         sql.NullTime `json:"read_at"`
+}
+
+type NotificationBaseline struct {
+	UserID       int64     `json:"user_id"`
+	RepositoryID int64     `json:"repository_id"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type NotificationSetting struct {
+	UserID    int64     `json:"user_id"`
+	Paused    bool      `json:"paused"`
+	PopupsOff string    `json:"popups_off"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type NotificationWatch struct {
+	UserID        int64  `json:"user_id"`
+	PullRequestID int64  `json:"pull_request_id"`
+	RepositoryID  int64  `json:"repository_id"`
+	Turn          string `json:"turn"`
+	HeadSha       string `json:"head_sha"`
+	ApprovedSha   string `json:"approved_sha"`
+	Risk          string `json:"risk"`
+}
+
 type PrChangedFile struct {
 	PullRequestID int64     `json:"pull_request_id"`
 	HeadSha       string    `json:"head_sha"`

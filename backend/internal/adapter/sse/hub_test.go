@@ -404,3 +404,53 @@ func TestMemoryLog_KeepsOnlyTheNewestEvents(t *testing.T) {
 		t.Fatalf("expected the newest 1000 (from id 100), got %d from %q", len(all), all[0].Event.ID)
 	}
 }
+
+func TestHub_StreamSendsANotificationToItsOwnerOnly(t *testing.T) {
+	t.Parallel()
+	hub := sse.NewInMemoryHub(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		hub.StreamFor(rec, req, 7, allowAll)
+		close(done)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for hub.SubscriberCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	hub.SendNotifications([]entity.Notification{
+		{ID: 41, UserID: 7, Kind: entity.NotificationKindTurn, PRNumber: 35, PopUp: true},
+		{ID: 42, UserID: 8, Kind: entity.NotificationKindTurn, PRNumber: 36},
+	})
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := rec.Body.String()
+	if strings.Count(body, "event: notification\n") != 1 || !strings.Contains(body, "id: n41\n") || !strings.Contains(body, `"pop_up":true`) {
+		t.Fatalf("want user 7's notification as a notification event, got:\n%s", body)
+	}
+	if strings.Contains(body, `"pr_number":36`) {
+		t.Fatalf("another user's notification leaked:\n%s", body)
+	}
+}
+
+func TestHub_WakesFollowersAfterEveryRead(t *testing.T) {
+	t.Parallel()
+	hub := sse.NewInMemoryHub(t.Context())
+	wake := hub.Wakes(t.Context())
+	_ = hub.Publish(context.Background(), entity.ActivityEvent{ID: "x", Type: "pr.opened", RepositoryID: 1})
+	select {
+	case <-wake:
+	case <-time.After(time.Second):
+		t.Fatal("a follower is woken when the log has news")
+	}
+	hub.Wake(context.Background())
+	select {
+	case <-wake:
+	case <-time.After(time.Second):
+		t.Fatal("Wake wakes the followers too")
+	}
+}

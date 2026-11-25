@@ -3,6 +3,59 @@ import { I18nText } from '../../domain/models/workspace.models';
 import { TRANSLATION_GATEWAY } from '../../domain/gateways/workspace.gateways';
 
 const DEFAULT_PT_BR_DICTIONARY: Readonly<Record<string, string>> = {
+  'notifications.title': 'Notificações',
+  'notifications.bell': 'Notificações',
+  'notifications.bell.unread': 'Notificações: {count} não lidas',
+  'notifications.close': 'Fechar notificações',
+  'notifications.tab.list': 'Notificações',
+  'notifications.tab.settings': 'Configurações',
+  'notifications.markAllRead': 'Marcar todas como lidas',
+  'notifications.empty': 'Nada novo. Aqui aparece o que ficar para você agir nos últimos 30 dias.',
+  'notifications.loadMore': 'Carregar mais antigas',
+  'notifications.loadFailed': 'Não foi possível carregar as notificações.',
+  'notifications.unreadDot': 'Não lida',
+  'notifications.expand': 'Ver todos ({count})',
+  'notifications.collapse': 'Recolher',
+  'notifications.group.turn': '{count} PRs entraram na Minha Vez',
+  'notifications.group.risk': '{count} atualizações do Dependabot com Alto Risco',
+  'notifications.group.involved': '{count} PRs em que você atuou mudaram',
+  'notifications.popup.turn': 'Sua vez: {repo}#{pr}',
+  'notifications.popup.risk': 'Alto Risco: {repo}#{pr}',
+  'notifications.popup.involved': '{repo}#{pr}',
+  'notifications.reason.review_requested': 'Sua revisão é esperada',
+  'notifications.reason.new_commit': 'Novo commit depois da sua revisão',
+  'notifications.reason.snooze_ended': 'Voltou para você: o silenciamento terminou',
+  'notifications.reason.author_replied': 'O autor respondeu',
+  'notifications.reason.high_risk': '{package} {from} → {to} saiu como Alto Risco',
+  'notifications.reason.merged': 'Mesclado por {actor}',
+  'notifications.reason.closed': 'Fechado por {actor}',
+  'notifications.reason.approval_dismissed': 'Sua aprovação foi descartada por {actor}',
+  'notifications.reason.ci_failed': 'O CI falhou no commit que você aprovou',
+  'notifications.kind.turn': 'Minha Vez',
+  'notifications.kind.turn.hint': 'Um PR entrou na sua fila: revisão pedida, novo commit, autor respondeu ou silenciamento terminou.',
+  'notifications.kind.risk': 'Dependabot com Alto Risco',
+  'notifications.kind.risk.hint': 'Uma análise do Dependabot saiu como Alto Risco em um repositório que você acompanha.',
+  'notifications.kind.involved': 'PRs em que você atuou',
+  'notifications.kind.involved.hint': 'Um PR que você revisou ou assumiu foi mesclado ou fechado, sua aprovação foi descartada ou o CI falhou depois dela.',
+  'notifications.status.label': 'Avisos neste navegador',
+  'notifications.status.unsupported': 'Indisponível neste navegador',
+  'notifications.status.unsupported.help': 'Este navegador, ou um endereço sem HTTPS, não mostra avisos do sistema. As notificações continuam aparecendo aqui.',
+  'notifications.status.default': 'Ainda não permitido',
+  'notifications.status.default.help': 'Permita para ser avisado quando o painel estiver em outra aba ou janela.',
+  'notifications.status.active': 'Ativas',
+  'notifications.status.active.help': 'Você é avisado quando o painel não está na tela. Com o painel visível, elas só aparecem aqui.',
+  'notifications.status.paused': 'Pausadas',
+  'notifications.status.paused.help': 'Nenhum aviso aparece. As notificações continuam chegando aqui.',
+  'notifications.status.denied': 'Bloqueadas pelo navegador',
+  'notifications.status.denied.help': 'O painel não pode pedir de novo. Para desbloquear, abra as configurações do site no navegador (o cadeado ao lado do endereço) e permita notificações.',
+  'notifications.enable': 'Ativar notificações',
+  'notifications.pause': 'Pausar avisos',
+  'notifications.pause.hint': 'Pausar não muda a permissão do navegador e vale em todos os seus dispositivos.',
+  'notifications.popups': 'Avisos por tipo',
+  'notifications.popups.hint': 'Um tipo desligado não aparece como aviso, mas continua na lista.',
+  'notifications.push.unavailable': 'Avisos com o painel fechado não estão habilitados neste servidor.',
+  'notifications.unfollowed': 'Você não acompanha mais {repo}.',
+  'notifications.prGone': 'O PR #{pr} não está mais aberto.',
   'app.brand': 'PR Follower',
   'app.perspectives': 'Perspectivas',
   'nav.inbox': 'Minha Vez (CODEOWNERS)',
@@ -410,6 +463,22 @@ export class LocaleStore {
       return '';
     }
     return typeof value === 'string' ? value : this.translate(value.key, value.params);
+  }
+
+  /**
+   * Loads the current language's dictionary (at startup, before the first render). The built-in
+   * messages cover only part of the UI, so they stay as the fallback when the file cannot be read.
+   */
+  async load(): Promise<void> {
+    if (!this.gateway) {
+      return;
+    }
+    try {
+      const loaded = await this.gateway.loadDictionary(this.locale());
+      this.dictionary.set({ ...DEFAULT_PT_BR_DICTIONARY, ...loaded });
+    } catch {
+      // Unreachable dictionary: render with the built-in messages.
+    }
   }
 
   async switchLocale(nextLocale: 'pt-BR' | 'en-US'): Promise<void> {

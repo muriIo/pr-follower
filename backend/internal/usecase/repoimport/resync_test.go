@@ -73,6 +73,9 @@ func TestResync_ClosesWhatGitHubNoLongerHasOpenAndSaysHow(t *testing.T) {
 		if e.RepositoryName != "acme/web" || e.PullRequestID == 0 {
 			t.Errorf("each close names its repository and PR: %+v", e)
 		}
+		if e.ActorLogin != "octocat" {
+			t.Errorf("the user who synced found it, so it is not news to them (ADR-0017): %+v", e)
+		}
 	}
 	if types["pr.merged"] != 1 || types["pr.closed"] != 1 || len(w.events.events) != 2 {
 		t.Fatalf("every close is announced, so other users' open drawers follow: %+v", w.events.events)

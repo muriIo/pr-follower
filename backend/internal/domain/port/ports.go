@@ -349,3 +349,63 @@ type CodeownersRefresher interface {
 type WorkspaceSyncer interface {
 	ResyncReporting(ctx context.Context, userID uint64, report func(entity.SyncProgress)) (entity.SyncResult, error)
 }
+
+// NotificationStore keeps notifications and each user's notification settings (ADR-0017).
+type NotificationStore interface {
+	// CreateNotifications stores the notifications not stored yet (by user and Key) and returns
+	// only those, with their ids: a second call with the same ones returns none.
+	CreateNotifications(ctx context.Context, notifications []entity.Notification) ([]entity.Notification, error)
+	// ListNotifications returns up to limit of a user's notifications older than beforeID (0: the
+	// newest), newest first.
+	ListNotifications(ctx context.Context, userID, beforeID uint64, limit int) ([]entity.Notification, error)
+	// ListNotificationsSince returns up to limit notifications of any user after afterID, oldest first.
+	ListNotificationsSince(ctx context.Context, afterID uint64, limit int) ([]entity.Notification, error)
+	// LatestNotificationID is the id of the newest notification, 0 when there is none.
+	LatestNotificationID(ctx context.Context) (uint64, error)
+	CountUnreadNotifications(ctx context.Context, userID uint64) (int, error)
+	// MarkNotificationsRead marks the given notifications of the user read, or all of them when ids
+	// is empty, and reports how many changed.
+	MarkNotificationsRead(ctx context.Context, userID uint64, ids []uint64, at time.Time) (int64, error)
+	// PruneNotifications deletes notifications created before the given time.
+	PruneNotifications(ctx context.Context, before time.Time) (int64, error)
+	// GetNotificationSettings returns the user's settings, the defaults when they never saved any.
+	GetNotificationSettings(ctx context.Context, userID uint64) (entity.NotificationSettings, error)
+	SaveNotificationSettings(ctx context.Context, userID uint64, settings entity.NotificationSettings, at time.Time) error
+}
+
+// Follow is one user following one repository.
+type Follow struct {
+	UserID       uint64
+	RepositoryID uint64
+}
+
+// NotifierMemory is what the notifier remembers between activities: what it last saw of each PR for
+// each user, which follows it has seen, and how far it has read the activity log.
+type NotifierMemory interface {
+	// GetNotificationWatch returns nil when the notifier never saw the PR for the user.
+	GetNotificationWatch(ctx context.Context, userID, prID uint64) (*entity.NotificationWatch, error)
+	SaveNotificationWatch(ctx context.Context, watch entity.NotificationWatch) error
+	HasNotificationBaseline(ctx context.Context, userID, repositoryID uint64) (bool, error)
+	SaveNotificationBaseline(ctx context.Context, userID, repositoryID uint64, at time.Time) error
+	// ListFollowsWithoutBaseline returns up to limit follows the notifier has not seen yet.
+	ListFollowsWithoutBaseline(ctx context.Context, limit int) ([]Follow, error)
+	// ForgetUnfollowed drops what the notifier saw of repositories nobody follows any more for that user.
+	ForgetUnfollowed(ctx context.Context) error
+	// LogPosition returns how far the named reader has read, false when it never saved a position.
+	LogPosition(ctx context.Context, name string) (int64, bool, error)
+	SaveLogPosition(ctx context.Context, name string, seq int64) error
+}
+
+// NotificationChannel delivers notifications outside the API: the open panel, Web Push, an app
+// (ADR-0017). It only delivers: what a notification is and whether it pops up is decided before.
+type NotificationChannel interface {
+	Name() string
+	Deliver(ctx context.Context, notifications []entity.Notification) error
+}
+
+// SingleRunner runs work on one replica at a time across the deployment (a Postgres advisory lock).
+type SingleRunner interface {
+	// TryRun runs fn and returns true when no other replica holds the named lock; otherwise it returns
+	// false without running fn. The lock is released when fn returns.
+	TryRun(ctx context.Context, lockID int64, fn func(ctx context.Context) error) (bool, error)
+}

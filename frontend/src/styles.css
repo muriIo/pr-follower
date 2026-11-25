@@ -392,3 +392,59 @@ a.pf-btn { text-decoration: none; }
 .pf-timeline-scope { display: inline-flex; gap: 6px; }
 .pf-event-time, .pf-event-repo { color: var(--text-3); }
 .pf-timeline-empty { margin: 24px 0; color: var(--text-3); text-align: center; }
+
+/* Notification center (ADR-0017): a bell in the sidebar, a side panel over the workspace. */
+.pf-brand-name { flex: 1; min-width: 0; }
+.pf-bell { position: relative; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-2); transition: background-color .12s, color .12s; }
+.pf-bell:hover, .pf-bell[aria-expanded="true"] { background: var(--surface-hover); color: var(--text); }
+.pf-bell.has-unread { color: var(--text); }
+.pf-bell-badge { position: absolute; top: -3px; right: -5px; min-width: 16px; padding: 0 4px; border-radius: 8px; font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; color: #fff; background: var(--rose); box-shadow: 0 0 0 2px var(--canvas); }
+.pf-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-2); }
+.pf-icon-btn:hover { background: var(--surface-hover); color: var(--text); }
+.pf-notif { position: absolute; top: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-direction: column; width: min(var(--pf-nw, 400px), 100%); background: var(--elevated); border-left: 1px solid var(--border); box-shadow: -16px 0 32px rgba(0, 0, 0, .35); animation: pf-dock-in .18s ease-out; }
+.pf-notif-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-4) var(--space-4) var(--space-2); }
+.pf-notif-title { font-size: 15px; font-weight: 600; }
+.pf-notif-tabs { display: flex; gap: var(--space-1); padding: 0 var(--space-4); border-bottom: 1px solid var(--border); }
+.pf-notif-tab { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--space-2); color: var(--text-2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.pf-notif-tab:hover { color: var(--text); }
+.pf-notif-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--indigo); font-weight: 500; }
+.pf-notif-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-4) var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.pf-notif-actions { display: flex; justify-content: flex-end; }
+.pf-notif.is-resizing { cursor: col-resize; user-select: none; }
+.pf-notif.is-resizing .pf-resize::before { background: var(--focus); }
+.pf-notif.is-resizing .pf-grip { color: var(--text); border-color: var(--focus); }
+/* The list's host takes no box, so the body's gap spaces its button, notes and list. */
+app-notification-list { display: contents; }
+.pf-notif-empty { padding: 40px 8px; text-align: center; color: var(--text-2); }
+.pf-notif-list, .pf-notif-sublist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.pf-notif-item { --pf-kind: var(--indigo); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--pf-kind); border-radius: 8px; overflow: hidden; }
+.pf-notif-item.is-unread { background: var(--surface-hover); }
+.pf-notif-turn { --pf-kind: var(--indigo); }
+.pf-notif-risk { --pf-kind: var(--rose); }
+.pf-notif-involved { --pf-kind: var(--amber); }
+.pf-notif-open { display: flex; align-items: flex-start; gap: var(--space-3); width: 100%; padding: var(--space-3); }
+.pf-notif-open:hover { background: rgba(255, 255, 255, .03); }
+.pf-notif-open-sm { padding: var(--space-2) var(--space-3); }
+.pf-notif-icon { flex: none; width: 20px; font-size: 15px; line-height: 20px; text-align: center; }
+.pf-notif-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pf-notif-heading { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.pf-notif-line { color: var(--text-2); }
+.pf-notif-pr { color: var(--text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-notif-meta { flex: none; display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 11px; }
+.pf-notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pf-kind, var(--indigo)); }
+.pf-notif-expand { align-self: flex-start; margin: 0 var(--space-3) var(--space-2) 44px; font-size: 12px; color: var(--text-2); }
+.pf-notif-expand:hover { color: var(--text); text-decoration: underline; }
+.pf-notif-sublist { gap: 0; border-top: 1px solid var(--border); }
+.pf-notif-sublist .is-unread .pf-notif-line { color: var(--text); }
+.pf-notif-more { align-self: center; }
+.pf-notif-section { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
+.pf-notif-section:last-of-type { border-bottom: 0; }
+.pf-notif-status { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.pf-notif-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
+.pf-notif-status.is-active .pf-notif-status-dot { background: var(--emerald); }
+.pf-notif-status.is-paused .pf-notif-status-dot, .pf-notif-status.is-default .pf-notif-status-dot { background: var(--amber); }
+.pf-notif-status.is-denied .pf-notif-status-dot { background: var(--rose); }
+.pf-notif-kind { display: flex; flex-direction: column; gap: 2px; padding-left: var(--space-2); border-left: 3px solid var(--pf-kind); }
+.pf-notif-kind .pf-note { padding-left: 36px; font-size: 12px; }
+.pf-notif-push { font-size: 12px; }
+@media (max-width: 640px) { .pf-notif { width: 100%; border-left: 0; } }

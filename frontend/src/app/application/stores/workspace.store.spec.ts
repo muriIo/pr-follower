@@ -7,9 +7,11 @@ import {
   PullRequestGateway,
 } from '../../domain/gateways/workspace.gateways';
 import { ActionError } from '../../domain/models/action-error.models';
+import { NotificationItem } from '../../domain/models/notification.models';
 import { PullRequestItem, RepoInfo, SyncResult, SyncStatus, TimelineEventItem } from '../../domain/models/workspace.models';
 import { ActionCancellationManager } from '../use-cases/action-cancellation.manager';
 import { LocaleStore } from './locale.store';
+import { NotificationStore } from './notification.store';
 import { WorkspaceStore } from './workspace.store';
 import { createInitialPrDataset, loadWorkspaceFixture } from '../../testing/workspace-fixtures';
 
@@ -1473,5 +1475,120 @@ describe('WorkspaceStore "Sincronizar"', () => {
     const { store, gateway } = setup([], async () => null, false);
     await store.runSync();
     expect(gateway.fetchWorkspace).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('WorkspaceStore notifications', () => {
+  function notifiedAbout(pr: PullRequestItem, patch: Partial<NotificationItem> = {}): NotificationItem {
+    return {
+      id: pr.id * 10,
+      kind: pr.dep ? 'risk' : 'turn',
+      reason: pr.dep ? 'high_risk' : 'review_requested',
+      repositoryId: 1,
+      repositoryName: pr.repo,
+      pullRequestId: pr.id,
+      prNumber: pr.number,
+      prTitle: pr.title,
+      actorLogin: 'carol',
+      details: {},
+      createdAt: Date.now(),
+      read: false,
+      popUp: false,
+      ...patch,
+    };
+  }
+
+  function setup() {
+    const { prGateway } = createFakeGateways();
+    let deliver: ((n: NotificationItem) => void) | undefined;
+    const sseGateway: LiveEventGateway = {
+      connect: (_onEvent, onStateChange, onNotification) => {
+        deliver = onNotification;
+        onStateChange('conectado');
+        return () => undefined;
+      },
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        ActionCancellationManager,
+        WorkspaceStore,
+        { provide: PULL_REQUEST_GATEWAY, useValue: prGateway },
+        { provide: LIVE_EVENT_GATEWAY, useValue: sseGateway },
+      ],
+    });
+    const store = TestBed.inject(WorkspaceStore);
+    const center = TestBed.inject(NotificationStore);
+    store.startLiveSession('octocat');
+    loadWorkspaceFixture(store);
+    return { store, center, deliver: (n: NotificationItem) => deliver?.(n) };
+  }
+
+  it('shows one side panel at a time: the center closes the PR drawer and a PR closes the center', () => {
+    const { store, center } = setup();
+    const pr = store.prs()[0];
+    store.openPr(pr.id);
+    center.toggleOpen();
+    expect(center.isOpen()).toBe(true);
+    expect(store.selectedPrId()).toBeNull();
+
+    store.openPr(pr.id);
+    expect(store.selectedPrId()).toBe(pr.id);
+    expect(center.isOpen()).toBe(false);
+  });
+
+  it('hands live notifications to the notification center', () => {
+    const { store, center, deliver } = setup();
+    const pr = store.prs().find((p) => !p.dep)!;
+    deliver(notifiedAbout(pr));
+    expect(center.items().map((n) => n.pullRequestId)).toEqual([pr.id]);
+    expect(center.unread()).toBe(1);
+  });
+
+  it('opens the drawer of the PR one notification is about', () => {
+    const { store, center, deliver } = setup();
+    const dep = store.prs().find((p) => p.dep)!;
+    deliver(notifiedAbout(dep));
+    center.activate([dep.id * 10]);
+    expect(store.selectedPrId()).toBe(dep.id);
+    expect(store.view()).toBe('radar');
+  });
+
+  it('opens the perspective of a burst', () => {
+    const { store, center, deliver } = setup();
+    const [a, b] = store.prs().filter((p) => !p.dep);
+    deliver(notifiedAbout(a));
+    deliver(notifiedAbout(b));
+    center.activate([a.id * 10, b.id * 10]);
+    expect(store.view()).toBe('inbox');
+    expect(store.selectedPrId()).toBeNull();
+  });
+
+  it('reloads the workspace before opening a PR it does not know yet', async () => {
+    const { store, center, deliver } = setup();
+    const known = store.prs().find((p) => !p.dep)!;
+    const fresh = { ...known, id: 777_777, number: 9001, title: 'Brand new' };
+    const fetchWorkspace = vi.spyOn(TestBed.inject(PULL_REQUEST_GATEWAY), 'fetchWorkspace').mockImplementation(async () => ({
+      repos: store.repos(),
+      prs: [...store.prs(), fresh],
+      events: [],
+    }));
+    deliver(notifiedAbout(fresh));
+    center.activate([fresh.id * 10]);
+    await vi.waitFor(() => expect(store.selectedPrId()).toBe(fresh.id));
+    expect(fetchWorkspace).toHaveBeenCalled();
+    expect(store.notice()).toBeNull();
+  });
+
+  it('says why it cannot open a PR that is gone or a repository no longer followed', async () => {
+    const { store, center, deliver } = setup();
+    const pr = store.prs().find((p) => !p.dep)!;
+    deliver(notifiedAbout(pr, { id: 1, pullRequestId: 999_999, prNumber: 4321 }));
+    center.activate([1]);
+    await vi.waitFor(() => expect(store.notice()).toBe(TestBed.inject(LocaleStore).translate('notifications.prGone', { pr: 4321 })));
+
+    deliver(notifiedAbout(pr, { id: 2, repositoryName: 'acme/gone' }));
+    center.activate([2]);
+    expect(store.notice()).toBe(TestBed.inject(LocaleStore).translate('notifications.unfollowed', { repo: 'acme/gone' }));
+    expect(store.selectedPrId()).toBeNull();
   });
 });

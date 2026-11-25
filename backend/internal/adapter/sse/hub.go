@@ -17,10 +17,12 @@ const (
 	// streamEventName is the single SSE event name for every activity; the activity type
 	// travels in the JSON payload. Browsers only deliver named events that have a listener,
 	// so per-type names silently dropped every type the SPA did not list.
-	streamEventName  = "activity"
-	heartbeatFrame   = "event: heartbeat\ndata: {}\n\n"
-	defaultHeartbeat = 25 * time.Second
-	reconnectHintMs  = 3000
+	streamEventName = "activity"
+	// notificationEventName frames a notification for the stream's own user (ADR-0017).
+	notificationEventName = "notification"
+	heartbeatFrame        = "event: heartbeat\ndata: {}\n\n"
+	defaultHeartbeat      = 25 * time.Second
+	reconnectHintMs       = 3000
 )
 
 // AllowFunc decides whether one subscriber may see an event (e.g. only repositories the
@@ -51,10 +53,14 @@ type Hub struct {
 
 	mu          sync.RWMutex
 	subscribers map[chan entity.ActivityEvent]struct{}
-	heartbeat   time.Duration
-	poll        time.Duration
-	retention   time.Duration
-	pruneEvery  time.Duration
+	// notified are the streams that receive their user's notifications, by user id.
+	notified map[chan entity.Notification]uint64
+	// followers are woken after every read of the log, for work that follows the same signal.
+	followers  map[chan struct{}]struct{}
+	heartbeat  time.Duration
+	poll       time.Duration
+	retention  time.Duration
+	pruneEvery time.Duration
 
 	// pump state, owned by the pump goroutine once Start has returned
 	last      int64
@@ -66,6 +72,8 @@ func NewHub(log port.ActivityLog, signal port.ActivitySignal) *Hub {
 		log:         log,
 		signal:      signal,
 		subscribers: make(map[chan entity.ActivityEvent]struct{}),
+		notified:    make(map[chan entity.Notification]uint64),
+		followers:   make(map[chan struct{}]struct{}),
 		heartbeat:   defaultHeartbeat,
 		poll:        defaultPollInterval,
 		retention:   defaultRetention,
@@ -147,8 +155,10 @@ func (h *Hub) pump(ctx context.Context, wake <-chan struct{}) {
 				return
 			}
 			h.drain(ctx)
+			h.wakeFollowers()
 		case <-poll.C:
 			h.drain(ctx)
+			h.wakeFollowers()
 		case <-prune.C:
 			h.pruneOld(ctx)
 		}
@@ -204,6 +214,74 @@ func (h *Hub) deliver(event entity.ActivityEvent) {
 	}
 }
 
+// Wakes returns a channel nudged whenever this replica was woken or polled: work that reads other
+// shared logs (the notifier, the notification dispatcher) follows it instead of opening its own
+// LISTEN connection. Nudges coalesce; the channel closes with ctx.
+func (h *Hub) Wakes(ctx context.Context) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	h.mu.Lock()
+	h.followers[ch] = struct{}{}
+	h.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		h.mu.Lock()
+		delete(h.followers, ch)
+		close(ch)
+		h.mu.Unlock()
+	}()
+	return ch
+}
+
+// Wake tells every replica, this one included, that a shared log has news.
+func (h *Hub) Wake(ctx context.Context) {
+	if err := h.signal.Notify(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("waking the replicas failed", "err", err)
+	}
+}
+
+func (h *Hub) wakeFollowers() {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for ch := range h.followers {
+		select {
+		case ch <- struct{}{}:
+		default: // one is pending already
+		}
+	}
+}
+
+// SendNotifications hands each notification to the streams of its own user on this replica.
+func (h *Hub) SendNotifications(notifications []entity.Notification) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, n := range notifications {
+		for ch, userID := range h.notified {
+			if userID != n.UserID {
+				continue
+			}
+			select {
+			case ch <- n:
+			default: // a slow stream misses the popup; the center still lists it
+			}
+		}
+	}
+}
+
+func (h *Hub) subscribeNotifications(ctx context.Context, userID uint64) <-chan entity.Notification {
+	ch := make(chan entity.Notification, 32)
+	h.mu.Lock()
+	h.notified[ch] = userID
+	h.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		h.mu.Lock()
+		delete(h.notified, ch)
+		close(ch)
+		h.mu.Unlock()
+	}()
+	return ch
+}
+
 func (h *Hub) Subscribe(ctx context.Context) <-chan entity.ActivityEvent {
 	ch := make(chan entity.ActivityEvent, 32)
 
@@ -255,8 +333,18 @@ func (h *Hub) SubscriberCount() int {
 // The subscription is registered before anything is written, so nothing published once the
 // client sees the stream open is lost.
 func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
+	h.StreamFor(w, r, 0, allow)
+}
+
+// StreamFor is Stream for a signed-in user: it also sends that user's notifications, and nobody
+// else's.
+func (h *Hub) StreamFor(w http.ResponseWriter, r *http.Request, userID uint64, allow AllowFunc) {
 	ctx := r.Context()
 	events := h.Subscribe(ctx)
+	var notifications <-chan entity.Notification
+	if userID != 0 {
+		notifications = h.subscribeNotifications(ctx, userID)
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -292,6 +380,18 @@ func (h *Hub) Stream(w http.ResponseWriter, r *http.Request, allow AllowFunc) {
 				continue
 			}
 			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, streamEventName, payload); err != nil { // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+				return
+			}
+			_ = rc.Flush()
+		case n, ok := <-notifications:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(n)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "id: n%d\nevent: %s\ndata: %s\n\n", n.ID, notificationEventName, payload); err != nil { // nosemgrep: go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
 				return
 			}
 			_ = rc.Flush()

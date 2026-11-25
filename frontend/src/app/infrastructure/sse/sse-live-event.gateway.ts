@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { LiveEventGateway } from '../../domain/gateways/workspace.gateways';
+import { NotificationItem } from '../../domain/models/notification.models';
 import { SseConnectionState, TimelineEventItem } from '../../domain/models/workspace.models';
+import { ApiNotificationDto, mapNotification } from '../http/http-notification.gateway';
 import { ApiActivityEventDto, mapActivityEventToTimelineItem } from '../http/workspace-api.mapper';
 import { computeFullJitterDelayMs } from '../resilience/jitter-backoff';
 
@@ -18,17 +20,20 @@ const EVENT_SOURCE_CLOSED = 2;
  */
 const SILENCE_LIMIT_MS = 60_000;
 const HEARTBEAT_EVENT_NAME = 'heartbeat';
+/** The signed-in user's own notifications arrive under their own name (ADR-0017). */
+const NOTIFICATION_EVENT_NAME = 'notification';
 
 @Injectable({ providedIn: 'root' })
 export class SseLiveEventGateway implements LiveEventGateway {
   connect(
     onEvent: (event: Omit<TimelineEventItem, 'key' | 't'>) => void,
     onStateChange: (state: SseConnectionState) => void,
+    onNotification?: (notification: NotificationItem) => void,
   ): () => void {
     const EventSourceCtor = (globalThis as { EventSource?: typeof EventSource }).EventSource;
 
     if (typeof EventSourceCtor === 'function') {
-      return this.connectEventSource(EventSourceCtor, onEvent, onStateChange);
+      return this.connectEventSource(EventSourceCtor, onEvent, onStateChange, onNotification);
     }
 
     // No EventSource (very old browser or a non-browser runtime): say so, never invent events.
@@ -45,6 +50,7 @@ export class SseLiveEventGateway implements LiveEventGateway {
     EventSourceCtor: typeof EventSource,
     onEvent: (event: Omit<TimelineEventItem, 'key' | 't'>) => void,
     onStateChange: (state: SseConnectionState) => void,
+    onNotification?: (notification: NotificationItem) => void,
   ): () => void {
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,6 +104,20 @@ export class SseLiveEventGateway implements LiveEventGateway {
       }
     };
 
+    const handleNotification = (msg: MessageEvent) => {
+      if (source) {
+        watch(source);
+      }
+      try {
+        const parsed = JSON.parse(String(msg.data)) as ApiNotificationDto;
+        if (parsed && typeof parsed === 'object' && typeof parsed.id === 'number') {
+          onNotification?.(mapNotification(parsed));
+        }
+      } catch {
+        // Ignore malformed frames
+      }
+    };
+
     const open = () => {
       const es = new EventSourceCtor('/api/v1/events/stream');
       source = es;
@@ -120,6 +140,7 @@ export class SseLiveEventGateway implements LiveEventGateway {
         es.addEventListener(name, handleMessage as EventListener);
       }
       es.addEventListener(HEARTBEAT_EVENT_NAME, () => watch(es));
+      es.addEventListener(NOTIFICATION_EVENT_NAME, handleNotification as EventListener);
     };
 
     onStateChange('reconectando');

@@ -51,6 +51,11 @@ func NewChiRouter(h *httpadapter.Handler, allowedOrigin string) http.Handler {
 			private.Post("/prs/{id}/dependabot-command", h.DependabotCommand)
 			private.Post("/prs/{id}/analyze", h.AnalyzePR)
 
+			private.Get("/notifications", h.ListNotifications)
+			private.Post("/notifications/read", h.MarkNotificationsRead)
+			private.Get("/notifications/settings", h.GetNotificationSettings)
+			private.Put("/notifications/settings", h.SaveNotificationSettings)
+
 			private.Delete("/operations/{id}", h.CancelOperation)
 		})
 	})

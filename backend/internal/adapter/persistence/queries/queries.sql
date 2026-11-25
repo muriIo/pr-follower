@@ -393,3 +393,109 @@ WHERE user_id = $1;
 -- name: DeleteUserSyncJob :execrows
 DELETE FROM sync_jobs
 WHERE user_id = $1;
+
+-- name: InsertNotification :one
+-- idempotent: a second reading of the same activity hits (user_id, dedup_key) and returns no row (ADR-0011, ADR-0017).
+INSERT INTO notifications (
+    user_id, dedup_key, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+    pr_title, commit_sha, actor_login, details_json, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (user_id, dedup_key) DO NOTHING
+RETURNING id;
+
+-- name: ListNotificationsBefore :many
+SELECT id, user_id, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+       pr_title, commit_sha, actor_login, details_json, created_at, read_at
+FROM notifications
+WHERE user_id = $1 AND id < $2
+ORDER BY id DESC
+LIMIT $3;
+
+-- name: ListNotificationsSince :many
+SELECT id, user_id, kind, reason, repository_id, repository_name, pull_request_id, pr_number,
+       pr_title, commit_sha, actor_login, details_json, created_at, read_at
+FROM notifications
+WHERE id > $1
+ORDER BY id ASC
+LIMIT $2;
+
+-- name: GetLatestNotificationID :one
+SELECT CAST(COALESCE(MAX(id), 0) AS BIGINT) AS id FROM notifications;
+
+-- name: CountUnreadNotifications :one
+SELECT COUNT(*) FROM notifications WHERE user_id = $1 AND read_at IS NULL;
+
+-- name: MarkNotificationRead :execrows
+UPDATE notifications SET read_at = $3 WHERE user_id = $1 AND id = $2 AND read_at IS NULL;
+
+-- name: MarkAllNotificationsRead :execrows
+UPDATE notifications SET read_at = $2 WHERE user_id = $1 AND read_at IS NULL;
+
+-- name: DeleteNotificationsBefore :execrows
+DELETE FROM notifications WHERE created_at < $1;
+
+-- name: GetNotificationSettings :one
+SELECT user_id, paused, popups_off, updated_at FROM notification_settings WHERE user_id = $1;
+
+-- name: UpsertNotificationSettings :exec
+INSERT INTO notification_settings (user_id, paused, popups_off, updated_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (user_id) DO UPDATE SET
+    paused = EXCLUDED.paused,
+    popups_off = EXCLUDED.popups_off,
+    updated_at = EXCLUDED.updated_at;
+
+-- name: GetNotificationWatch :one
+SELECT user_id, pull_request_id, repository_id, turn, head_sha, approved_sha, risk
+FROM notification_watches
+WHERE user_id = $1 AND pull_request_id = $2;
+
+-- name: UpsertNotificationWatch :exec
+INSERT INTO notification_watches (user_id, pull_request_id, repository_id, turn, head_sha, approved_sha, risk)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (user_id, pull_request_id) DO UPDATE SET
+    repository_id = EXCLUDED.repository_id,
+    turn = EXCLUDED.turn,
+    head_sha = EXCLUDED.head_sha,
+    approved_sha = EXCLUDED.approved_sha,
+    risk = EXCLUDED.risk;
+
+-- name: HasNotificationBaseline :one
+SELECT COUNT(*) FROM notification_baselines WHERE user_id = $1 AND repository_id = $2;
+
+-- name: InsertNotificationBaseline :exec
+INSERT INTO notification_baselines (user_id, repository_id, created_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (user_id, repository_id) DO NOTHING;
+
+-- name: ListFollowsWithoutNotificationBaseline :many
+SELECT f.user_id, f.repository_id
+FROM user_repo_follows f
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_baselines b
+    WHERE b.user_id = f.user_id AND b.repository_id = f.repository_id
+)
+ORDER BY f.user_id, f.repository_id
+LIMIT $1;
+
+-- name: DeleteUnfollowedNotificationWatches :execrows
+-- An unfollow forgets what the notifier saw, so following again starts silently from scratch.
+DELETE FROM notification_watches
+WHERE NOT EXISTS (
+    SELECT 1 FROM user_repo_follows f
+    WHERE f.user_id = notification_watches.user_id AND f.repository_id = notification_watches.repository_id
+);
+
+-- name: DeleteUnfollowedNotificationBaselines :execrows
+DELETE FROM notification_baselines
+WHERE NOT EXISTS (
+    SELECT 1 FROM user_repo_follows f
+    WHERE f.user_id = notification_baselines.user_id AND f.repository_id = notification_baselines.repository_id
+);
+
+-- name: GetLogPosition :one
+SELECT seq FROM log_positions WHERE name = $1;
+
+-- name: SaveLogPosition :exec
+INSERT INTO log_positions (name, seq) VALUES ($1, $2)
+ON CONFLICT (name) DO UPDATE SET seq = EXCLUDED.seq;

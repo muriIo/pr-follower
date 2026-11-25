@@ -56,3 +56,42 @@ describe('LocaleStore messages with parameters', () => {
     expect(locale.text(undefined)).toBe('');
   });
 });
+
+describe('LocaleStore at startup', () => {
+  it('loads the dictionary of the current language, keeping the built-in messages for keys it lacks', async () => {
+    const asked: string[] = [];
+    TestBed.configureTestingModule({
+      providers: [
+        LocaleStore,
+        {
+          provide: TRANSLATION_GATEWAY,
+          useValue: {
+            loadDictionary: async (locale: string) => {
+              asked.push(locale);
+              return { 'import.followPending': 'Importando PRs...' };
+            },
+          },
+        },
+      ],
+    });
+    const store = TestBed.inject(LocaleStore);
+    expect(store.translate('import.followPending')).toBe('import.followPending');
+
+    await store.load();
+    expect(asked).toEqual(['pt-BR']);
+    expect(store.translate('import.followPending')).toBe('Importando PRs...');
+    expect(store.translate('nav.inbox')).toBe('Minha Vez (CODEOWNERS)');
+  });
+
+  it('keeps the built-in messages when the dictionary cannot be loaded', async () => {
+    TestBed.configureTestingModule({
+      providers: [
+        LocaleStore,
+        { provide: TRANSLATION_GATEWAY, useValue: { loadDictionary: async () => Promise.reject(new Error('offline')) } },
+      ],
+    });
+    const store = TestBed.inject(LocaleStore);
+    await store.load();
+    expect(store.translate('nav.inbox')).toBe('Minha Vez (CODEOWNERS)');
+  });
+});

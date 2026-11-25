@@ -29,7 +29,9 @@ import {
 import { ActionCancellationManager, ActionViewModel } from '../use-cases/action-cancellation.manager';
 import { ActivityIconName, ActivityTone, activityIconFor } from '../../domain/models/activity.models';
 import { ActionError, toActionErrorCode } from '../../domain/models/action-error.models';
+import { NotificationItem } from '../../domain/models/notification.models';
 import { LocaleStore } from './locale.store';
+import { NotificationStore } from './notification.store';
 
 /** How often the progress of a background sync is read. */
 const SYNC_POLL_MS = 1000;
@@ -343,6 +345,7 @@ export class WorkspaceStore {
   private readonly sseGateway = inject(LIVE_EVENT_GATEWAY, { optional: true });
   private readonly cancellation = inject(ActionCancellationManager);
   private readonly locale = inject(LocaleStore);
+  private readonly notifications = inject(NotificationStore);
 
   readonly repos = signal<readonly RepoInfo[]>([]);
   readonly prs = signal<readonly PullRequestItem[]>([]);
@@ -404,6 +407,9 @@ export class WorkspaceStore {
       return;
     }
     void this.loadWorkspace();
+    this.notifications.setOpener((items) => void this.openNotified(items));
+    this.notifications.setOnOpen(() => this.closeDrawer()); // one side panel at a time
+    void this.notifications.start();
     this.disconnectLive =
       this.sseGateway?.connect(
         (evt) => {
@@ -422,7 +428,34 @@ export class WorkspaceStore {
           }
         },
         (state) => this.onConnectionState(state),
+        (notification) => this.notifications.receive(notification),
       ) ?? (() => undefined);
+  }
+
+  /**
+   * Opens what notifications are about: one PR's drawer, or the perspective of a burst. A PR the
+   * workspace does not list yet (the notification outran the reload) is looked for once more; a PR
+   * no longer open, or a repository no longer followed, is said so rather than opened.
+   */
+  private async openNotified(items: readonly NotificationItem[]): Promise<void> {
+    const first = items[0];
+    if (!this.repos().some((r) => r.name === first.repositoryName)) {
+      this.noticeState.set({ key: 'notifications.unfollowed', params: { repo: first.repositoryName } });
+      return;
+    }
+    if (items.length > 1) {
+      this.setPerspective(first.kind === 'risk' ? 'radar' : 'inbox');
+      return;
+    }
+    if (!this.prs().some((p) => p.id === first.pullRequestId)) {
+      await this.loadWorkspace();
+    }
+    if (!this.prs().some((p) => p.id === first.pullRequestId)) {
+      this.noticeState.set({ key: 'notifications.prGone', params: { pr: first.prNumber } });
+      return;
+    }
+    this.setPerspective(first.kind === 'risk' ? 'radar' : 'inbox');
+    this.openPr(first.pullRequestId);
   }
 
   private streamOpenedBefore = false;
@@ -456,6 +489,7 @@ export class WorkspaceStore {
     }
     if (this.streamOpenedBefore && previous !== 'conectado') {
       void this.loadWorkspace();
+      void this.notifications.refresh(); // notifications sent while the stream was down
     }
     this.streamOpenedBefore = true;
   }
@@ -464,6 +498,7 @@ export class WorkspaceStore {
     const disconnect = this.disconnectLive;
     this.disconnectLive = null;
     this.streamOpenedBefore = false;
+    this.notifications.stop();
     if (this.refreshTimer !== null) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -994,6 +1029,7 @@ export class WorkspaceStore {
   }
 
   openPr(prId: number): void {
+    this.notifications.close(); // one side panel at a time
     this.closingDrawer.set(false);
     this.selectedPrId.set(prId);
     this.selectedTreeNode.set(null);

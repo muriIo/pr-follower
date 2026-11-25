@@ -35,6 +35,7 @@ import (
 	"github.com/murilo/pr-follower/backend/internal/usecase/changedfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/codeowners"
 	"github.com/murilo/pr-follower/backend/internal/usecase/dependabot"
+	"github.com/murilo/pr-follower/backend/internal/usecase/notify"
 	"github.com/murilo/pr-follower/backend/internal/usecase/prfiles"
 	"github.com/murilo/pr-follower/backend/internal/usecase/repoimport"
 	"github.com/murilo/pr-follower/backend/internal/usecase/syncjob"
@@ -266,6 +267,7 @@ type testServer struct {
 	files  *fakeRepoFiles
 	ended  *fakeEndedPRs
 	syncs  *persistence.SyncJobStore
+	notes  *persistence.NotificationStore
 }
 
 // do sends a request through the router, attaching the session cookie when given.
@@ -391,6 +393,7 @@ func setupTestRouterWithAuth(t *testing.T, oauth fakeGitHubOAuth, configure func
 	syncJobs := syncjob.NewManager(syncCtx, importUC, syncStore)
 	installationUC := webhook.NewInstallationUseCase(repoRepo, sseHub)
 	filesUC := prfiles.NewUseCase(authUC, userAPI, repoRepo, prRepo)
+	notes := persistence.NewNotificationStore(db)
 
 	handler := httpadapter.NewHandler(httpadapter.HandlerDeps{
 		UserRepo:       userRepo,
@@ -412,9 +415,10 @@ func setupTestRouterWithAuth(t *testing.T, oauth fakeGitHubOAuth, configure func
 		InstallationUC: installationUC,
 		Follows:        repoRepo,
 		FilesUC:        filesUC,
+		Notifications:  notify.NewCenter(notes, []notify.ChannelInfo{{Name: "panel"}}),
 	})
 
-	return testServer{router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles, ended: ended, syncs: syncStore}
+	return testServer{notes: notes, router: server.NewChiRouter(handler, "*"), opReg: opReg, authUC: authUC, repos: repoRepo, prs: prRepo, gh: ghGw, files: repoFiles, ended: ended, syncs: syncStore}
 }
 
 func TestChiServer_SeedWorkspaceActionsWebhookAndCancel(t *testing.T) {
